@@ -58,7 +58,7 @@ export function contractProblem(descriptor: LabDescriptor): string | undefined {
 }
 
 type Schema = {
-	type?: string;
+	type?: string | string[];
 	required?: string[];
 	properties?: Record<string, Schema>;
 	items?: Schema;
@@ -81,7 +81,9 @@ const typeOf = (value: unknown): string =>
 export function validate(schema: Schema, value: unknown, at = "$"): string[] {
 	const problems: string[] = [];
 	const actual = typeOf(value);
-	if (schema.type && !(schema.type === actual || (schema.type === "number" && actual === "integer"))) return [`${at} is ${actual}, expected ${schema.type}`];
+	const types = schema.type === undefined ? undefined : [schema.type].flat();
+	if (types && !types.some((type) => type === actual || (type === "number" && actual === "integer"))) return [`${at} is ${actual}, expected ${types.join(" or ")}`];
+	if (value === null) return problems;
 	if (schema.enum && !schema.enum.includes(value)) problems.push(`${at} is ${JSON.stringify(value)}, expected one of ${schema.enum.map((e) => JSON.stringify(e)).join(", ")}`);
 	if (typeof value === "string") {
 		if (schema.minLength !== undefined && value.length < schema.minLength) problems.push(`${at} is shorter than ${schema.minLength}`);

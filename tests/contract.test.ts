@@ -19,7 +19,15 @@ const descriptor: LabDescriptor = {
 	sandbox_profiles: [{ name: "small", cpu: 2, memory: "4Gi" }],
 	conformance: { foreign_scope: "otherlab" },
 };
-const me = { subject: "u_9f2c41aa", handle: "pat", memberships: [{ lab: "devlab", research_group: "soils", roles: ["researcher"] }], policy: { keep_data_inside: false } };
+const me = {
+	subject: "u_9f2c41aa",
+	handle: "pat",
+	memberships: [
+		{ lab: "devlab", research_group: "soils", roles: ["researcher"] },
+		{ lab: "devlab", research_group: null, roles: ["member"] },
+	],
+	policy: { keep_data_inside: false },
+};
 const seen: { cursor?: string | null; deleted?: string } = {};
 
 const lab = Bun.serve({
@@ -81,6 +89,7 @@ describe("lab contract", () => {
 		const bad = validate(SCHEMAS.me, { subject: "pat@example.org", memberships: [{ lab: "x" }] });
 		expect(bad.join(" | ")).toContain("$.subject must not match");
 		expect(bad.join(" | ")).toContain("$.memberships[0].roles is missing");
+		expect(validate(SCHEMAS.me, { ...me, memberships: [{ lab: "devlab", research_group: 7, roles: [] }] })).toEqual(["$.memberships[0].research_group is integer, expected string or null"]);
 		expect(contractProblem({ ...descriptor, contract: "2026-11.2" })).toBeUndefined();
 		expect(contractProblem({ ...descriptor, contract: "2027-03" })).toContain("speaks lab contract 2027-03");
 	});

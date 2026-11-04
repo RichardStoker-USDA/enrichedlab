@@ -12,7 +12,7 @@
         "required": ["lab", "tokens", "gpu_seconds", "sandbox_seconds"],
         "properties": {
           "lab": { "type": "string" },
-          "research_group": { "type": "string" },
+          "research_group": { "type": ["string", "null"], "description": "absent or null for use outside a group" },
           "tokens": { "type": "object", "required": ["input", "output"], "properties": { "input": { "type": "integer", "minimum": 0 }, "output": { "type": "integer", "minimum": 0 } } },
           "gpu_seconds": { "type": "number", "minimum": 0 },
           "sandbox_seconds": { "type": "number", "minimum": 0 }

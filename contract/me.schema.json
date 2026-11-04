@@ -14,7 +14,7 @@
       "items": {
         "type": "object",
         "required": ["lab", "roles"],
-        "properties": { "lab": { "type": "string" }, "research_group": { "type": "string" }, "roles": { "type": "array", "items": { "type": "string" } } }
+        "properties": { "lab": { "type": "string" }, "research_group": { "type": ["string", "null"], "description": "absent or null for a lab-wide membership" }, "roles": { "type": "array", "items": { "type": "string" } } }
       }
     },
     "policy": { "type": "object", "properties": { "keep_data_inside": { "type": "boolean" } } },

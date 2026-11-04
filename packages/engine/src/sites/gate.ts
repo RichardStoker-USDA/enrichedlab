@@ -316,7 +316,10 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			await first.arrayBuffer();
 			if (!etag) return add("ETag on /v1/me", "fail", "no ETag header");
 			const again = await this.call("GET", "/v1/me", { headers: { "if-none-match": etag }, signal: t() });
-			add("ETag on /v1/me", again.status === 304 ? "pass" : "fail", again.status === 304 ? undefined : `answered ${again.status} to If-None-Match`);
+			await again.arrayBuffer();
+			// A proxy that compresses (Cloudflare does) turns a strong ETag into a weak one; If-None-Match must still match.
+			const weak = etag.startsWith("W/") ? `; the ETag arrived weak (${etag}), so compare without the W/ prefix (RFC 9110 weak comparison)` : "";
+			add("ETag on /v1/me", again.status === 304 ? "pass" : "fail", again.status === 304 ? undefined : `answered ${again.status} to If-None-Match${weak}`);
 		});
 		await attempt("GET /v1/models", async () => {
 			const list = await this.json<{ data?: unknown[] }>("GET", "/v1/models", { signal: t() });
@@ -335,8 +338,13 @@ export class GateSite implements SiteAdapter, SandboxApi {
 					else {
 						const result = await tool.run(data.arguments ?? {}, { signal: t() } as never);
 						const files = result.view?.files ?? [];
-						const referenced = files.length > 0 && files.every((f) => f.sha256);
-						add("data by reference", referenced && result.content.length < 20_000 ? "pass" : "fail", referenced ? `${files.length} files with checksums` : "the result carried no file references with checksums");
+						if (!files.length && result.content.length < 2_000) {
+							// Nothing to list proves nothing either way; the lab can name arguments that always return a sample file.
+							add("data by reference", "skip", `the tool returned no files ("${result.content.trim().slice(0, 80)}"); give conformance.data_tool arguments that return a sample file`);
+						} else {
+							const referenced = files.length > 0 && files.every((f) => f.sha256);
+							add("data by reference", referenced && result.content.length < 20_000 ? "pass" : "fail", referenced ? `${files.length} files with checksums` : "the result carried no file references with checksums");
+						}
 					}
 				} else add("data by reference", "skip", "the descriptor names no conformance.data_tool");
 				await connection.close();
@@ -346,6 +354,39 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		if (has("bundles")) await attempt("GET /v1/bundles", async () => fits("GET /v1/bundles", "bundles", await this.json("GET", "/v1/bundles", { signal: t() })));
 		else skip("GET /v1/bundles");
 
+		if (has("guard")) {
+			await attempt("POST /v1/guard", async () => {
+				const answer = await this.json<{ decision?: string }>("POST", "/v1/guard", { json: { stage: "input", text: "Summarize the yield table by treatment." }, signal: t() });
+				fits("POST /v1/guard", "guard", answer, `decision ${answer.decision}`);
+				if (answer.decision === "block") add("guard on harmless text", "fail", "it blocked a plain request");
+			});
+		} else skip("POST /v1/guard");
+
+		if (has("usage")) {
+			await attempt("GET /v1/usage", async () => fits("GET /v1/usage", "usage", await this.json("GET", "/v1/usage?window=7d", { signal: t() })));
+			const foreign = d?.conformance?.foreign_scope;
+			if (foreign) {
+				await attempt("another lab's scope", async () => {
+					const response = await this.call("GET", `/v1/usage?window=7d&lab=${encodeURIComponent(foreign)}`, { signal: t() }).catch((error: { status?: number }) => error);
+					const status = response instanceof Response ? response.status : response.status;
+					add("another lab's scope", status === 403 || status === 404 ? "pass" : "fail", `answered ${status ?? "?"}`);
+				});
+			} else add("another lab's scope", "skip", "the descriptor names no conformance.foreign_scope");
+		} else skip("GET /v1/usage");
+
+		if (has("containers")) {
+			await attempt("sandbox", async () => {
+				const profile = d?.sandbox_profiles?.[0]?.name;
+				const made = await this.json<{ id: string }>("POST", "/v1/containers", { json: { name: "el-lab-check", ...(profile ? { profile } : {}) }, signal: AbortSignal.timeout(300_000) });
+				fits("sandbox made", "container", made, profile ? `profile ${profile}` : undefined);
+				try {
+					const ran = await this.json<{ exit_code?: number; stdout?: string }>("POST", `/v1/containers/${made.id}/exec`, { json: { command: "echo ok", timeout_seconds: 30 }, signal: AbortSignal.timeout(120_000) });
+					add("sandbox runs a command", ran.exit_code === 0 && ran.stdout?.trim() === "ok" ? "pass" : "fail", `exit ${ran.exit_code}`);
+				} finally {
+					await this.call("DELETE", `/v1/containers/${made.id}`, { signal: t() }).catch(() => undefined);
+				}
+			});
+		} else skip("sandbox");
 		if (has("events")) {
 			await attempt("GET /v1/events", async () => {
 				const controller = new AbortController();
@@ -385,39 +426,6 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			});
 		} else skip("GET /v1/events");
 
-		if (has("guard")) {
-			await attempt("POST /v1/guard", async () => {
-				const answer = await this.json<{ decision?: string }>("POST", "/v1/guard", { json: { stage: "input", text: "Summarize the yield table by treatment." }, signal: t() });
-				fits("POST /v1/guard", "guard", answer, `decision ${answer.decision}`);
-				if (answer.decision === "block") add("guard on harmless text", "fail", "it blocked a plain request");
-			});
-		} else skip("POST /v1/guard");
-
-		if (has("usage")) {
-			await attempt("GET /v1/usage", async () => fits("GET /v1/usage", "usage", await this.json("GET", "/v1/usage?window=7d", { signal: t() })));
-			const foreign = d?.conformance?.foreign_scope;
-			if (foreign) {
-				await attempt("another lab's scope", async () => {
-					const response = await this.call("GET", `/v1/usage?window=7d&lab=${encodeURIComponent(foreign)}`, { signal: t() }).catch((error: { status?: number }) => error);
-					const status = response instanceof Response ? response.status : response.status;
-					add("another lab's scope", status === 403 || status === 404 ? "pass" : "fail", `answered ${status ?? "?"}`);
-				});
-			} else add("another lab's scope", "skip", "the descriptor names no conformance.foreign_scope");
-		} else skip("GET /v1/usage");
-
-		if (has("containers")) {
-			await attempt("sandbox", async () => {
-				const profile = d?.sandbox_profiles?.[0]?.name;
-				const made = await this.json<{ id: string }>("POST", "/v1/containers", { json: { name: "el-lab-check", ...(profile ? { profile } : {}) }, signal: AbortSignal.timeout(300_000) });
-				fits("sandbox made", "container", made, profile ? `profile ${profile}` : undefined);
-				try {
-					const ran = await this.json<{ exit_code?: number; stdout?: string }>("POST", `/v1/containers/${made.id}/exec`, { json: { command: "echo ok", timeout_seconds: 30 }, signal: AbortSignal.timeout(120_000) });
-					add("sandbox runs a command", ran.exit_code === 0 && ran.stdout?.trim() === "ok" ? "pass" : "fail", `exit ${ran.exit_code}`);
-				} finally {
-					await this.call("DELETE", `/v1/containers/${made.id}`, { signal: t() }).catch(() => undefined);
-				}
-			});
-		} else skip("sandbox");
 		return rows;
 	}
 
