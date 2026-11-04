@@ -304,10 +304,21 @@ export interface SurfaceAnswer {
 export interface ProviderPreset {
 	id: string;
 	label: string;
-	api: "openai-chat" | "anthropic";
+	api: "openai-chat" | "openai-responses" | "anthropic";
 	baseUrl: string;
 	keyUrl?: string;
 	note: string;
+}
+
+/** An account signed in through a service's own sign-in (ChatGPT plan use). Tokens never leave the engine. */
+export interface ServiceAccount {
+	service: "chatgpt";
+	id: string;
+	label: string;
+	active: boolean;
+	signedIn: boolean;
+	/** The account allowed EnrichedLab to use its plan. */
+	plan: boolean;
 }
 
 /** What `update.check` found. `kind` is how this copy was installed. */
@@ -372,7 +383,17 @@ export interface Requests {
 	/** A surface's answer to surface.call. */
 	"surface.reply": { params: { callId: string; result?: SurfaceAnswer; error?: string }; result: { ok: true } };
 	/** Services `provider.add` knows, and the ones this person added. */
-	"provider.list": { params: Record<string, never>; result: { presets: ProviderPreset[]; added: { name: string; label: string; baseUrl: string }[] } };
+	"provider.list": {
+		params: Record<string, never>;
+		result: { presets: ProviderPreset[]; added: { name: string; label: string; baseUrl: string }[]; accounts: ServiceAccount[] };
+	};
+	/** Sign in through the service's own page in the browser (provider.auth carries the address). `account` signs
+	 * in again to a saved account; without it a new account is added. `welcome` is true the first time plan use is on. */
+	"provider.signin": { params: { service: "chatgpt"; account?: string }; result: { account: ServiceAccount; models: number; welcome: boolean } };
+	/** End the account's session at the service and clear its tokens; `revoked` says the service confirmed it. */
+	"provider.signout": { params: { service: "chatgpt"; account: string }; result: { revoked: boolean } };
+	/** Use this saved account from now on. */
+	"provider.use": { params: { service: "chatgpt"; account: string }; result: { ok: true } };
 	/** Check a key against the service, keep it in the OS credential store, and offer the service's models. */
 	"provider.add": { params: { preset: string; key: string; name?: string; baseUrl?: string }; result: { name: string; models: number } };
 	"provider.remove": { params: { name: string }; result: { ok: true } };
@@ -444,6 +465,8 @@ export interface Notifications {
 	"permission.request": PermissionRequest;
 	"permission.settled": { requestId: string; decision: PermissionDecision | "cancelled" };
 	"site.auth": { name: string; url: string; instructions: string };
+	/** Open this sign-in page in the system browser (it comes back to the engine on 127.0.0.1). */
+	"provider.auth": { service: string; url: string };
 	"term.output": { termId: string; data: string };
 	"term.exit": { termId: string; code: number | null };
 	"site.updated": SiteSummary;

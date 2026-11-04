@@ -37,6 +37,8 @@ export interface ModelProfile {
 	headers: () => Promise<Record<string, string>>;
 	/** PEM text for a private CA, when the endpoint uses one. */
 	ca?: string;
+	/** Group the tools under this name in the request (routes that want tools grouped). */
+	toolNamespace?: string;
 }
 
 export interface ModelRequest {

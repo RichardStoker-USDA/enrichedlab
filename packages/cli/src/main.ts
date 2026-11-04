@@ -68,6 +68,7 @@ const HELP = `EnrichedLab ${VERSION}
   enriched models [--refresh]     models you can use now
   enriched model <ref> [effort]   set the default model
   enriched sessions               recent sessions in this folder (--all for every folder)
+  enriched service add chatgpt    use your ChatGPT plan (sign in in the browser; --new adds another account)
   enriched service add <service>  use your own key: openai, anthropic, gemini, openrouter, custom --address <url>
   enriched doctor                 check the setup
   enriched update [--check]       install the newest release (signed; no administrator)
@@ -364,7 +365,23 @@ async function main(): Promise<void> {
 		case "service": {
 			const client = await connect();
 			const [action, which] = command === "services" ? ["list"] : rest;
-			if (action === "add" && which) {
+			if (action === "add" && which === "chatgpt") {
+				// Your ChatGPT plan, through ChatGPT's own sign-in page; no key involved.
+				client.on("provider.auth", (auth) => {
+					out(`Opening your browser to continue with ChatGPT. If it doesn't open, visit:\n${auth.url}`);
+					openBrowser(auth.url);
+				});
+				// Signing in again reuses the saved account's registration; --new adds another account or workspace.
+				const saved = (await client.call("provider.list", {})).accounts.find((a) => a.service === "chatgpt" && a.active) ?? (await client.call("provider.list", {})).accounts[0];
+				const result = await client.call("provider.signin", { service: "chatgpt", account: flags.new === true ? undefined : saved?.id });
+				out(`Signed in to ChatGPT as ${result.account.label}: ${result.models} models on your plan.`);
+				if (result.welcome) out("You're using your ChatGPT plan: eligible requests in EnrichedLab count toward it. Manage usage at https://chatgpt.com/settings/usage");
+			} else if (action === "remove" && which === "chatgpt") {
+				for (const a of (await client.call("provider.list", {})).accounts.filter((x) => x.service === "chatgpt" && x.signedIn)) {
+					const { revoked } = await client.call("provider.signout", { service: "chatgpt", account: a.id });
+					out(revoked ? `Signed out of ChatGPT (${a.label}).` : `Signed out of ChatGPT (${a.label}) here; OpenAI didn't confirm the session ended, so disconnect EnrichedLab in ChatGPT settings if you need to be sure.`);
+				}
+			} else if (action === "add" && which) {
 				// The key is read from the terminal without echo, or from a pipe; it never appears on the command line.
 				process.stdout.write("Key: ");
 				if (process.stdin.isTTY) Bun.spawnSync(["stty", "-echo"], { stdin: "inherit" });
@@ -381,10 +398,11 @@ async function main(): Promise<void> {
 				await client.call("provider.remove", { name: which });
 				out(`Removed ${which} and its key.`);
 			} else {
-				const { presets, added } = await client.call("provider.list", {});
+				const { presets, added, accounts } = await client.call("provider.list", {});
+				for (const a of accounts) out(`chatgpt  ChatGPT plan  ${a.label}${a.active ? " (in use)" : ""}${a.signedIn ? (a.plan ? "" : ", plan use not allowed") : ", signed out"}`);
 				for (const a of added) out(`${a.name}  ${a.label}  ${a.baseUrl}`);
-				if (!added.length) out("No services added.");
-				out(`\nAdd one: enriched service add <${presets.map((p) => p.id).join("|")}> [--address <url> for custom]`);
+				if (!added.length && !accounts.length) out("No services added.");
+				out(`\nAdd one: enriched service add <chatgpt|${presets.map((p) => p.id).join("|")}> [--address <url> for custom]`);
 			}
 			client.close();
 			return;

@@ -49,6 +49,7 @@ import { applyUpdate, checkForUpdate } from "./update.ts";
 import { BROWSER_TOOLS } from "./tools/browser.ts";
 import { pdfFieldsTool, pdfFillTool } from "./tools/pdf.ts";
 import { forgetKey, PROVIDER_PRESETS, storeKey, testProvider } from "./models/providers.ts";
+import { RESOURCE as CHATGPT_API, signIn as chatgptSignIn, signOut as chatgptSignOut, summaries as chatgptAccounts, useAccount as useChatgpt } from "./models/chatgpt.ts";
 import { newId, readJson, sleep, VERSION, writeJson } from "./util.ts";
 
 export const BUILT_IN_TOOLS: Tool[] = [readTool, writeTool, editTool, lsTool, globTool, grepTool, shellTool, fetchTool, showTool, recallTool, planTool, agentStartTool, agentWaitTool, rememberTool, skillCreateTool, appCreateTool, appOpenTool, pdfFieldsTool, pdfFillTool, ...BROWSER_TOOLS];
@@ -459,6 +460,17 @@ export class Engine {
 		return { theme: "auto", showReasoning: true, ...readJson<Partial<UiPrefs>>(this.paths.ui, {}) };
 	}
 
+	/** ChatGPT plan models are offered while an account is signed in; config.json records only that. */
+	private setChatgptProvider(on: boolean): void {
+		const raw = readJson<Record<string, unknown>>(this.paths.config, {});
+		const providers = { ...(raw.providers as Record<string, unknown>) };
+		if (on) providers.chatgpt = { api: "openai-responses", baseUrl: CHATGPT_API, auth: "chatgpt", label: "ChatGPT" } satisfies ProviderConfig;
+		else delete providers.chatgpt;
+		raw.providers = providers;
+		writeJson(this.paths.config, raw);
+		this.reloadConfig();
+	}
+
 	reloadConfig(): void {
 		this.config = this.loadAll();
 	}
@@ -584,8 +596,40 @@ export class Engine {
 				case "provider.list":
 					return {
 						presets: PROVIDER_PRESETS,
-						added: Object.entries(this.config.providers).map(([name, c]) => ({ name, label: c.label ?? name, baseUrl: c.baseUrl })),
+						added: Object.entries(this.config.providers)
+							.filter(([, c]) => !c.auth)
+							.map(([name, c]) => ({ name, label: c.label ?? name, baseUrl: c.baseUrl })),
+						accounts: chatgptAccounts(this.paths.credentials).map((a) => ({ service: "chatgpt" as const, ...a })),
 					};
+				case "provider.signin": {
+					if (p.service !== "chatgpt") throw new RpcError(-32602, "Unknown service.");
+					const { account, welcome } = await chatgptSignIn({
+						home: this.paths.home,
+						credentials: this.paths.credentials,
+						account: typeof p.account === "string" ? p.account : undefined,
+						open: (url) => this.emit("provider.auth", { service: "chatgpt", url }),
+					});
+					this.setChatgptProvider(true);
+					await this.registry.refresh();
+					const problem = this.registry.problems.get("chatgpt");
+					if (problem) throw new RpcError(-32000, `Signed in, but ChatGPT's models didn't load: ${problem}`);
+					const summary = chatgptAccounts(this.paths.credentials).find((a) => a.id === account.id)!;
+					return { account: { service: "chatgpt", ...summary }, models: this.registry.all().filter((m) => m.provider === "chatgpt").length, welcome };
+				}
+				case "provider.signout": {
+					if (p.service !== "chatgpt") throw new RpcError(-32602, "Unknown service.");
+					const result = await chatgptSignOut(this.paths.credentials, need("account"));
+					this.setChatgptProvider(chatgptAccounts(this.paths.credentials).some((a) => a.active && a.signedIn));
+					await this.registry.refresh();
+					return result;
+				}
+				case "provider.use": {
+					if (p.service !== "chatgpt") throw new RpcError(-32602, "Unknown service.");
+					useChatgpt(this.paths.credentials, need("account"));
+					this.setChatgptProvider(chatgptAccounts(this.paths.credentials).some((a) => a.active && a.signedIn));
+					await this.registry.refresh();
+					return { ok: true };
+				}
 				case "provider.add": {
 					const preset = PROVIDER_PRESETS.find((x) => x.id === need("preset"));
 					if (!preset) throw new RpcError(-32602, "Unknown service.");

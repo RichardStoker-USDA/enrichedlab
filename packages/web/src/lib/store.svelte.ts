@@ -457,6 +457,9 @@ class Lab {
 			const known = this.sites.some((s) => s.name === site.name);
 			this.sites = known ? this.sites.map((s) => (s.name === site.name ? site : s)) : [...this.sites, site];
 		});
+		rpc.on("provider.auth", (auth) => {
+			window.open(auth.url, "_blank", "noopener");
+		});
 		rpc.on("site.auth", (auth) => {
 			window.open(auth.url, "_blank", "noopener");
 			this.say(`Sign in to ${auth.name} in the window that opened.`);
@@ -478,3 +481,6 @@ class Lab {
 }
 
 export const lab = new Lab();
+
+/** Where a person reviews and limits their ChatGPT plan's use in other apps. */
+export const USAGE_URL = "https://chatgpt.com/settings/usage";

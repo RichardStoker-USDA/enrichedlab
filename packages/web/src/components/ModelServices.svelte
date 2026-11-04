@@ -1,15 +1,22 @@
 <script lang="ts">
-	// Add a model service with your own key. The key is checked against the service before it's kept, and it goes to
-	// the operating system's credential store, never to a settings file.
-	import type { ProviderPreset } from "@enrichedlab/protocol";
-	import { lab } from "../lib/store.svelte.ts";
+	// Model services: your ChatGPT plan through ChatGPT's own sign-in, or a service with your own key. A key is checked
+	// against the service before it's kept, and goes to the operating system's credential store, never to a settings
+	// file. ChatGPT tokens stay in the engine; this dialog sees the account's email and whether plan use is on.
+	import type { ProviderPreset, ServiceAccount } from "@enrichedlab/protocol";
+	import { lab, USAGE_URL } from "../lib/store.svelte.ts";
 	import { rpc } from "../lib/rpc.ts";
+	import ChatGptMark from "./ChatGptMark.svelte";
 
 	let { open = $bindable(false) }: { open: boolean } = $props();
 
 	let dialog = $state<HTMLDialogElement>();
+	let welcomeDialog = $state<HTMLDialogElement>();
 	let presets = $state<ProviderPreset[]>([]);
 	let added = $state<{ name: string; label: string; baseUrl: string }[]>([]);
+	let accounts = $state<ServiceAccount[]>([]);
+	let signing = $state(false);
+	let planMessage = $state("");
+	let planFailed = $state(false);
 	let choice = $state("gemini");
 	let key = $state("");
 	let address = $state("");
@@ -22,6 +29,42 @@
 		const list = await rpc.call("provider.list", {});
 		presets = list.presets;
 		added = list.added;
+		accounts = list.accounts;
+	}
+
+	/** ChatGPT's page opens in the browser; the engine waits for it to come back. `account` signs in again. */
+	async function continueWithChatGpt(account?: string) {
+		signing = true;
+		planFailed = false;
+		planMessage = "Finish in your browser. EnrichedLab is waiting for ChatGPT.";
+		try {
+			const result = await rpc.call("provider.signin", { service: "chatgpt", account });
+			planMessage = result.account.plan
+				? `Signed in as ${result.account.label}. ${result.models} models on your plan are in the model menu.`
+				: `Signed in as ${result.account.label}, but plan use wasn't allowed. Continue with ChatGPT again and allow it.`;
+			await lab.refreshModels();
+			await load();
+			if (result.welcome) welcomeDialog?.showModal();
+		} catch (error) {
+			planFailed = true;
+			planMessage = (error as Error).message;
+		} finally {
+			signing = false;
+		}
+	}
+
+	async function signOut(account: ServiceAccount) {
+		const { revoked } = await rpc.call("provider.signout", { service: "chatgpt", account: account.id });
+		planFailed = !revoked;
+		planMessage = revoked ? `Signed out of ${account.label}.` : `Signed out here. ChatGPT didn't confirm the session ended; you can disconnect EnrichedLab in ChatGPT settings.`;
+		await lab.refreshModels();
+		await load();
+	}
+
+	async function use(account: ServiceAccount) {
+		await rpc.call("provider.use", { service: "chatgpt", account: account.id });
+		await lab.refreshModels();
+		await load();
 	}
 
 	$effect(() => {
@@ -67,9 +110,41 @@
 	</form>
 	<p class="lead">
 		Your lab's models appear when you sign in to it. Models on this computer (Ollama, LM Studio) appear while they run; Gemma and Qwen run well
-		in LM Studio on Apple silicon. To use a service with your own account, add its key here.
+		in LM Studio on Apple silicon.
 	</p>
 
+	<section class="plan" aria-labelledby="plan-title">
+		<h3 id="plan-title">Your ChatGPT plan</h3>
+		<p class="note">Requests in EnrichedLab can use the usage included in your ChatGPT plan. No key, and nothing billed by EnrichedLab.</p>
+		{#if accounts.length}
+			<ul class="accounts">
+				{#each accounts as account (account.id)}
+					<li>
+						<span class="who">{account.label}</span>
+						<span class="state">{account.active && account.plan ? "In use" : account.signedIn ? (account.plan ? "Signed in" : "Plan use not allowed") : "Signed out"}</span>
+						{#if account.signedIn && account.plan && !account.active}
+							<button type="button" class="link" onclick={() => use(account)}>Use</button>
+						{/if}
+						{#if account.signedIn}
+							<button type="button" class="link" onclick={() => signOut(account)}>Sign out</button>
+						{:else}
+							<button type="button" class="link" disabled={signing} onclick={() => continueWithChatGpt(account.id)}>Sign in</button>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+		{/if}
+		<div class="actions">
+			<button type="button" class="chatgpt" data-oai-siwc-button disabled={signing} onclick={() => continueWithChatGpt()}>
+				<ChatGptMark />
+				<span>{accounts.length ? "Add another ChatGPT account" : "Continue with ChatGPT"}</span>
+			</button>
+			{#if accounts.some((a) => a.signedIn)}<a class="usage" href={USAGE_URL} target="_blank" rel="noreferrer">Manage usage</a>{/if}
+		</div>
+		<p class="status" class:failed={planFailed} role="status" aria-live="polite">{planMessage}</p>
+	</section>
+
+	<h3>Your own key</h3>
 	<form class="add" onsubmit={add}>
 		<fieldset>
 			<legend>Service</legend>
@@ -99,7 +174,7 @@
 	</form>
 
 	{#if added.length}
-		<h3>Added</h3>
+		<h3>Keys added</h3>
 		<ul class="added">
 			{#each added as service (service.name)}
 				<li>
@@ -110,6 +185,16 @@
 			{/each}
 		</ul>
 	{/if}
+</dialog>
+
+<dialog bind:this={welcomeDialog} class="welcome" aria-labelledby="welcome-title">
+	<ChatGptMark size={28} />
+	<h2 id="welcome-title">You're using your ChatGPT plan</h2>
+	<p>Eligible requests in EnrichedLab now use the usage included in your ChatGPT plan. You can review and limit it in ChatGPT settings.</p>
+	<div class="welcome-actions">
+		<a href={USAGE_URL} target="_blank" rel="noreferrer">Manage usage</a>
+		<form method="dialog"><button class="primary">Got it</button></form>
+	</div>
 </dialog>
 
 <style>
@@ -257,6 +342,99 @@
 	}
 	.primary:disabled {
 		opacity: 0.45;
+	}
+	.plan {
+		padding-bottom: 6px;
+	}
+	.plan h3 {
+		margin-top: 4px;
+	}
+	.plan .note {
+		margin-bottom: 10px;
+	}
+	.plan .actions {
+		margin-top: 4px;
+	}
+	.plan .status:empty {
+		display: none;
+	}
+	.plan .status {
+		margin-top: 10px;
+	}
+	/* OpenAI's "Continue with ChatGPT" formats: black on light surfaces, white on dark. */
+	.chatgpt {
+		display: inline-flex;
+		align-items: center;
+		gap: 9px;
+		min-height: 40px;
+		padding: 0 18px 0 14px;
+		border-radius: 999px;
+		background: light-dark(#000, #fff);
+		color: light-dark(#fff, #000);
+		font-size: 14px;
+		font-weight: 500;
+		transition: background-color 120ms ease-out;
+	}
+	.chatgpt:hover:not(:disabled) {
+		background: light-dark(#262626, #e3e3e3);
+	}
+	.chatgpt:disabled {
+		opacity: 0.5;
+	}
+	.usage {
+		color: var(--link);
+		font-size: 13px;
+	}
+	.accounts {
+		list-style: none;
+		margin: 0 0 12px;
+		padding: 0;
+	}
+	.accounts li {
+		display: flex;
+		align-items: baseline;
+		gap: 12px;
+		padding: 8px 0;
+		border-top: 1px solid var(--rule);
+		font-size: 13px;
+	}
+	.accounts .who {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.accounts .state {
+		color: var(--text-muted);
+		font-size: 12.5px;
+	}
+	.welcome {
+		width: min(400px, calc(100vw - 32px));
+		padding: 26px 24px 20px;
+		text-align: center;
+	}
+	.welcome h2 {
+		margin: 12px 0 8px;
+	}
+	.welcome p {
+		margin: 0 0 18px;
+		font-size: 13.5px;
+		line-height: 1.5;
+		color: var(--text-muted);
+	}
+	.welcome-actions {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 18px;
+		font-size: 13px;
+	}
+	.welcome-actions a {
+		color: var(--link);
+	}
+	.welcome-actions form {
+		margin: 0;
 	}
 	.added {
 		list-style: none;

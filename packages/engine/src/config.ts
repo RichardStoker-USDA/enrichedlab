@@ -7,7 +7,7 @@ import type { SearchConfig } from "./tools/search.ts";
 import type { Paths } from "./paths.ts";
 import { readJson, writeJson } from "./util.ts";
 
-export type ApiKind = "openai-chat" | "anthropic";
+export type ApiKind = "openai-chat" | "openai-responses" | "anthropic";
 
 export interface ProviderConfig {
 	api: ApiKind;
@@ -16,6 +16,8 @@ export interface ProviderConfig {
 	keyEnv?: string;
 	/** The key is in the OS credential store (or ~/.enriched/credentials), put there by `provider.add`. */
 	keychain?: boolean;
+	/** Signed in through the service's own sign-in instead of a key (ChatGPT plan use). */
+	auth?: "chatgpt";
 	/** A PEM file for a private certificate authority (a LAN service with its own CA). */
 	caFile?: string;
 	headers?: Record<string, string>;

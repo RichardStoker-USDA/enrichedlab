@@ -8,6 +8,8 @@ import { errorText, expandHome, readSecret } from "../util.ts";
 import { labFetch } from "./http.ts";
 import { openaiChat } from "./openai_chat.ts";
 import { anthropic } from "./anthropic.ts";
+import { accessToken, planModels } from "./chatgpt.ts";
+import { responsesAdapter, TOOL_NAMESPACE } from "./openai_responses.ts";
 import { loadKey } from "./providers.ts";
 import type { ModelAdapter, ModelProfile } from "./types.ts";
 
@@ -28,7 +30,9 @@ export interface ModelSource {
 }
 
 export function adapterFor(model: ModelProfile): ModelAdapter {
-	return model.api === "anthropic" ? anthropic : openaiChat;
+	if (model.api === "anthropic") return anthropic;
+	if (model.api === "openai-responses") return responsesAdapter(model.toolNamespace);
+	return openaiChat;
 }
 
 /** Apply config.json overrides by full reference first, then by model id. */
@@ -170,6 +174,7 @@ export class ModelRegistry {
 	}
 
 	private async configuredModels(name: string, provider: ProviderConfig): Promise<ModelProfile[]> {
+		if (provider.auth === "chatgpt") return this.planModels(name, provider);
 		const ca = provider.caFile ? readFileSync(expandHome(provider.caFile), "utf8") : undefined;
 		const headers = async (): Promise<Record<string, string>> => {
 			const key = provider.keychain ? await loadKey(this.credentials, name) : readSecret(provider);
@@ -203,6 +208,31 @@ export class ModelRegistry {
 					: {}),
 			}),
 		);
+	}
+
+	/** The models of a signed-in ChatGPT account, on its plan. */
+	private async planModels(name: string, provider: ProviderConfig): Promise<ModelProfile[]> {
+		const headers = async () => ({ authorization: `Bearer ${await accessToken(this.credentials)}` });
+		const listed = await planModels(await accessToken(this.credentials));
+		const label = provider.label ?? "ChatGPT";
+		return listed.map((m) => ({
+			ref: `${name}/${m.id}`,
+			provider: name,
+			id: m.id,
+			label: `${m.label} · ${label}`,
+			source: "config" as const,
+			api: "openai-responses" as const,
+			baseUrl: provider.baseUrl,
+			context: m.context ?? 200_000,
+			maxOutput: 128_000,
+			vision: m.vision,
+			efforts: m.efforts,
+			defaultEffort: m.defaultEffort ?? (m.efforts.includes("medium") ? "medium" : undefined),
+			effortField: "none" as const,
+			replayReasoning: true,
+			headers,
+			toolNamespace: TOOL_NAMESPACE,
+		}));
 	}
 
 	all(): ModelProfile[] {

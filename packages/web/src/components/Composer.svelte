@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Part } from "@enrichedlab/protocol";
-	import { lab } from "../lib/store.svelte.ts";
+	import { lab, USAGE_URL } from "../lib/store.svelte.ts";
 	import { tokens } from "../lib/format.ts";
 
 	let text = $state("");
@@ -22,10 +22,18 @@
 	});
 
 	const groups = $derived.by(() => {
-		const order = ["site", "local", "config"] as const;
-		const names = { site: "From your sites", local: "On this computer", config: "Your providers" };
-		return order.map((source) => ({ label: names[source], models: lab.models.filter((m) => m.source === source) })).filter((g) => g.models.length);
+		const plan = (m: { provider: string }) => m.provider === "chatgpt";
+		return [
+			{ label: "From your labs", models: lab.models.filter((m) => m.source === "site") },
+			{ label: "Your ChatGPT plan", models: lab.models.filter((m) => m.source === "config" && plan(m)) },
+			{ label: "Your keys", models: lab.models.filter((m) => m.source === "config" && !plan(m)) },
+			{ label: "On this computer", models: lab.models.filter((m) => m.source === "local") },
+		].filter((g) => g.models.length);
 	});
+	/** OpenAI asks apps to say when requests use the person's ChatGPT plan, with a way to manage it. */
+	const onPlan = $derived(lab.model?.provider === "chatgpt");
+	/** A model's name as its service gives it ("GPT-6.1 Sol · ChatGPT" shows as "GPT-6.1 Sol"). */
+	const named = (m: { id: string; label: string }) => m.label.split(" · ")[0] || m.id;
 
 	function resize() {
 		if (!field) return;
@@ -139,7 +147,7 @@
 						<circle cx="11" cy="11" r="9" class="track" />
 						<circle cx="11" cy="11" r="9" class="arc" class:low={leftPct < 15} stroke-dasharray={CIRC} stroke-dashoffset={CIRC * (1 - left)} />
 					</svg>
-					<span class="model-name">{lab.model?.id ?? (lab.status?.model || "Choose a model")}</span>
+					<span class="model-name">{lab.model ? named(lab.model) : lab.status?.model || "Choose a model"}</span>
 					{#if lab.status?.effort}<span class="effort">{lab.status.effort}</span>{/if}
 				</button>
 				{#if menuOpen}
@@ -158,8 +166,8 @@
 									}}
 								>
 									<span class="check" aria-hidden="true">{m.ref === lab.status?.model ? "✓" : ""}</span>
-									<span class="menu-name">{m.id}</span>
-									<span class="menu-meta">{m.provider} · {tokens(m.context)}{m.vision ? " · vision" : ""}</span>
+									<span class="menu-name">{named(m)}</span>
+									<span class="menu-meta">{m.provider === "chatgpt" ? "plan" : m.provider} · {tokens(m.context)}{m.vision ? " · vision" : ""}</span>
 								</button>
 							{/each}
 						{:else}
@@ -181,6 +189,9 @@
 					</div>
 				{/if}
 			</div>
+			{#if onPlan}
+				<span class="plan">Using ChatGPT plan · <a href={USAGE_URL} target="_blank" rel="noreferrer">Manage usage</a></span>
+			{/if}
 			{#if lab.status?.rate}<span class="rate">{lab.status.rate} tok/s</span>{/if}
 			<span class="spacer"></span>
 			{#if lab.busy}
@@ -297,6 +308,14 @@
 		font-size: 12px;
 		color: var(--text-faint);
 		font-variant-numeric: tabular-nums;
+	}
+	.plan {
+		font-size: 12px;
+		color: var(--text-muted);
+		white-space: nowrap;
+	}
+	.plan a {
+		color: var(--link);
 	}
 	.send {
 		width: 32px;
@@ -461,6 +480,9 @@
 		}
 		.rate {
 			display: none;
+		}
+		.plan {
+			font-size: 11.5px;
 		}
 		.chip {
 			max-width: 220px;

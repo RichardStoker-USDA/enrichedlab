@@ -131,15 +131,18 @@ const PAGE = (title: string, line: string): string =>
 	`<body style="font:16px system-ui;margin:4rem auto;max-width:28rem;color:#022851">` +
 	`<h1 style="font-size:1.4rem">${title}</h1><p>${line}</p></body>`;
 
-interface Listener {
+export interface Listener {
 	port: number;
 	code(state: string, signal?: AbortSignal): Promise<string>;
+	/** Everything the callback carried, once one with this state arrives. Errors are left to the caller. */
+	arrival(state: string, signal?: AbortSignal): Promise<URLSearchParams>;
 	close(): void;
 }
 
 interface Arrival {
 	code?: string;
 	error?: string;
+	params: URLSearchParams;
 }
 
 /**
@@ -147,7 +150,7 @@ interface Arrival {
  * carries this sign-in's state counts; anything else (another local program guessing the port, an old tab) gets an
  * error page and the wait goes on.
  */
-export function listen(port: number): Promise<Listener> {
+export function listen(port: number, path = "/callback"): Promise<Listener> {
 	return new Promise((resolve, reject) => {
 		let expected: string | undefined;
 		let settle: ((value: Arrival) => void) | undefined;
@@ -156,7 +159,7 @@ export function listen(port: number): Promise<Listener> {
 		});
 		const server: Server = createServer((request, response) => {
 			const url = new URL(request.url ?? "/", "http://127.0.0.1");
-			if (url.pathname !== "/callback") {
+			if (url.pathname !== path) {
 				response.writeHead(404).end();
 				return;
 			}
@@ -173,23 +176,27 @@ export function listen(port: number): Promise<Listener> {
 					? PAGE("Sign-in didn't finish", "Go back to EnrichedLab to see why and try again.")
 					: PAGE("Signed in", "You can close this tab and go back to EnrichedLab."),
 			);
-			settle?.({ code: url.searchParams.get("code") ?? undefined, error });
+			settle?.({ code: url.searchParams.get("code") ?? undefined, error, params: url.searchParams });
 		});
 		server.once("error", reject);
 		server.listen(port, "127.0.0.1", () => {
 			const address = server.address();
 			const bound = typeof address === "object" && address ? address.port : port;
+			const wait = (state: string, signal?: AbortSignal): Promise<Arrival> => {
+				expected = state;
+				const timeout = new Promise<never>((_, fail) => {
+					const timer = setTimeout(() => fail(new Error("Sign-in timed out. Start it again.")), SIGN_IN_WAIT_MS);
+					timer.unref();
+					signal?.addEventListener("abort", () => fail(new Error("Sign-in was cancelled.")), { once: true });
+				});
+				return Promise.race([arrived, timeout]);
+			};
 			resolve({
 				port: bound,
 				close: () => server.close(),
+				arrival: async (state, signal) => (await wait(state, signal)).params,
 				code: async (state, signal) => {
-					expected = state;
-					const timeout = new Promise<never>((_, fail) => {
-						const timer = setTimeout(() => fail(new Error("Sign-in timed out. Run enriched login again.")), SIGN_IN_WAIT_MS);
-						timer.unref();
-						signal?.addEventListener("abort", () => fail(new Error("Sign-in was cancelled.")), { once: true });
-					});
-					const result = await Promise.race([arrived, timeout]);
+					const result = await wait(state, signal);
 					if (result.error) throw new Error(`Sign-in didn't finish: ${result.error}.`);
 					if (!result.code) throw new Error("Sign-in came back without a code.");
 					return result.code;
