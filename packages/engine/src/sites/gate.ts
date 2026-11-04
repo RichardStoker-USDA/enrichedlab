@@ -912,10 +912,11 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		return this.starting;
 	}
 
-	/** A sandbox's lifecycle status; "deleted" when the lab no longer has it (404 or 410). */
+	/** A sandbox's lifecycle status; "deleted" when the lab no longer has it (404 or 410) or is still deleting it. */
 	private async containerStatus(id: string, signal?: AbortSignal): Promise<string> {
 		try {
-			return (await this.json<{ status?: string }>("GET", `/v1/containers/${encodeURIComponent(id)}`, { signal })).status ?? "running";
+			const status = (await this.json<{ status?: string }>("GET", `/v1/containers/${encodeURIComponent(id)}`, { signal })).status ?? "running";
+			return status === "deleting" ? "deleted" : status;
 		} catch (error) {
 			const status = (error as { status?: number }).status;
 			if (status === 404 || status === 410) return "deleted";

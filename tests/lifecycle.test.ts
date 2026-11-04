@@ -121,11 +121,15 @@ describe("sandbox lifecycle", () => {
 		await expect(s.run("echo hi", 30)).rejects.toThrow("still archived");
 	}, 30_000);
 
-	test("a deleted sandbox is replaced with a new one, and the person is told", async () => {
+	test("a deleted sandbox, or one still being deleted, is replaced with a new one, and the person is told", async () => {
 		const { s, notices } = await site("c-deleted", { status: "deleted" });
 		const result = await s.run("echo hi", 30);
 		expect(result.stdout).toMatch(/^ran in new\d+\n$/);
 		expect(notices.join(" ")).toContain("was deleted, with its files");
+		const going = await site("c-deleting", { status: "deleting" });
+		const started = Date.now();
+		expect((await going.s.run("echo hi", 30)).stdout).toMatch(/^ran in new\d+\n$/);
+		expect(Date.now() - started).toBeLessThan(2_000);
 	});
 
 	test("a lab too busy to take a new sandbox is waited out; one that's full says how to make room", async () => {

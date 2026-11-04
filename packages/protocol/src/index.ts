@@ -328,7 +328,7 @@ export interface LabDevice {
 export interface LabSandbox {
 	id: string;
 	name?: string;
-	/** running, starting, stopped, archived, restoring, or deleted while the lab clears it */
+	/** running, starting, stopped, archived, restoring, or deleting while the lab clears it (it still counts toward the limit) */
 	status?: string;
 	created?: string;
 	last_active?: string;
