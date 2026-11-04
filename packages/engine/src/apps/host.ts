@@ -241,7 +241,7 @@ export class AppHost {
 		const b = m.backend;
 		const packages = b?.runtime === "command" || b?.runtime === "serve" ? environmentSummary(dir) : undefined;
 		if (packages) lines.push(`Install ${packages} from conda-forge into the app's folder (no administrator)`);
-		if (b?.runtime === "command" || b?.runtime === "serve") lines.push(`Run ${b.command.join(" ")} on this computer, contained`);
+		if (b?.runtime === "command" || b?.runtime === "serve") lines.push(`Run ${b.command.join(" ")} on this computer${process.platform === "win32" ? " with your access" : ", contained"}`);
 		if (b?.runtime === "container") lines.push(`Run the container ${b.image}${b.build !== undefined ? " (built from its folder)" : ""}`);
 		const program = b && b.runtime !== "bun" ? JSON.stringify(b) : "";
 		return { lines, key: `${permissionKey(m.permissions)}|${program}|${packages ?? ""}` };

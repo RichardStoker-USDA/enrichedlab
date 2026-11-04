@@ -9,6 +9,7 @@
 | Credential folders (`~/.ssh`, `~/.aws`, key stores, browser profiles) | hidden | hidden | readable |
 | Network | off unless allowed | off unless allowed | open |
 | Commands inside the project | run | run | ask first |
+| App backends | contained as above | contained as above | run as the person (the consent card says so) |
 
 None of these need administrator rights. Where the facility isn't available (bubblewrap inside a container, a
 locked-down Windows policy), commands run as the person and every one asks first. Hiding reads and blocking the

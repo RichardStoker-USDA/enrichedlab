@@ -166,13 +166,13 @@ export async function startBackend(manifest: AppManifest, ctx: BackendContext): 
 		case "bun": {
 			// The compiled binary is Bun; BUN_BE_BUN makes it act as the bun command. From source, execPath is bun.
 			const runner = runnerPath(ctx.runDir);
-			const launch = contained(process.execPath, [runner, join(ctx.dir, backend.main)], { writable: [ctx.dataDir], readable: [runner, ctx.dir], network });
+			const launch = contained(process.execPath, [runner, join(ctx.dir, backend.main)], { writable: [ctx.dataDir], readable: [runner, ctx.dir], network, server: true });
 			return connectStdio(launch.file, launch.args, { ...env, BUN_BE_BUN: "1", NO_COLOR: "1" }, ctx.dir, ctx);
 		}
 		case "command": {
 			const command = hasEnvironment(ctx.dir) ? await inEnvironment(ctx.dir, backend.command, ctx.toolsDir, ctx.log) : backend.command;
 			const [program, ...args] = command;
-			const launch = contained(program!, args, { writable: [ctx.dataDir, join(ctx.dir, ".pixi")], readable: [ctx.dir, ctx.toolsDir], network });
+			const launch = contained(program!, args, { writable: [ctx.dataDir, join(ctx.dir, ".pixi")], readable: [ctx.dir, ctx.toolsDir], network, server: true });
 			return connectStdio(launch.file, launch.args, env, ctx.dir, ctx);
 		}
 		case "container": {
@@ -214,7 +214,7 @@ export async function startBackend(manifest: AppManifest, ctx: BackendContext): 
 			const [program, ...args] = command;
 			// Writes go to the data folder (and the environment's own cache), so history files don't touch the app's
 			// folder and its reload.
-			const launch = contained(program!, args, { writable: [ctx.dataDir, join(ctx.dir, ".pixi")], readable: [ctx.dir, ctx.toolsDir], network: ctx.network ? "all" : "loopback" });
+			const launch = contained(program!, args, { writable: [ctx.dataDir, join(ctx.dir, ".pixi")], readable: [ctx.dir, ctx.toolsDir], network: ctx.network ? "all" : "loopback", server: true });
 			const proc = spawn(launch.file, launch.args, { cwd: ctx.dir, env: { ...env, PORT: String(port), HOST: "127.0.0.1", TMPDIR: ctx.dataDir }, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
 			for (const stream of [proc.stdout, proc.stderr]) stream?.on("data", (chunk: Buffer) => chunk.toString("utf8").split("\n").forEach((line) => line.trim() && ctx.log(line)));
 			const url = `http://127.0.0.1:${port}${backend.path ?? "/"}`;

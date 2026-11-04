@@ -158,10 +158,13 @@ function seatbeltProfile(writable: string[], network: NetworkAccess, readable: s
 /** The program and arguments that run `file args` contained by the OS: writes only to `writable` (and temp folders),
  * credential folders hidden, the network as given. Returned unchanged where this computer has no facility
  * (Windows today); `facility` says which one applied. */
-export function contained(file: string, args: string[], options: { writable: string[]; network: NetworkAccess; readable?: string[] }): { file: string; args: string[]; facility?: Facility } {
+export function contained(file: string, args: string[], options: { writable: string[]; network: NetworkAccess; readable?: string[]; server?: boolean }): { file: string; args: string[]; facility?: Facility } {
 	const facility = sandboxer();
 	if (!facility) return { file, args };
 	if (facility === "restricted-token") {
+		// Long-running servers (app backends) speaking MCP over stdio stall under the Windows helper after their
+		// first messages; until that's solved they run as the person, and the consent card says so.
+		if (options.server) return { file, args };
 		// This program runs the command under a write-restricted token (windows_contain.ts): the compiled binary
 		// itself, or bun with the CLI's source.
 		const self = selfCommand();
