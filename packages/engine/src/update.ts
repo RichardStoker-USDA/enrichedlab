@@ -14,7 +14,7 @@ import type { UpdateStatus } from "@enrichedlab/protocol";
 import { readJson, VERSION, writeFileAtomic } from "./util.ts";
 
 /** Where releases live. `ENRICHED_RELEASES` points a test or a lab mirror elsewhere. */
-export const RELEASES = process.env.ENRICHED_RELEASES ?? "https://github.com/RichardStoker-USDA/enrichedlab/releases/latest/download";
+export const RELEASES = process.env.ENRICHED_RELEASES ?? "https://github.com/RichardStoker-USDA/enrichedlab-harness/releases/latest/download";
 
 export interface Manifest {
 	version: string;

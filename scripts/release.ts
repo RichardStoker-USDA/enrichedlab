@@ -140,7 +140,7 @@ writeFileSync(join(release, "manifest.json.sig"), `${btoa(String.fromCharCode(..
 for (const [name, f] of Object.entries(files)) console.log(`  ${name}  ${(f.bytes / 1_048_576).toFixed(0)} MB`);
 
 if (publish) {
-	const notes = [`EnrichedLab ${VERSION}`, "", ...NEWS.map((n) => `- ${n}`), "", "Download: macOS `EnrichedLab-mac.pkg`, Windows `EnrichedLab-Setup-x64.exe`, Linux `EnrichedLab-linux-<arch>.AppImage`.", "Terminal (macOS, Linux): `curl -fsSL https://github.com/RichardStoker-USDA/enrichedlab/releases/latest/download/install.sh | sh`"].join("\n");
+	const notes = [`EnrichedLab ${VERSION}`, "", ...NEWS.map((n) => `- ${n}`), "", "Download: macOS `EnrichedLab-mac.pkg`, Windows `EnrichedLab-Setup-x64.exe`, Linux `EnrichedLab-linux-<arch>.AppImage`.", "Terminal (macOS, Linux): `curl -fsSL https://github.com/RichardStoker-USDA/enrichedlab-harness/releases/latest/download/install.sh | sh`"].join("\n");
 	const assets = readdirSync(release).map((n) => join(release, n));
 	await $`gh release create ${`v${VERSION}`} --title ${`EnrichedLab ${VERSION}`} --notes ${notes} ${assets}`.cwd(root);
 	console.log(`Published v${VERSION}`);

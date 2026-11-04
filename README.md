@@ -1,15 +1,15 @@
-# EnrichedLab
+# EnrichedLab harness
 
-An AI workbench for research. You ask for something in plain words; an agent works on it with your files, a browser,
-R and Python, and the models, tools and sandboxes of the lab you belong to. Results appear beside the conversation as
-tables, plots, pages, and apps you can keep using.
+The EnrichedLab app for your computer: an AI workbench for research. You ask for something in plain words; an agent
+works on it with your files, a browser, R and Python, and the models, tools and sandboxes of the lab you belong to.
+Results appear beside the conversation as tables, plots, pages, and apps you can keep using.
 
 It runs on macOS, Windows 11 and Linux, installs without administrator rights, and works the same from its window or
 from a terminal.
 
 ## Install
 
-Download the file for your computer from the [latest release](https://github.com/RichardStoker-USDA/enrichedlab/releases/latest)
+Download the file for your computer from the [latest release](https://github.com/RichardStoker-USDA/enrichedlab-harness/releases/latest)
 and open it:
 
 | Computer | File |
@@ -21,7 +21,7 @@ and open it:
 Terminal only, on macOS or Linux:
 
 ```sh
-curl -fsSL https://github.com/RichardStoker-USDA/enrichedlab/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/RichardStoker-USDA/enrichedlab-harness/releases/latest/download/install.sh | sh
 ```
 
 Updates are signed and install themselves the same way: the app offers them, `enriched update` applies them.

@@ -1,14 +1,14 @@
 #!/bin/sh
 # Install the EnrichedLab terminal command for this person on macOS or Linux. No sudo; nothing outside the home folder.
 #
-#   curl -fsSL https://github.com/RichardStoker-USDA/enrichedlab/releases/latest/download/install.sh | sh
+#   curl -fsSL https://github.com/RichardStoker-USDA/enrichedlab-harness/releases/latest/download/install.sh | sh
 #   sh install.sh --from <folder>       install binaries you built (dist/bin)
 #
 # The binary goes to ~/.enriched/bin/enriched, linked as ~/.local/bin/enriched. `enriched update` keeps it current.
 
 set -eu
 
-from="https://github.com/RichardStoker-USDA/enrichedlab/releases/latest/download"
+from="https://github.com/RichardStoker-USDA/enrichedlab-harness/releases/latest/download"
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--from) from="$2"; shift 2 ;;
