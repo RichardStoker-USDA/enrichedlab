@@ -451,6 +451,7 @@ export class Sites {
 			docs: d.docs?.url,
 			keepsDataInside: d.policy?.keep_data_inside,
 			profiles: d.sandbox_profiles?.map(({ name: profile, cpu, memory, gpu }) => ({ name: profile, cpu, memory, ...(gpu ? { gpu } : {}) })),
+			browser: Boolean(this.adapters.get(name)?.sandboxApi?.()?.browser?.()),
 		};
 	}
 

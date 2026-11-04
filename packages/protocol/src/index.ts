@@ -227,6 +227,8 @@ export interface SiteSummary {
 	models: number;
 	tools: number;
 	sandbox: boolean;
+	/** The lab runs a browser in the person's sandbox (the browser tools' sandbox lane). */
+	browser?: boolean;
 	error?: string;
 	/** Connected, but something the person should know (for example: the browser sign-in was refused and the LAN key is in use). */
 	warning?: string;
@@ -463,6 +465,14 @@ export interface Requests {
 	"session.delete": { params: { sessionId: string }; result: { ok: true } };
 	/** A surface's answer to surface.call. */
 	"surface.reply": { params: { callId: string; result?: SurfaceAnswer; error?: string }; result: { ok: true } };
+	/** A window shows (or stops showing) the session's page in a lab's sandbox browser: frames come while one does. */
+	"browser.watch": { params: { sessionId: string; on: boolean | "again" }; result: { page?: BrowserPageState } };
+	/** The window's pane size for the sandbox browser's page, in CSS pixels: the page lays out to it. */
+	"browser.resize": { params: { sessionId: string; width: number; height: number }; result: { ok: true } };
+	/** The person's own click, scroll or key in the sandbox browser's page. */
+	"browser.input": { params: { sessionId: string; event: BrowserInput }; result: { ok: true } };
+	/** The person moving the sandbox browser's page: an address, back, forward or reload. */
+	"browser.navigate": { params: { sessionId: string; site?: string; url?: string; step?: "back" | "forward" | "reload" }; result: { ok: true } };
 	/** Services `provider.add` knows, and the ones this person added. */
 	"provider.list": {
 		params: Record<string, never>;
@@ -528,6 +538,41 @@ export interface UiPrefs {
 	showReasoning: boolean;
 }
 
+// ── The browser in a lab's sandbox ───────────────────────────────────────────────────────────────────────────────
+
+/** What a lab's sandbox can reach on the web: nothing, the hosts listed, or anything its network policy allows. */
+export type SandboxNetwork = "none" | "allowlist" | "open";
+
+export interface BrowserPageState {
+	sessionId: string;
+	site: string;
+	/** The lab's display name. */
+	lab: string;
+	url: string;
+	title: string;
+	loading: boolean;
+	canBack: boolean;
+	canForward: boolean;
+	network?: SandboxNetwork;
+	hosts?: string[];
+}
+
+export interface BrowserFrame {
+	sessionId: string;
+	/** base64 JPEG */
+	data: string;
+	/** The page's size in CSS pixels, for mapping the person's clicks onto it. */
+	width: number;
+	height: number;
+}
+
+/** Input in page CSS pixels. `modifiers` is a bit set: Alt 1, Control 2, Meta 4, Shift 8. */
+export type BrowserInput =
+	| { kind: "mouse"; type: "mouseMoved" | "mousePressed" | "mouseReleased"; x: number; y: number; button?: "left" | "middle" | "right" | "none"; clickCount?: number; modifiers?: number }
+	| { kind: "wheel"; x: number; y: number; deltaX: number; deltaY: number }
+	| { kind: "key"; type: "keyDown" | "keyUp"; key: string; code?: string; modifiers?: number }
+	| { kind: "text"; text: string };
+
 export type Method = keyof Requests;
 export type Params<M extends Method> = Requests[M]["params"];
 export type Result<M extends Method> = Requests[M]["result"];
@@ -573,6 +618,10 @@ export interface Notifications {
 	"surface.call": { callId: string; sessionId: string; capability: string; op: string; args: Record<string, unknown> };
 	/** A newer release is out; surfaces offer it. */
 	"update.available": UpdateStatus;
+	/** Where the session's page in a lab's sandbox browser is: the window opens its pane on the first one. */
+	"browser.page": BrowserPageState;
+	/** A picture of that page (JPEG), while a window watches it. */
+	"browser.frame": BrowserFrame;
 }
 
 export type Notification = keyof Notifications;

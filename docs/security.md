@@ -26,10 +26,19 @@ the lab that issued them. At a lab that asks for it, every request also carries 
 key whose private half stays in the OS credential store, so a copied token is useless elsewhere ([labs.md](labs.md)).
 
 A sandbox port opened on this computer (`<lab>_sandbox_open_port`) is a loopback proxy that adds the person's lab
-sign-in to what it forwards. It answers only its own page: the Host must be its loopback address, a browser Origin
-its own origin, and each request carries a per-port cookie (HttpOnly, SameSite=Strict) set from a one-time token in
-the first address. Other sites in the browser and other programs get 403. ChatGPT sign-in tokens stay in the engine (`~/.el/credentials/chatgpt.json`, owner-only,
-refreshed before they expire, revoked at OpenAI on sign-out); windows and the terminal see only the account's email.
+sign-in to what it forwards. It answers only its own page: the Host must be its loopback address, a browser Origin its
+own origin, and each request carries a per-port cookie (HttpOnly, SameSite=Strict) set from a one-time token in the
+first address. Other sites in the browser and other programs get 403.
+
+A lab sandbox's browser has none of the person's sign-ins: the engine never copies cookies into it, each session gets
+its own browser context (disposed when the session or the connection ends), and it reaches only what the lab's network
+policy allows. The engine connects to it through the lab's port path with the person's sign-in; the lab sends that hop
+to Chrome on loopback with no Origin header. Files it downloads stay in the sandbox and leave only through the lab's
+scanned file API, checked against `Repr-Digest`. A confirm or prompt on a page is cancelled, never accepted for the
+person.
+
+ChatGPT sign-in tokens stay in the engine (`~/.el/credentials/chatgpt.json`, owner-only, refreshed before they expire,
+revoked at OpenAI on sign-out); windows and the terminal see only the account's email.
 
 ## Updates
 

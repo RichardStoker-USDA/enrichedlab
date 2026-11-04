@@ -32,7 +32,7 @@ import { type RuntimeDeps, SessionRuntime } from "./session/runtime.ts";
 import { Sites } from "./sites/sites.ts";
 import { createWorktree, repoRoot } from "./git.ts";
 import { fetchRepo, sendRepo } from "./sites/repo_handoff.ts";
-import { type SandboxApi, SandboxWorkspace } from "./sites/sandbox_workspace.ts";
+import { type SandboxApi, SandboxWorkspace, shq } from "./sites/sandbox_workspace.ts";
 import { findSkills, skillDirs } from "./skills.ts";
 import { type SearchConfig, searchTool } from "./tools/search.ts";
 import type { AgentResult } from "./tools/agents.ts";
@@ -47,7 +47,8 @@ import { readNotes, rememberTool, skillCreateTool } from "./memory.ts";
 import { Terminals } from "./terminal.ts";
 import { LocalWorkspace, type Workspace } from "./tools/workspace.ts";
 import { applyUpdate, checkForUpdate } from "./update.ts";
-import { BROWSER_TOOLS } from "./tools/browser.ts";
+import { BROWSER_TOOLS, type BrowserLanes } from "./tools/browser.ts";
+import { SandboxBrowsers } from "./sites/sandbox_browser.ts";
 import { pdfFieldsTool, pdfFillTool } from "./tools/pdf.ts";
 import { forgetKey, PROVIDER_PRESETS, storeKey, testProvider } from "./models/providers.ts";
 import { RESOURCE as CHATGPT_API, signIn as chatgptSignIn, signOut as chatgptSignOut, summaries as chatgptAccounts, useAccount as useChatgpt } from "./models/chatgpt.ts";
@@ -92,6 +93,8 @@ export class Engine {
 	readonly sites: Sites;
 	readonly canvas: CanvasStore;
 	readonly apps: AppHost;
+	/** Each session's page in a lab sandbox's browser (the sandbox lane of the browser tools). */
+	private browsers: SandboxBrowsers;
 	/** Set by the server: whether a desktop window shows a session. */
 	windowFor?: (sessionId: string) => boolean;
 	private windowAsked = new Map<string, number>();
@@ -145,6 +148,38 @@ export class Engine {
 			labAppBlocked: (origin) => this.sites.appBlocked(origin),
 			resolveLab: (name) => this.sites.resolve(name),
 		});
+		this.browsers = new SandboxBrowsers({
+			connect: (site, signal) => {
+				const api = this.sites.sandbox(site);
+				if (!api?.cdp) throw new Error(`${this.sites.title(site)}'s sandbox has no browser.`);
+				return api.cdp(signal);
+			},
+			prepare: async (site, dir, signal) => void (await this.sites.sandbox(site)?.run(`mkdir -p ${shq(dir)}`, 30, signal)),
+			lane: (site) => this.sites.sandbox(site)?.browser?.(),
+			title: (site) => this.sites.title(site),
+			emit: (name: "browser.page" | "browser.frame", params: never, sessionId: string) => {
+				this.emit(name, params, sessionId);
+				if (name === "browser.page") this.wantWindow(sessionId, "the sandbox browser");
+			},
+		});
+	}
+
+	/** The browser tools' lanes for a session: the desktop window's browser, and the labs' sandbox browsers. */
+	private browserLanes(sessionId: string): BrowserLanes {
+		return {
+			device: () => Boolean(this.windowFor?.(sessionId)),
+			labs: () =>
+				this.sites
+					.list()
+					.filter((s) => s.signedIn)
+					.flatMap((s) => {
+						const lane = this.sites.sandbox(s.name)?.browser?.();
+						return lane ? [{ site: s.name, title: s.title, network: lane.network, hosts: lane.hosts }] : [];
+					}),
+			page: (site, signal) => this.browsers.page(sessionId, site, signal),
+			last: () => this.browsers.lane(sessionId),
+			remember: (where, site) => this.browsers.remember(sessionId, where, site),
+		};
 	}
 
 	/** A session as the app host sees it. */
@@ -193,6 +228,7 @@ export class Engine {
 
 	async stop(): Promise<void> {
 		this.terminals.closeAll();
+		await this.browsers.closeAll();
 		await this.apps.stop();
 		for (const session of this.sessions.values()) session.cancel();
 		await Promise.all([this.mcp.close(), this.sites.close()]);
@@ -219,7 +255,9 @@ export class Engine {
 			// Notes and skills are files on the person's computer that later sessions read; lab data stays out of them.
 			const keeps = (t: Tool) => !/_sandbox_(download|repo_fetch)$/.test(t.name);
 			const local = (t: Tool) => t.kind !== "net" && t.name !== "remember" && t.name !== "skill_create" && !t.name.startsWith("browser_");
-			return [...BUILT_IN_TOOLS.filter(local), ...this.sites.tools(site).filter(keeps)];
+			// The lab's own sandbox browser stays inside the lab: the browser tools use only it there (tools/browser.ts).
+			const browser = this.sites.sandbox(site)?.browser?.() ? BROWSER_TOOLS : [];
+			return [...BUILT_IN_TOOLS.filter(local), ...browser, ...this.sites.tools(site).filter(keeps)];
 		}
 		const search = this.config.search ? [this.searchTool(this.config.search)] : [];
 		return [...BUILT_IN_TOOLS, ...search, ...this.mcp.tools(), ...this.sites.tools(site)];
@@ -331,6 +369,7 @@ export class Engine {
 			sealed: (site) => Boolean(site && this.sites.isolated(site)),
 			apps: (sessionId) => ({ open: (path) => this.apps.openForSession(sessionId, path), publishView: (view) => this.apps.publishView(sessionId, view) }),
 			surface: (sessionId) => (this.surfaces ? { call: (capability, op, args, signal) => this.surfaces!(sessionId, capability, op, args, signal) } : undefined),
+			browser: (sessionId) => this.browserLanes(sessionId),
 			cancelChildren: (parent) => {
 				for (const session of this.sessions.values()) if (session.parent === parent) session.cancel();
 			},
@@ -375,6 +414,7 @@ export class Engine {
 		}
 		this.unwatched.delete(id);
 		this.sessions.delete(id);
+		void this.browsers.close(id);
 	}
 
 	/** A surface has the session open again. */
@@ -605,6 +645,7 @@ export class Engine {
 					const runtime = this.session(id);
 					if (runtime.isRunning) throw new RpcError(-32010, "Stop the session first.");
 					this.sessions.delete(id);
+					void this.browsers.close(id);
 					rmSync(join(this.paths.sessions, id), { recursive: true, force: true });
 					return { ok: true };
 				}
@@ -763,6 +804,35 @@ export class Engine {
 				case "lab.device.revoke":
 					await this.sites.revokeDevice(need("name"), need("id"));
 					return { ok: true };
+				case "browser.watch": {
+					// "again": a window that already watches asks for a fresh picture (it reloaded its pane).
+					const page = await this.browsers.watch(need("sessionId"), p.on === "again" ? "again" : p.on === true);
+					if (!page) return {};
+					const info = await page.info().catch(() => undefined);
+					const lane = this.sites.sandbox(page.site)?.browser?.();
+					return info ? { page: { sessionId: need("sessionId"), site: page.site, lab: this.sites.title(page.site), network: lane?.network, hosts: lane?.hosts, ...info } } : {};
+				}
+				case "browser.resize": {
+					await this.browsers.current(need("sessionId"))?.resize(Number(p.width), Number(p.height));
+					return { ok: true };
+				}
+				case "browser.input": {
+					const page = this.browsers.current(need("sessionId"));
+					if (!page) throw new RpcError(-32602, "No sandbox browser page is open in this session.");
+					await page.input(p.event as never);
+					return { ok: true };
+				}
+				case "browser.navigate": {
+					// The person can start the session's sandbox browser from the window; the agent then keeps using it.
+					const id = need("sessionId");
+					const site = typeof p.site === "string" ? p.site : undefined;
+					const page = this.browsers.current(id) ?? (site && this.sites.sandbox(site)?.browser?.() ? await this.browsers.page(id, site) : undefined);
+					if (!page) throw new RpcError(-32602, "No sandbox browser page is open in this session.");
+					if (site) this.browsers.remember(id, "sandbox", page.site);
+					const step = p.step === "back" || p.step === "forward" || p.step === "reload" ? p.step : undefined;
+					await page.navigate({ url: typeof p.url === "string" ? p.url : undefined, step });
+					return { ok: true };
+				}
 				case "lab.check":
 					return { rows: await this.sites.check(need("name")) };
 				case "lab.usage":

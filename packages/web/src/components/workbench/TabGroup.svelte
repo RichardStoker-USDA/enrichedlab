@@ -69,8 +69,9 @@
 		document.getElementById(`tab-${tabs[next]!.id}`)?.focus();
 	}
 
-	/** The place a tab's work came from, for tabs of data that live in a lab. */
-	function placeFor(ref?: string) {
+	/** The place a tab's work came from, for tabs of data that live in a lab and a lab's sandbox browser. */
+	function placeFor(ref?: string, kind?: string) {
+		if (kind === "screen" && ref) return placeOf(lab.places, ref);
 		const view = ref ? lab.canvases.find((c) => c.id === ref) : undefined;
 		return view?.source && view.source.place !== "local" ? placeOf(lab.places, view.source.place) : undefined;
 	}
@@ -79,15 +80,16 @@
 <section class="group">
 	<div class="tabs" bind:this={strip} role="tablist" aria-label="Open panes" tabindex="-1" ondragover={(e) => e.dataTransfer?.types.includes(TYPE) && e.preventDefault()} ondrop={(e) => drop(e, "center")}>
 		{#each group.tabs as tab, index (tab.id)}
-			{@const place = placeFor(tab.ref)}
+			{@const place = placeFor(tab.ref, tab.kind)}
 			{@const active = tab.id === group.active}
+			{@const kind = tab.kind === "screen" ? "browser" : tab.kind}
 			<div class="tab" class:active role="presentation" draggable="true" ondragstart={(e) => e.dataTransfer?.setData(TYPE, tab.id)} onauxclick={(e) => e.button === 1 && lab.closePane(tab.id)}>
 				<button id={`tab-${tab.id}`} class="label" role="tab" aria-selected={active} aria-controls={`panel-${tab.id}`} tabindex={active ? 0 : -1}
 					title="Arrows switch, Delete closes, Alt+Shift+arrow moves the pane"
 					onclick={() => lab.focusPane(tab.id)} onkeydown={(e) => keys(e, index)}>
-					{#if place}<span class="place-dot" style:--dot={`var(${place.color})`} title={`From the ${place.title} sandbox`}></span>{/if}
+					{#if place}<span class="place-dot" style:--dot={`var(${place.color})`} title={tab.kind === "screen" ? `Runs in the ${place.title} sandbox` : `From the ${place.title} sandbox`}></span>{/if}
 					<!-- The kind says what a pane is when its title doesn't (a table named "Field plots"); never twice. -->
-					{#if tab.kind !== "view" && tab.title.toLowerCase() !== tab.kind}<span class="kind">{tab.kind}</span>{/if}
+					{#if kind !== "view" && !tab.title.toLowerCase().split(/\s+/).includes(kind)}<span class="kind">{kind}</span>{/if}
 					<span class="name">{tab.title}</span>
 				</button>
 				<button class="close" tabindex="-1" onclick={() => lab.closePane(tab.id)} aria-label={`Close ${tab.title}`}>

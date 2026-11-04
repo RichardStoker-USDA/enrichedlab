@@ -19,7 +19,13 @@
     },
     "policy": { "type": "object", "properties": { "keep_data_inside": { "type": "boolean" } } },
     "files": { "type": "object", "properties": { "enabled": { "type": "boolean" } } },
-    "sandboxes": { "type": "object", "properties": { "enabled": { "type": "boolean" }, "idle_minutes": { "type": "integer" } } },
+    "sandboxes": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }, "idle_minutes": { "type": "integer" },
+        "network": { "enum": ["none", "allowlist", "open"] }, "hosts": { "type": "array", "items": { "type": "string" } }
+      }
+    },
     "quotas": { "type": "array" }
   }
 }

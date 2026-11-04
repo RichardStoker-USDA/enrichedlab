@@ -66,6 +66,8 @@ interface Client {
 	terms: Set<string>;
 	/** What it can do for the engine, from hello (the desktop window: "browser"). */
 	capabilities: Set<string>;
+	/** Sessions whose sandbox browser page this client watches: its frames stop when the client goes. */
+	screens: Set<string>;
 }
 
 const SESSION_SCOPED = new Set<Notification>(["session.event", "session.delta", "session.status", "permission.request", "permission.settled", "surface.wanted"]);
@@ -290,13 +292,14 @@ export class LabServer {
 	}
 
 	private attach(ws: WebSocket, req: IncomingMessage): void {
-		const client: Client = { ws, name: String(req.headers["user-agent"] ?? "surface").slice(0, 60), sessions: new Set(), terms: new Set(), capabilities: new Set() };
+		const client: Client = { ws, name: String(req.headers["user-agent"] ?? "surface").slice(0, 60), sessions: new Set(), terms: new Set(), capabilities: new Set(), screens: new Set() };
 		this.clients.add(client);
 		this.options.onIdleChange?.(this.clients.size);
 		ws.on("message", (data) => void this.message(client, data.toString()));
 		ws.on("close", () => {
 			this.clients.delete(client);
 			for (const call of this.surfaceCalls.values()) if (call.client === client) call.reject(new Error("The window closed."));
+			for (const id of client.screens) void this.options.engine.handle("browser.watch", { sessionId: id, on: false }).catch(() => undefined);
 			for (const id of client.sessions) this.releaseIfUnwatched(id);
 			for (const termId of client.terms) void this.options.engine.handle("term.close", { termId }).catch(() => undefined);
 			this.options.onIdleChange?.(this.clients.size);
@@ -344,6 +347,17 @@ export class LabServer {
 					this.options.engine.watched(String(params.sessionId));
 				}
 				if (/^term\.(input|resize|close)$/.test(request.method) && !client.terms.has(String(params.termId))) throw new RpcError(-32602, "That terminal belongs to another window.");
+				// Each window watches a session's sandbox browser at most once, and stops when it closes.
+				if (request.method === "browser.watch") {
+					const id = String(params.sessionId);
+					const on = params.on === true;
+					if (on && client.screens.has(id)) params.on = "again";
+					else if (!on && !client.screens.delete(id)) {
+						this.send(client, { jsonrpc: "2.0", id: request.id, result: {} });
+						return;
+					}
+					if (on) client.screens.add(id);
+				}
 				if (request.method === "hello" && Array.isArray(params.capabilities)) {
 					client.capabilities = new Set(params.capabilities.filter((c): c is string => typeof c === "string").slice(0, 16));
 				}
@@ -353,6 +367,7 @@ export class LabServer {
 				if (request.method === "term.close") client.terms.delete(String(params.termId));
 				if (request.method === "session.close") {
 					client.sessions.delete(String(params.sessionId));
+					if (client.screens.delete(String(params.sessionId))) void this.options.engine.handle("browser.watch", { sessionId: String(params.sessionId), on: false }).catch(() => undefined);
 					this.releaseIfUnwatched(String(params.sessionId));
 				}
 			}

@@ -61,8 +61,9 @@ because it is data, not decoration.
 
 - Pane kinds: View (agent-made HTML, R and Python widgets, figures), Table (sort, filter, column statistics, copy,
   millions of rows virtualized), Plot (WebGPU), App (a running Shiny, Streamlit or dev server), Browser (a real
-  browser in the desktop app), Terminal (the person's shell on this computer; a command console in a lab sandbox),
-  Files (the place's folder, opening data as tables).
+  browser in the desktop app, or a lab sandbox's browser shown live and marked with that lab's color), Terminal (the
+  person's shell on this computer; a command console in a lab sandbox), Files (the place's folder, opening data as
+  tables).
 - Drag a tab to an edge to split; drag a gutter to resize; the layout is remembered per session.
 - When a view arrives, it opens as a tab in the most recent pane group; the workbench opens if it was closed.
 - On a phone the workbench is a full-height sheet with its tabs across the top.

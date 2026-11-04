@@ -18,6 +18,9 @@ import { labFetch, sseData } from "../models/http.ts";
 import { DeviceKey, dpopError } from "./dpop.ts";
 import { type OpenPort, openPort } from "./port_proxy.ts";
 import { type AttachSpec, type Attached, attachSocket } from "./attach.ts";
+import { Cdp } from "./cdp.ts";
+import type { SandboxBrowserLane } from "./sandbox_browser.ts";
+import type { SandboxNetwork } from "@enrichedlab/protocol";
 import type { ModelProfile } from "../models/types.ts";
 import { num, str, type Tool, ToolError } from "../tools/types.ts";
 import { errorText, redact, SECRET_NAME, sleep } from "../util.ts";
@@ -46,7 +49,7 @@ interface GateMe {
 	handle?: string;
 	owner?: boolean;
 	files?: { enabled?: boolean };
-	sandboxes?: { enabled?: boolean; idle_minutes?: number };
+	sandboxes?: { enabled?: boolean; idle_minutes?: number; network?: SandboxNetwork; hosts?: string[] };
 	quotas?: unknown[];
 }
 
@@ -64,6 +67,8 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	models: ModelProfile[] = [];
 	tools: Tool[] = [];
 	sandboxOn = false;
+	/** What the person's sandbox can reach on the web, as /v1/me says. */
+	private network?: { network?: SandboxNetwork; hosts?: string[] };
 	warning?: string;
 	private mcp?: McpConnection;
 	private container?: string;
@@ -410,6 +415,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		this.who = me.handle;
 		this.owner = me.owner === true;
 		this.sandboxOn = me.sandboxes?.enabled === true;
+		this.network = { network: me.sandboxes?.network, hosts: me.sandboxes?.hosts };
 		const list = await this.cached<{ data?: GateModel[] }>("/v1/models", AbortSignal.timeout(10_000));
 		this.models = (list.data ?? []).filter((m) => !m.gate?.endpoints?.length || m.gate.endpoints.includes("chat")).map((m) => this.profile(m));
 		const tools: Tool[] = [];
@@ -1145,6 +1151,41 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		const url = `${this.route.base}/v1/containers/${encodeURIComponent(id)}/attach`;
 		await this.freshNonce();
 		return attachSocket(url.replace(/^http/, "ws"), await this.authHeaders("GET", url), spec, this.route.ca);
+	}
+
+	/** The browser in the person's sandbox, when the lab runs one this client speaks to (descriptor `browser`). */
+	browser(): SandboxBrowserLane | undefined {
+		const info = this.descriptor?.browser;
+		if (!this.sandboxOn || info?.protocol !== "cdp" || !this.offers("ports")) return undefined;
+		return { version: info.version, ...this.network };
+	}
+
+	/**
+	 * A DevTools connection to that browser through the lab's port path. The lab starts the browser on the first
+	 * connection, so its address is asked for again for a few seconds while the port isn't answering yet.
+	 */
+	async cdp(signal?: AbortSignal): Promise<Cdp> {
+		const info = this.descriptor?.browser;
+		if (!this.browser() || !info) throw Object.assign(new Error(`${this.title}'s sandbox has no browser.`), { unsupported: true });
+		const id = await this.sandbox(signal);
+		const path = `/v1/containers/${encodeURIComponent(id)}/ports/${info.port}`;
+		let found: { webSocketDebuggerUrl?: string } | undefined;
+		let last: unknown;
+		for (const until = Date.now() + 20_000; !found && Date.now() < until; ) {
+			try {
+				found = await this.json<{ webSocketDebuggerUrl?: string }>("GET", `${path}/json/version`, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000) });
+			} catch (error) {
+				last = error;
+				const status = (error as { status?: number }).status;
+				if (signal?.aborted || (status && status < 500)) throw error;
+				await sleep(1_000, signal);
+			}
+		}
+		if (!found?.webSocketDebuggerUrl) throw new Error(`${this.title}'s sandbox browser didn't start${last ? ` (${redact(errorText(last))})` : ""}.`);
+		// Chrome names its own loopback address; the same path goes through the lab's port instead.
+		const url = `${this.route.base}${path}${new URL(found.webSocketDebuggerUrl).pathname}`;
+		await this.freshNonce();
+		return Cdp.open(url.replace(/^http/, "ws"), await this.authHeaders("GET", url), this.route.ca);
 	}
 
 	/** Open a port of the sandbox on this computer (port_proxy.ts); one loopback address per port, reused. */

@@ -43,7 +43,8 @@ Updates are signed and install themselves the same way: the app offers them, `el
 - **Apps on request.** Ask for "an app to compare yield by treatment" and the agent builds one that runs in a pane.
   Apps can be web pages, R or Python Shiny apps, or containers, and you can share them as signed files
   ([docs/apps.md](docs/apps.md)).
-- **The web and PDFs.** The agent can open pages in the built-in browser, where your sign-ins persist, and it can
+- **The web and PDFs.** The agent can open pages in the built-in browser, where your sign-ins persist, or in a
+  browser in your lab's sandbox, which has none of your sign-ins and which you watch live in a pane. It can also
   fill PDF forms.
 - **Where work runs.** Each session works on this computer or in a lab sandbox, and can move between them, taking
   its git repository along. A lab that keeps its data inside pins its sessions there.

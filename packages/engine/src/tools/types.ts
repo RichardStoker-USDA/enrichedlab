@@ -1,4 +1,5 @@
 import type { AgentHost } from "./agents.ts";
+import type { BrowserLanes } from "./browser.ts";
 import type { AppSummary, CanvasSummary, Part, StepView, SurfaceAnswer } from "@enrichedlab/protocol";
 import type { McpView } from "../apps/host.ts";
 import type { SessionLog } from "../session/log.ts";
@@ -33,6 +34,8 @@ export interface ToolContext {
 	sealed?: boolean;
 	/** Opening apps in this session's workbench, and showing an MCP server's view. */
 	apps?: { open(path: string): Promise<AppSummary>; publishView(view: McpView): AppSummary };
+	/** The browser tools' two browsers: the desktop app's and the one in a lab's sandbox (tools/browser.ts). */
+	browser?: BrowserLanes;
 	/** Asking the desktop window showing this session to act (its browser); absent when none is open. */
 	surface?: { call(capability: string, op: string, args: Record<string, unknown>, signal: AbortSignal): Promise<SurfaceAnswer> };
 	/** Starting and collecting subagents; absent inside a subagent. */

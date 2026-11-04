@@ -5,6 +5,8 @@
 
 import type { AttachSpec, Attached } from "./attach.ts";
 import type { OpenPort } from "./port_proxy.ts";
+import type { Cdp } from "./cdp.ts";
+import type { SandboxBrowserLane } from "./sandbox_browser.ts";
 import { randomBytes } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -25,6 +27,10 @@ export interface SandboxApi {
 	attach?(spec: AttachSpec, signal?: AbortSignal): Promise<Attached>;
 	/** Open a port of the sandbox on this computer, when the lab offers ports. */
 	openPort?(port: number, path?: string, signal?: AbortSignal): Promise<OpenPort>;
+	/** The browser in the sandbox, when the lab runs one: its version and what it can reach. */
+	browser?(): SandboxBrowserLane | undefined;
+	/** A DevTools connection to that browser. */
+	cdp?(signal?: AbortSignal): Promise<Cdp>;
 }
 
 /** Quote for the sandbox's POSIX shell. */

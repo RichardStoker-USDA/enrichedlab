@@ -76,7 +76,17 @@ export interface LabDescriptor {
 	support?: { url: string };
 	docs?: { url: string };
 	sandbox_profiles?: SandboxProfile[];
-	conformance?: { foreign_scope?: string; data_tool?: { name: string; arguments?: Record<string, unknown> } };
+	/** A browser in the person's sandbox, reached through the lab's port path (the sandbox lane of the browser tools). */
+	browser?: BrowserInfo;
+	conformance?: { foreign_scope?: string; scan_test?: boolean; data_tool?: { name: string; arguments?: Record<string, unknown> } };
+}
+
+export interface BrowserInfo {
+	/** "cdp", the Chrome DevTools Protocol; a lab may add others later, and a client skips ones it doesn't speak. */
+	protocol: string;
+	port: number;
+	version?: string;
+	notes?: string;
 }
 
 /** Why this client can't use a lab on that contract, or undefined when it can. */

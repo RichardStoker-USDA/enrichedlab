@@ -57,6 +57,7 @@ export interface RuntimeDeps {
 	/** Apps for a tool call in this session: opening one in the workbench, showing an MCP server's view. */
 	apps?(sessionId: string): ToolContext["apps"];
 	surface?(sessionId: string): ToolContext["surface"];
+	browser?(sessionId: string): ToolContext["browser"];
 	cancelChildren(parent: string): void;
 	canvas: CanvasPublisher;
 	notify<N extends keyof Notifications>(name: N, params: Notifications[N]): void;
@@ -747,6 +748,7 @@ export class SessionRuntime {
 				sealed: this.deps.sealed?.(this.site),
 				apps: this.deps.apps?.(this.id),
 				surface: this.deps.surface?.(this.id),
+				browser: this.deps.browser?.(this.id),
 				log: this.log,
 				signal,
 				vision: model.vision,

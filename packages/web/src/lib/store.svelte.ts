@@ -1,7 +1,7 @@
 // The web surface's state. Everything comes from the engine; this file mirrors it and sends requests. The workbench
 // layout is the one piece kept here: it belongs to this person's screen, per session, in local storage.
 
-import type { AppSummary, CanvasSummary, DeviceRequest, LabApp, ModelInfo, Part, Partial_, PermissionDecision, PermissionRequest, SessionEvent, SessionStatus, SessionSummary, SiteSummary, UiPrefs } from "@enrichedlab/protocol";
+import type { AppSummary, BrowserFrame, BrowserInput, BrowserPageState, CanvasSummary, DeviceRequest, LabApp, ModelInfo, Part, Partial_, PermissionDecision, PermissionRequest, SessionEvent, SessionStatus, SessionSummary, SiteSummary, UiPrefs } from "@enrichedlab/protocol";
 import { close as closeTab, emptyLayout, move, type Node, open as openTab, resize as resizeSplit, revive, sync, type Edge, type PaneKind, type Tab, uid, activate, groups } from "./layout.ts";
 import { placeOf, places, type Place } from "./places.ts";
 import { rpc } from "./rpc.ts";
@@ -25,7 +25,7 @@ const store = {
 	},
 };
 
-const TITLES: Record<PaneKind, string> = { view: "View", table: "Table", plot: "Plot", browser: "Browser", terminal: "Terminal", files: "Files", app: "App" };
+const TITLES: Record<PaneKind, string> = { view: "View", table: "Table", plot: "Plot", browser: "Browser", screen: "Sandbox browser", terminal: "Terminal", files: "Files", app: "App" };
 
 class Lab {
 	connected = $state(false);
@@ -36,6 +36,9 @@ class Lab {
 	apps = $state<AppSummary[]>([]);
 	/** Apps the person's labs offer, every listed version (newest first per app). */
 	labApps = $state<LabApp[]>([]);
+	/** The open session's page in a lab's sandbox browser, as the engine last described it. */
+	screen = $state<BrowserPageState | undefined>();
+	private frames = new Set<(frame: BrowserFrame) => void>();
 	/** Other devices asking to use the person's sign-in at a lab, oldest first; the window asks about each. */
 	deviceRequests = $state<DeviceRequest[]>([]);
 	/** Lab apps being installed, by "site/name". */
@@ -161,6 +164,7 @@ class Lab {
 		this.status = undefined;
 		this.pending = [];
 		this.canvases = [];
+		this.screen = undefined;
 		this.layout = emptyLayout();
 	}
 
@@ -176,6 +180,7 @@ class Lab {
 			const snap = await rpc.call("session.open", { sessionId: id });
 			const held = this.opening;
 			this.opening = undefined;
+			if (this.current !== id) this.screen = undefined;
 			this.current = id;
 			this.openedAt = Date.now();
 			this.summary = snap.summary;
@@ -234,7 +239,8 @@ class Lab {
 	/** Open a pane (or bring it forward) and show the workbench. */
 	openPane(kind: PaneKind, ref?: string, title?: string): string {
 		const view = ref ? this.canvases.find((c) => c.id === ref) : undefined;
-		const openFiles = kind === "files" && !ref ? groups(this.layout).flatMap((g) => g.tabs).find((t) => t.kind === "files") : undefined;
+		// Files, and each lab's sandbox browser, are one pane each: opening again brings it forward.
+		const openFiles = (kind === "files" && !ref) || kind === "screen" ? groups(this.layout).flatMap((g) => g.tabs).find((t) => t.kind === kind && (kind === "files" || t.ref === ref)) : undefined;
 		if (openFiles) {
 			this.focusPane(openFiles.id);
 			this.workbench = true;
@@ -266,6 +272,36 @@ class Lab {
 			await rpc.call("surface.reply", { callId: call.callId, result });
 		} catch (error) {
 			await rpc.call("surface.reply", { callId: call.callId, error: (error as Error).message }).catch(() => undefined);
+		}
+	}
+
+	/** Start or stop the screencast of the session's sandbox browser page; answers where the page is. */
+	async watchScreen(on: boolean): Promise<void> {
+		if (!this.current) return;
+		const answer = await rpc.call("browser.watch", { sessionId: this.current, on }).catch(() => ({ page: undefined }));
+		if (on && answer.page) this.screen = answer.page;
+	}
+
+	onFrame(listener: (frame: BrowserFrame) => void): () => void {
+		this.frames.add(listener);
+		return () => this.frames.delete(listener);
+	}
+
+	/** The pane's size: the page lays out to it, so it fills the pane at full sharpness. */
+	screenResize(width: number, height: number): void {
+		if (this.current) void rpc.call("browser.resize", { sessionId: this.current, width, height }).catch(() => undefined);
+	}
+
+	screenInput(event: BrowserInput): void {
+		if (this.current) void rpc.call("browser.input", { sessionId: this.current, event }).catch(() => undefined);
+	}
+
+	async screenNavigate(site: string, to: { url?: string; step?: "back" | "forward" | "reload" }): Promise<void> {
+		if (!this.current) return;
+		try {
+			await rpc.call("browser.navigate", { sessionId: this.current, site, ...to });
+		} catch (error) {
+			this.say((error as Error).message);
 		}
 	}
 
@@ -513,6 +549,17 @@ class Lab {
 			}
 		});
 		rpc.on("ui.updated", (ui) => (this.ui = ui));
+		// The agent's page in a lab's sandbox browser: its pane opens on the first sign of it.
+		rpc.on("browser.page", (page) => {
+			if (page.sessionId !== this.current) return;
+			const fresh = this.screen?.site !== page.site;
+			this.screen = page;
+			// The first sign of the agent browsing there brings the pane forward, opening the workbench if needed.
+			if (fresh) this.openPane("screen", page.site, `${page.lab} browser`);
+		});
+		rpc.on("browser.frame", (frame) => {
+			if (frame.sessionId === this.current) for (const listener of this.frames) listener(frame);
+		});
 		rpc.on("app.opened", ({ sessionId, app }) => {
 			if (sessionId === this.current) this.openApp(app);
 		});

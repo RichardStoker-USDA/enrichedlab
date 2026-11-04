@@ -112,12 +112,23 @@ interpreters and compound lines. A site tool runs when the site marks it read-on
 commands run, since the sandbox is isolated. The person answers from whichever surface they are looking at; the
 first answer wins. `el run` refuses what would ask, unless started with `--allow`.
 
-**Windows that act.** A surface can say in `hello` what it can do for the engine. The desktop window says
-"browser": the browser tools (`browser_open`, `browser_read`, `browser_click`, `browser_type`, `browser_screenshot`)
-become `surface.call` notifications to a window showing the session, which acts on its browser pane with real input
-events and answers with `surface.reply`. The page is read as text with numbered controls. When the agent shows
-something or needs the browser and no window shows the session, the engine sends `surface.wanted` and the terminal
-opens the window (`/window off` keeps a session in the terminal).
+**Windows that act.** A surface can say in `hello` what it can do for the engine. The desktop window says "browser":
+the browser tools (`browser_open`, `browser_read`, `browser_click`, `browser_type`, `browser_screenshot`) become
+`surface.call` notifications to a window showing the session, which acts on its browser pane with real input events
+and answers with `surface.reply`. The page is read as text with numbered controls
+(`apps/desktop/src/page_script.mjs`). When the agent shows something or needs the browser and no window shows the
+session, the engine sends `surface.wanted` and the terminal opens the window (`/window off` keeps a session in the
+terminal).
+
+**Two browsers.** The same tools take `where`: `device` is the desktop browser above, with the person's own sign-ins;
+`sandbox` is a headless Chrome in a lab's sandbox that the lab lists in its descriptor
+(`browser: {protocol: "cdp", port}`). The engine drives that one itself over the DevTools protocol through the lab's
+port path (`sites/cdp.ts`, `sites/sandbox_browser.ts`), with the same page script, so both read pages the same way.
+Each session gets its own browser context, so sessions share no cookies; downloads stay in the sandbox and leave only
+through the lab's scanned file API. A window watches the page with `browser.watch` and gets `browser.frame` pictures
+and `browser.page` state; the person's clicks and keys go back with `browser.input`, and the page lays out to the
+pane's size (`browser.resize`). A session keeps the browser it used last; an isolated lab's sessions use only that
+lab's sandbox browser.
 
 **Updates.** `update.check` and `update.apply` read the signed release manifest and replace the install in place
 ([security.md](security.md)). The long-lived engine checks daily and sends `update.available`.

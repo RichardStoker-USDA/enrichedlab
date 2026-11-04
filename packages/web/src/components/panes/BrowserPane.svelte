@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onDestroy, untrack } from "svelte";
+	import { normalize } from "../../lib/address.ts";
+	import { computerName } from "../../lib/places.ts";
 
 	let { id, url, active }: { id: string; url?: string; active: boolean } = $props();
 
@@ -11,14 +13,6 @@
 	let title = $state("");
 	let page = $state<BrowserState | undefined>();
 	let slot: HTMLDivElement | undefined = $state();
-
-	function normalize(text: string): string {
-		const t = text.trim();
-		if (!t) return "";
-		if (/^https?:\/\//i.test(t)) return t;
-		if (/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/.test(t)) return `http://${t}`;
-		return /\s/.test(t) || !/\./.test(t) ? `https://duckduckgo.com/?q=${encodeURIComponent(t)}` : `https://${t}`;
-	}
 
 	function go(e?: Event) {
 		e?.preventDefault();
@@ -59,6 +53,7 @@
 
 <div class="browser-pane">
 	<form class="bar" onsubmit={go}>
+		<span class="lane" title="This browser runs on this computer, with your own sign-ins"><span class="place-dot local"></span>{computerName()}</span>
 		{#if desktop}
 			<button type="button" class="icon-btn" onclick={() => desktop.go(id, "back")} disabled={!page?.canGoBack} aria-label="Back">
 				<svg viewBox="0 0 16 16"><path d="M10 3.5 5.5 8l4.5 4.5" /></svg>
@@ -99,6 +94,15 @@
 		gap: 2px;
 		padding: 6px 8px;
 		border-bottom: 1px solid var(--rule);
+	}
+	.lane {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 0 8px 0 4px;
+		font-size: 12px;
+		color: var(--text-muted);
+		white-space: nowrap;
 	}
 	.address {
 		flex: 1;

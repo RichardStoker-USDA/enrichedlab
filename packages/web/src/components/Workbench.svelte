@@ -1,9 +1,13 @@
 <script lang="ts">
+	import { computerName } from "../lib/places.ts";
 	import { lab } from "../lib/store.svelte.ts";
 	import LayoutNode from "./workbench/LayoutNode.svelte";
 
 	const empty = $derived(!lab.layout || (lab.layout.type === "group" && lab.layout.tabs.length === 0));
 	let appsOpen = $state(false);
+	let browserOpen = $state(false);
+	// Labs that run a browser in the person's sandbox: the Browser button then asks which browser.
+	const browserLabs = $derived(lab.places.filter((p) => p.site?.signedIn && p.site.browser));
 	function toggleApps() {
 		appsOpen = !appsOpen;
 		if (appsOpen) void lab.refreshApps();
@@ -33,7 +37,28 @@
 		<div class="actions">
 			<button class="btn quiet" onclick={() => lab.openPane("files")} title="The session's folder">Files</button>
 			<button class="btn quiet" onclick={() => lab.openPane("terminal")} title={terminalNote}>Terminal</button>
-			<button class="btn quiet" onclick={() => lab.openPane("browser")} title="A browser the agent's apps open in">Browser</button>
+			{#if browserLabs.length}
+				<div class="apps">
+					<button class="btn quiet" onclick={() => (browserOpen = !browserOpen)} aria-expanded={browserOpen} aria-haspopup="menu">Browser</button>
+					{#if browserOpen}
+						<button class="scrim" aria-label="Close" onclick={() => (browserOpen = false)}></button>
+						<div class="menu apps-menu" role="menu">
+							<button class="menu-item" role="menuitem" onclick={() => ((browserOpen = false), lab.openPane("browser"))}>
+								<span class="app-title"><span class="place-dot local"></span>{computerName()}</span>
+								<span class="app-meta">your sign-ins</span>
+							</button>
+							{#each browserLabs as place (place.id)}
+								<button class="menu-item" role="menuitem" onclick={() => ((browserOpen = false), lab.openPane("screen", place.id, `${place.title} browser`))}>
+									<span class="app-title"><span class="place-dot" style:--dot={`var(${place.color})`}></span>{place.title} sandbox</span>
+									<span class="app-meta">no sign-ins</span>
+								</button>
+							{/each}
+						</div>
+					{/if}
+				</div>
+			{:else}
+				<button class="btn quiet" onclick={() => lab.openPane("browser")} title="A browser the agent's apps open in">Browser</button>
+			{/if}
 			<div class="apps">
 				<button class="btn quiet" onclick={toggleApps} aria-expanded={appsOpen} aria-haspopup="menu">Apps</button>
 				{#if appsOpen}
@@ -96,6 +121,11 @@
 		display: flex;
 		justify-content: space-between;
 		gap: 10px;
+	}
+	.app-title {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
 	}
 	.app-meta {
 		font-size: 12px;
