@@ -236,6 +236,16 @@ export class Engine {
 			run: (command, timeout, signal) => live().run(command, timeout, signal),
 			put: (path, signal) => live().put(path, signal),
 			get: (path, target, signal) => live().get(path, target, signal),
+			attach: (spec, signal) => {
+				const api = live();
+				if (!api.attach) throw Object.assign(new Error(`${sites.title(site)} doesn't stream sandbox processes.`), { unsupported: true });
+				return api.attach(spec, signal);
+			},
+			openPort: (port, path, signal) => {
+				const api = live();
+				if (!api.openPort) throw Object.assign(new Error(`${sites.title(site)} doesn't open sandbox ports.`), { unsupported: true });
+				return api.openPort(port, path, signal);
+			},
 		};
 	}
 

@@ -3,6 +3,8 @@
 // Commands go through the site's exec call (bash, no network); files move as base64 in small pieces or through the
 // site's file upload and download for large ones.
 
+import type { AttachSpec, Attached } from "./attach.ts";
+import type { OpenPort } from "./port_proxy.ts";
 import { randomBytes } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -19,6 +21,10 @@ export interface SandboxApi {
 	put(localPath: string, signal?: AbortSignal): Promise<{ path: string; bytes: number }>;
 	/** Stream a sandbox file to a local path. */
 	get(path: string, target: string, signal?: AbortSignal): Promise<{ bytes: number; sha: string }>;
+	/** Start a process with its stdin and output streamed, when the lab offers attach. */
+	attach?(spec: AttachSpec, signal?: AbortSignal): Promise<Attached>;
+	/** Open a port of the sandbox on this computer, when the lab offers ports. */
+	openPort?(port: number, path?: string, signal?: AbortSignal): Promise<OpenPort>;
 }
 
 /** Quote for the sandbox's POSIX shell. */

@@ -16,10 +16,11 @@ const lab = Bun.serve({
 		if (url.pathname === "/v1/models") return Response.json({ data: [] });
 		if (url.pathname === "/v1/containers/c1") return Response.json({ id: "c1", status: "running" });
 		if (url.pathname === `${PORT_PATH}/ws`) return srv.upgrade(request) ? undefined : new Response("", { status: 400 });
+		if (url.pathname === `${PORT_PATH}/go2`) return new Response(null, { status: 302, headers: { location: `${PORT_PATH}/landed2` } });
 		if (url.pathname === `${PORT_PATH}/go`) return new Response(null, { status: 302, headers: { location: `${url.origin}${PORT_PATH}/landed` } });
 		if (url.pathname.startsWith(PORT_PATH)) {
 			return Response.json(
-				{ path: url.pathname.slice(PORT_PATH.length), query: url.search, method: request.method, body: request.body ? await request.text() : "", cookie: request.headers.get("cookie") },
+				{ path: url.pathname.slice(PORT_PATH.length), query: url.search, method: request.method, body: request.body ? await request.text() : "", cookie: request.headers.get("cookie"), origin: request.headers.get("origin") },
 				{ headers: { "set-cookie": "app=1; Path=/" } },
 			);
 		}
@@ -46,12 +47,15 @@ describe("sandbox ports", () => {
 		expect(first.headers.get("location")).toBe("/app?x=1");
 		const cookie = first.headers.get("set-cookie")!.split(";")[0]!;
 		const answer = await fetch(`${opened.origin}/app?x=1`, { method: "POST", body: "a=1", headers: { cookie: `${cookie}; app=1`, origin: opened.origin } });
-		expect(await answer.json()).toEqual({ path: "/app", query: "?x=1", method: "POST", body: "a=1", cookie: "app=1" });
+		// The browser's Origin stays here: the lab refuses writes from a foreign origin.
+		expect(await answer.json()).toEqual({ path: "/app", query: "?x=1", method: "POST", body: "a=1", cookie: "app=1", origin: null });
 		// The same port opens at the same address.
 		expect((await site.openPort(8080)).origin).toBe(opened.origin);
 		// Redirects inside the app stay here.
 		const moved = await fetch(`${opened.origin}/go`, { redirect: "manual", headers: { cookie } });
 		expect(moved.headers.get("location")).toBe("/landed");
+		const movedPath = await fetch(`${opened.origin}/go2`, { redirect: "manual", headers: { cookie } });
+		expect(movedPath.headers.get("location")).toBe("/landed2");
 	});
 
 	test("requests without the cookie, from another origin, or for another host are refused", async () => {

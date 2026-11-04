@@ -22,11 +22,13 @@ export interface OpenPort {
 	/** Open this once (in the browser pane); it sets the cookie and goes to `path`. */
 	url: string;
 	origin: string;
+	/** The app's answer to GET / through the lab, without the browser: 0 when the lab didn't answer. */
+	probe(): Promise<number>;
 	close(): void;
 }
 
 // Headers that describe one hop, never forwarded (RFC 9110 section 7.6.1), plus the proxy's own.
-const HOP = new Set(["connection", "keep-alive", "proxy-connection", "transfer-encoding", "te", "trailer", "upgrade", "host", "authorization", "dpop", "content-length"]);
+const HOP = new Set(["connection", "keep-alive", "proxy-connection", "transfer-encoding", "te", "trailer", "upgrade", "host", "authorization", "dpop", "content-length", "origin"]);
 
 interface Socket {
 	upstream?: WebSocket;
@@ -98,7 +100,9 @@ export function openPort(target: PortTarget, path = "/"): OpenPort {
 			const location = response.headers.get("location");
 			if (location) {
 				const base = target.url("");
+				const prefix = new URL(base).pathname;
 				if (location.startsWith(base)) headers.set("location", location.slice(base.length) || "/");
+				else if (location === prefix || location.startsWith(`${prefix}/`)) headers.set("location", location.slice(prefix.length) || "/");
 				else if (/cloudflareaccess\.com|\/cdn-cgi\/access\//.test(location)) return new Response("Your sign-in to the lab ended. Run el login, then reload.", { status: 401 });
 			}
 			return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
@@ -138,6 +142,12 @@ export function openPort(target: PortTarget, path = "/"): OpenPort {
 	return {
 		url: `${origin}${start}${start.includes("?") ? "&" : "?"}el_port=${token}`,
 		origin,
+		probe: async () => {
+			const url = target.url("/");
+			const response = await labFetch(url, { headers: await target.headers("GET", url), redirect: "manual", ca: target.ca, signal: AbortSignal.timeout(10_000) } as RequestInit & { ca?: string }).catch(() => undefined);
+			await response?.arrayBuffer().catch(() => undefined);
+			return response?.status ?? 0;
+		},
 		close: () => server.stop(true),
 	};
 }

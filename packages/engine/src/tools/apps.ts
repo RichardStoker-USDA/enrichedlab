@@ -52,12 +52,11 @@ export const appCreateTool: Tool = {
 export const appOpenTool: Tool = {
 	name: "app_open",
 	kind: "local",
-	description: "Show an app (a folder with an app.json, such as apps/<name>) in the person's workbench. Open views reload when its files change, so open it once and keep editing.",
+	description: "Show an app (a folder with an app.json, such as apps/<name>) in the person's workbench. Open views reload when its files change, so open it once and keep editing. In a session that works in a lab, give the id of an installed app instead: its backend runs in the lab's sandbox.",
 	parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
 	view: (args) => ({ verb: "Open app", target: String(args.path ?? "") }),
 	async run(args, ctx) {
 		if (!ctx.apps) throw new ToolError("Apps open in a session with the workbench.");
-		if (ctx.place !== "local") throw new ToolError("Apps run from this computer; move the session back first.");
 		const app = await ctx.apps.open(str(args, "path"));
 		const asks = app.granted ? "" : " It asks the person for permissions first.";
 		return { ok: true, content: `Opened ${app.title} (${app.id}) in the workbench.${asks}`, view: { result: app.title } };

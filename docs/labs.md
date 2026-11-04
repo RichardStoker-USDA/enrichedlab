@@ -28,7 +28,7 @@ look the same to EnrichedLab.
 | `GET /v1/usage` | tokens, GPU and sandbox seconds by lab and group, for a 7- or 30-day window | `el usage <lab>` |
 | `POST /v1/devices` | registers the client's device key (ES256) for sender-bound tokens; `GET` lists them; `DELETE /v1/devices/{id}` revokes one | built: proofs on every request; `el lab check` tries a proof for another token, another address, and one used twice |
 | `/v1/containers/{id}/ports/{port}/…` | HTTP and WebSocket into a port of the sandbox, header auth only, every app page served with `Content-Security-Policy: sandbox` | built: `<lab>_sandbox_open_port` opens the app in the browser pane through a loopback proxy |
-| `/v1/containers/{id}/attach` | stdio over a WebSocket (JSON frames), for app backends that run in the sandbox | to add |
+| `/v1/containers/{id}/attach` | a process with stdin and output streamed over a WebSocket of JSON frames: the command first, then `{stdin}`, `{eof}`, `{signal}` in and `{stdout}`, `{stderr}`, `{exit_code}` out | built: app backends in a lab session run this way (apps.md); `el lab check` runs one |
 | `/v1/apps`, `/v1/signers` | the apps a group may install, and whose signatures to trust | to add |
 
 Tools and results carry two markers. `_meta["org.enrichedlab/tier"]: "unvalidated"` marks a tool no person has
@@ -97,7 +97,7 @@ from copying it. The lab makes a copied token worth little:
   its private half in the OS credential store (an owner-only file where there is none), and registers the public half
   (`POST /v1/devices`, signed by that key). Every request, MCP included, then carries a DPoP proof (RFC 9449): `htm`,
   `htu` (the lab's public address even over the LAN), `iat`, a single-use `jti`, and `ath`, the hash of the exact
-  bearer in that request. `policy.device_proof` says whether proofs are `optional` or `required`. A token copied into
+  bearer in that request. `policy.device_proof` is `off` (a lab staging the change: proofs it gets are still checked, none are asked for), `optional` or `required`. A token copied into
   another tool fails. Access doesn't issue DPoP-bound tokens, so the lab's endpoint checks the proof. On
   `device_unregistered` the client registers a new key; on `device_revoked` it stops until the person signs in again,
   so revoking a lost laptop sticks. Sign-out revokes the key (`DELETE /v1/devices/{id}`). MCP is standardizing the same

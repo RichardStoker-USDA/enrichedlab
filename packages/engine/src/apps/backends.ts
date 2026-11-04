@@ -5,13 +5,16 @@
 // Containment: bun and command backends run under the OS sandbox (writes only to the app's data folder, credential
 // folders hidden, no network unless the app was allowed origins). A serve backend may also listen on loopback. A
 // container is its own boundary: no network unless allowed, the app folder read-only, the data folder writable.
+//
+// In a session that works in a lab, the backend runs in that lab's sandbox instead (startInSandbox), so the lab's data
+// stays inside the lab: the app's folder is copied in once per version and the process is attached (sites/attach.ts).
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
-import { join } from "node:path";
-import { Client } from "@modelcontextprotocol/client";
+import { basename, dirname, join } from "node:path";
+import { Client, type Transport } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import type { AppToolResult } from "@enrichedlab/protocol";
 import { contained, type NetworkAccess } from "../tools/workspace.ts";
@@ -19,6 +22,8 @@ import { VERSION } from "../util.ts";
 import type { AppManifest } from "./manifest.ts";
 import { hasEnvironment, inEnvironment } from "./environments.ts";
 import { RUNNER_SOURCE } from "./runner.ts";
+import { AttachTransport } from "../sites/attach.ts";
+import { type SandboxApi, shq } from "../sites/sandbox_workspace.ts";
 
 export interface BackendTool {
 	name: string;
@@ -58,6 +63,10 @@ export interface BackendContext {
 	network: boolean;
 	/** Recent stderr lines, for error messages. */
 	log: (line: string) => void;
+	/** The lab sandbox of the session's place, when the session works in a lab. */
+	sandbox?: SandboxApi;
+	/** The lab keeps its data inside: the backend must run in its sandbox, never on this computer. */
+	sandboxOnly?: boolean;
 }
 
 /** The container runtime the person has, if any: Docker, Podman or nerdctl on the PATH. */
@@ -92,6 +101,10 @@ async function connectStdio(command: string, args: string[], env: Record<string,
 	stderr?.on("data", (chunk: Buffer) => {
 		for (const line of chunk.toString("utf8").split("\n")) if (line.trim()) ctx.log(line);
 	});
+	return connectTransport(transport);
+}
+
+async function connectTransport(transport: Transport): Promise<McpBackend> {
 	const client = new Client({ name: "enrichedlab-app-host", version: VERSION }, { capabilities: {} });
 	await client.connect(transport);
 	const listed = await client.listTools();
@@ -156,9 +169,92 @@ function stop(proc: ChildProcess): Promise<void> {
 }
 
 /** Start the backend `manifest` declares. */
+/** Run the backend in the lab sandbox: copy the app in (once per version), then attach to its process there. */
+async function startInSandbox(manifest: AppManifest, ctx: BackendContext, lab: SandboxApi): Promise<Backend> {
+	const backend = manifest.backend!;
+	if (!lab.attach) throw Object.assign(new Error(`${lab.title} doesn't stream sandbox processes.`), { unsupported: true });
+	if (backend.runtime === "container") throw new Error(`This app's backend is a container image, which runs on this computer. In a ${lab.title} session, give the app a command backend.`);
+	const runner = backend.runtime === "bun" ? runnerPath(ctx.runDir) : undefined;
+	mkdirSync(ctx.runDir, { recursive: true, mode: 0o700 });
+	const packed = join(ctx.runDir, `app_${manifest.name.replace(/[^\w.-]/g, "_")}_${process.pid}.tgz`);
+	const tar = spawnSync(
+		"tar",
+		["-czf", packed, "--exclude=.pixi", "--exclude=node_modules", "--exclude=.git", "-C", ctx.dir, ".", ...(runner ? ["-C", dirname(runner), basename(runner)] : [])],
+		{ encoding: "utf8" },
+	);
+	if (tar.status !== 0) throw new Error(`Couldn't pack the app for ${lab.title}: ${(tar.stderr || tar.error?.message || "").trim()}`);
+	const digest = createHash("sha256").update(readFileSync(packed)).digest("hex").slice(0, 16);
+	const name = manifest.name.replace(/[^\w.-]/g, "_");
+	let sent: { path: string };
+	try {
+		sent = await lab.put(packed);
+	} finally {
+		rmSync(packed, { force: true });
+	}
+	const needsBun = runner ? `command -v bun >/dev/null || exit 4; ` : "";
+	const unpacked = await lab.run(
+		`set -e; D="$HOME/.el-apps/${name}"; mkdir -p "$D/data" "$D/${digest}"; tar -xzf ${shq(sent.path)} -C "$D/${digest}"; rm -f ${shq(sent.path)}; ${needsBun}printf %s "$D"`,
+		120,
+	);
+	if (unpacked.exitCode === 4) throw new Error(`This app's backend runs on Bun, which ${lab.title}'s sandbox doesn't have. Give the app a command backend to run it there.`);
+	if (unpacked.exitCode !== 0) throw new Error(`Couldn't copy the app into ${lab.title}'s sandbox: ${(unpacked.stderr || unpacked.stdout).trim().slice(0, 300)}`);
+	const home = unpacked.stdout.trim();
+	const workdir = `${home}/${digest}`;
+	const env: Record<string, string> = { APP_NAME: manifest.name, APP_VERSION: manifest.version, APP_DATA_DIR: `${home}/data`, NO_COLOR: "1", ...(ctx.projectDir ? { PROJECT_DIR: ctx.projectDir } : {}) };
+	if (hasEnvironment(ctx.dir)) ctx.log(`The sandbox has no network, so the app's own environment isn't installed there; the command runs with what ${lab.title}'s image has.`);
+	switch (backend.runtime) {
+		case "bun":
+		case "command": {
+			const argv = backend.runtime === "bun" ? ["bun", basename(runner!), backend.main] : backend.command;
+			return connectTransport(new AttachTransport(() => lab.attach!({ argv, workdir, env }), ctx.log));
+		}
+		case "serve": {
+			if (!lab.openPort) throw Object.assign(new Error(`${lab.title} doesn't open sandbox ports.`), { unsupported: true });
+			// One port per app version, so two versions never collide.
+			const port = 20_000 + (Number.parseInt(digest.slice(0, 4), 16) % 10_000);
+			const started = await lab.attach({ argv: backend.command, workdir, env: { ...env, PORT: String(port), HOST: "0.0.0.0" } });
+			const decoder = new TextDecoder();
+			const lines = (chunk: Uint8Array) => {
+				for (const line of decoder.decode(chunk).split("\n")) if (line.trim()) ctx.log(line);
+			};
+			started.onStdout(lines);
+			started.onStderr(lines);
+			let ended: string | undefined;
+			started.exit.then(
+				(code) => (ended = `The app's server stopped (exit ${code ?? "stopped"}).`),
+				(error: Error) => (ended = error.message),
+			);
+			const opened = await lab.openPort(port, backend.path ?? "/");
+			for (const until = Date.now() + 90_000; ; ) {
+				if (ended) throw new Error(ended);
+				const status = await opened.probe();
+				if (status && status !== 502 && status !== 503 && status !== 504) break;
+				if (Date.now() > until) throw new Error(`The app's server in ${lab.title}'s sandbox didn't answer on port ${port}.`);
+				await new Promise((r) => setTimeout(r, 700));
+			}
+			return {
+				kind: "serve",
+				url: opened.url,
+				close: async () => {
+					started.signal("TERM");
+					started.close();
+				},
+			};
+		}
+	}
+}
+
 export async function startBackend(manifest: AppManifest, ctx: BackendContext): Promise<Backend> {
 	const backend = manifest.backend;
 	if (!backend) throw new Error("This app has no backend.");
+	if (ctx.sandbox) {
+		try {
+			return await startInSandbox(manifest, ctx, ctx.sandbox);
+		} catch (error) {
+			// A lab that can't attach yet: run here, unless the lab keeps its data inside.
+			if (ctx.sandboxOnly || !(error as { unsupported?: boolean }).unsupported) throw error;
+		}
+	}
 	mkdirSync(ctx.dataDir, { recursive: true, mode: 0o700 });
 	const env = baseEnv(manifest, ctx);
 	const network: NetworkAccess = ctx.network ? "all" : "none";

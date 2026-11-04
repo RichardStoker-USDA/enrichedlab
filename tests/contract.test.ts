@@ -12,7 +12,7 @@ const descriptor: LabDescriptor = {
 	contract: "2026-11",
 	name: "devlab",
 	title: "Dev Lab",
-	endpoints: { models: true, bundles: true, events: true, guard: true, usage: true, containers: true },
+	endpoints: { models: true, bundles: true, events: true, guard: true, usage: true, containers: true, attach: true },
 	sign_in: { kind: "cloudflare-access-oauth" },
 	policy: { keep_data_inside: false },
 	support: { url: "https://help.example.org" },
@@ -30,10 +30,10 @@ const me = {
 };
 const seen: { cursor?: string | null; deleted?: string } = {};
 
-const lab = Bun.serve({
+const lab = Bun.serve<{ stdin: string; started: boolean }, never>({
 	port: 0,
 	hostname: "127.0.0.1",
-	async fetch(request) {
+	async fetch(request, srv): Promise<Response | undefined> {
 		const url = new URL(request.url);
 		if (request.headers.get("authorization") !== "Bearer test") return new Response("", { status: 401 });
 		const etagged = (body: unknown) => {
@@ -59,6 +59,8 @@ const lab = Bun.serve({
 				return Response.json({ id: "c1", status: "running", image_digest: `sha256:${"a".repeat(64)}` });
 			case "/v1/containers/c1/exec":
 				return Response.json({ exit_code: 0, stdout: "ok\n", stderr: "" });
+			case "/v1/containers/c1/attach":
+				return srv.upgrade(request, { data: { stdin: "", started: false } }) ? undefined : new Response("", { status: 400 });
 			case "/v1/files/f1/content":
 				return new Response("plot,yield\nP1,5.1\n");
 			case "/v1/events": {
@@ -75,6 +77,24 @@ const lab = Bun.serve({
 			return Response.json({ ok: true });
 		}
 		return new Response("", { status: 404 });
+	},
+	// Stands in for the check's `read line; echo got:$line; echo note >&2; exit 3` in the sandbox shell.
+	websocket: {
+		message(ws, raw) {
+			const frame = JSON.parse(String(raw)) as { argv?: string[]; stdin?: string; eof?: boolean };
+			if (!ws.data.started) {
+				ws.data.started = frame.argv?.[0] === "sh";
+				return;
+			}
+			if (frame.stdin) ws.data.stdin += Buffer.from(frame.stdin, "base64").toString();
+			if (frame.eof) {
+				const b64 = (s: string) => Buffer.from(s).toString("base64");
+				ws.send(JSON.stringify({ stdout: b64(`got:${ws.data.stdin.split("\n")[0]}\n`) }));
+				ws.send(JSON.stringify({ stderr: b64("note\n") }));
+				ws.send(JSON.stringify({ exit_code: 3 }));
+				ws.close();
+			}
+		},
 	},
 });
 afterAll(() => lab.stop(true));
@@ -109,6 +129,7 @@ describe("lab contract", () => {
 		expect(failed).toEqual([]);
 		expect(rows.find((r) => r.row === "old cursor")?.detail).toContain("reset");
 		expect(rows.find((r) => r.row === "another lab's scope")?.status).toBe("pass");
+		expect(rows.find((r) => r.row === "attach")?.status).toBe("pass");
 		expect(seen.deleted).toBe("c1");
 	});
 

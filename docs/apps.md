@@ -24,6 +24,17 @@ macOS, Windows and Linux, and `pixi.lock` records exactly what was installed, so
 environment into a sandbox image. The consent card lists the packages. `command` and `serve` backends then run
 inside that environment, contained; `$PORT` in a served app's command is its port.
 
+## In a lab session
+
+When the session works in a lab, an app's backend runs in that lab's sandbox, next to the project and its data. The
+app's folder is copied in once per version (`~/.el-apps/<name>/<digest>` there, with `data/` beside it as
+`APP_DATA_DIR`), and the process is attached over the lab's attach endpoint: `command` and `bun` backends speak MCP
+over its stdin and stdout, and a `serve` backend listens on `$PORT` (0.0.0.0) and opens through the lab's port path.
+The sandbox has no network, so an app's own environment isn't installed there; its command runs with what the lab's
+image has, and a `bun` backend needs Bun in that image. `container` backends run on this computer only. A lab that
+keeps its data inside never runs the backend here; for other labs, a lab without attach falls back to this computer.
+Installed apps (and apps the lab grants in bundles) open in a lab session by id: `app_open` with the id.
+
 ## app.json
 
 ```json
@@ -80,5 +91,4 @@ and the signature and refuses a signer the person hasn't trusted unless given `-
 
 ## Not yet
 
-- App backends that run in a lab sandbox, and building images there, need the lab's attach and port endpoints
-  (docs/labs.md). Today a page reaches a lab with `lab_cluster_run`.
+- Building an app's environment into a lab's sandbox image: the lab's signed apps (`/v1/apps`, `/v1/signers`).

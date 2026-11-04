@@ -314,6 +314,15 @@ export class AppHost {
 	async openForSession(sessionId: string, path: string): Promise<AppSummary> {
 		const session = this.deps.session(sessionId);
 		if (!session) throw new Error("No such session.");
+		if (session.place !== "local") {
+			// The project is in the lab's sandbox: apps installed here (or granted by the lab) open by id, and their
+			// backends run in that sandbox.
+			const listed = this.list().find((a) => a.id === path || a.name === path);
+			if (!listed) throw new Error(`In a session that works in ${session.place}, open an installed app by its id (el apps lists them); ${path} isn't one.`);
+			const summary = this.summary(this.find(listed.id));
+			this.deps.emit("app.opened", { sessionId, app: summary }, sessionId);
+			return summary;
+		}
 		const dir = isAbsolute(path) ? path : resolve(session.project, path);
 		if (relative(session.project, dir).startsWith("..")) throw new Error("Open apps from inside the session's project.");
 		const summary = this.summary(this.register(dir, "project"));
@@ -424,15 +433,21 @@ export class AppHost {
 				lines.push(line.slice(0, 400));
 				this.logs.set(app.id, lines.slice(-40));
 			};
-			running = startBackend(app.manifest, {
-				dir: app.dir,
-				dataDir: this.dataDir(app.id),
-				projectDir: session?.place === "local" ? session.project : undefined,
-				runDir: join(this.deps.paths.home, "runtime"),
-				toolsDir: join(this.deps.paths.home, "tools"),
-				network: !session?.sealed && (app.manifest.permissions.network?.length ?? 0) > 0,
-				log,
-			});
+			// A session that works in a lab runs the backend in that lab's sandbox, next to the project and its data.
+			const lab = session && session.place !== "local" ? this.deps.sandbox(session.place) : undefined;
+			const sealedAway = session && session.place !== "local" && !lab && this.deps.isolated(session.place);
+			running = sealedAway
+				? Promise.reject(new Error(`${session!.place} keeps its data inside, so this app's backend runs in its sandbox. Sign in to ${session!.place}, with its sandbox on, first.`))
+				: startBackend(app.manifest, {
+					dir: app.dir,
+					dataDir: this.dataDir(app.id),
+					projectDir: session?.place === "local" ? session.project : lab ? session?.workspace.root : undefined,
+					...(lab ? { sandbox: lab, sandboxOnly: this.deps.isolated(session!.place) } : {}),
+					runDir: join(this.deps.paths.home, "runtime"),
+					toolsDir: join(this.deps.paths.home, "tools"),
+					network: !session?.sealed && (app.manifest.permissions.network?.length ?? 0) > 0,
+					log,
+				});
 			const started = running;
 			running.catch(() => this.backends.get(key) === started && this.backends.delete(key));
 			// Starting can build the app's environment, whose install scripts write and remove files in the app's

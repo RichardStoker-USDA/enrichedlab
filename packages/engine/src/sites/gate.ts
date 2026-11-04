@@ -17,6 +17,7 @@ import { connectRemote, type McpConnection } from "../mcp.ts";
 import { labFetch, sseData } from "../models/http.ts";
 import { DeviceKey, dpopError } from "./dpop.ts";
 import { type OpenPort, openPort } from "./port_proxy.ts";
+import { type AttachSpec, type Attached, attachSocket } from "./attach.ts";
 import type { ModelProfile } from "../models/types.ts";
 import { num, str, type Tool, ToolError } from "../tools/types.ts";
 import { errorText, redact, SECRET_NAME, sleep } from "../util.ts";
@@ -509,6 +510,20 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				try {
 					const ran = await this.json<{ exit_code?: number; stdout?: string }>("POST", `/v1/containers/${made.id}/exec`, { json: { command: "echo ok", timeout_seconds: 30 }, signal: AbortSignal.timeout(120_000) });
 					add("sandbox runs a command", ran.exit_code === 0 && ran.stdout?.trim() === "ok" ? "pass" : "fail", `exit ${ran.exit_code}`);
+					if (has("attach")) {
+						const url = `${this.route.base}/v1/containers/${encodeURIComponent(made.id)}/attach`;
+						const process = await attachSocket(url.replace(/^http/, "ws"), await this.authHeaders("GET", url), { argv: ["sh", "-c", "read line; echo got:$line; echo note >&2; exit 3"], timeout_seconds: 30 }, this.route.ca);
+						let out = "";
+						let err = "";
+						process.onStdout((c) => (out += new TextDecoder().decode(c)));
+						process.onStderr((c) => (err += new TextDecoder().decode(c)));
+						process.write("hello\n");
+						process.end();
+						const code = await Promise.race([process.exit, sleep(30_000).then(() => "timeout" as const)]);
+						process.close();
+						const fits = code === 3 && out.trim() === "got:hello" && err.trim() === "note";
+						add("attach", fits ? "pass" : "fail", fits ? "stdin in, stdout and stderr out, exit code" : `exit ${code}, stdout ${JSON.stringify(out.slice(0, 40))}, stderr ${JSON.stringify(err.slice(0, 40))}`);
+					}
 					if (has("ports")) {
 						// A web server in the sandbox, read through the lab's port path; app pages must come sandboxed (CSP).
 						const served = await this.json<{ exit_code?: number }>("POST", `/v1/containers/${made.id}/exec`, {
@@ -847,9 +862,17 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	}
 
 	/** Engine shutdown: delete the sandbox unless a background job is still running in it; Gate expires it then. */
+	/** A process in the sandbox with stdin and output streamed (attach.ts). */
+	async attach(spec: AttachSpec, signal?: AbortSignal): Promise<Attached> {
+		if (!this.offers("attach")) throw Object.assign(new Error(`${this.title} doesn't stream sandbox processes.`), { unsupported: true });
+		const id = await this.sandbox(signal);
+		const url = `${this.route.base}/v1/containers/${encodeURIComponent(id)}/attach`;
+		return attachSocket(url.replace(/^http/, "ws"), await this.authHeaders("GET", url), spec, this.route.ca);
+	}
+
 	/** Open a port of the sandbox on this computer (port_proxy.ts); one loopback address per port, reused. */
 	async openPort(port: number, path = "/", signal?: AbortSignal): Promise<OpenPort> {
-		if (!this.offers("ports")) throw new Error(`${this.title} doesn't open sandbox ports.`);
+		if (!this.offers("ports")) throw Object.assign(new Error(`${this.title} doesn't open sandbox ports.`), { unsupported: true });
 		if (!Number.isInteger(port) || port < 1 || port > 65535) throw new ToolError("Give a port from 1 to 65535.");
 		const id = await this.sandbox(signal);
 		const kept = this.ports.get(`${id}:${port}`);

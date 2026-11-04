@@ -43,7 +43,7 @@ export interface LabDescriptor {
 	title: string;
 	endpoints: Partial<Record<Endpoint, boolean>>;
 	sign_in: { kind: string };
-	policy?: { keep_data_inside?: boolean; device_proof?: "optional" | "required" };
+	policy?: { keep_data_inside?: boolean; device_proof?: "off" | "optional" | "required" };
 	support?: { url: string };
 	docs?: { url: string };
 	sandbox_profiles?: SandboxProfile[];
