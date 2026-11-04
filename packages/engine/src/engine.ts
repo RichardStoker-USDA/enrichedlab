@@ -124,6 +124,7 @@ export class Engine {
 			for (const source of this.sites.modelSources()) this.registry.addSource(source);
 			this.emit("site.updated", summary);
 		}, (notice) => this.emit("lab.notice", notice));
+		this.sites.onAppsChanged = (site) => this.emit("lab.apps.changed", { site });
 		this.terminals = new Terminals((name, params) => this.emit(name, params as never));
 		this.canvas = new CanvasStore(this.paths.canvases, () => this.origin(), (summary) => {
 			this.emit("canvas.updated", summary, summary.sessionId);
@@ -140,6 +141,8 @@ export class Engine {
 			isolated: (site) => this.sites.isolated(site),
 			bundles: () => listBundles(this.paths).map((b) => ({ name: b.name, dir: b.dir })),
 			origin: () => this.origin(),
+			labAppBlocked: (origin) => this.sites.appBlocked(origin),
+			resolveLab: (name) => this.sites.resolve(name),
 		});
 	}
 
@@ -736,6 +739,20 @@ export class Engine {
 				case "site.login": {
 					const name = need("name");
 					return this.sites.login(name, (url, instructions) => this.emit("site.auth", { name, url, instructions }));
+				}
+				case "lab.apps": {
+					const installed = this.apps.list().filter((a) => a.source.startsWith("lab:"));
+					return this.sites.labApps().map((a) => {
+						const here = installed.find((i) => i.source === `lab:${a.site}` && i.name === a.name);
+						return here ? { ...a, installed: here.version } : a;
+					});
+				}
+				case "lab.app.install": {
+					const done = await this.sites.installLabApp(need("site"), need("name"), typeof p.version === "string" ? p.version : undefined);
+					this.emit("lab.apps.changed", { site: need("site") });
+					const summary = this.apps.list().find((a) => a.name === done.name && a.source === `lab:${need("site")}`);
+					if (!summary) throw new RpcError(-32000, `Installed ${done.name}, but it didn't load.`);
+					return summary;
 				}
 				case "lab.check":
 					return { rows: await this.sites.check(need("name")) };

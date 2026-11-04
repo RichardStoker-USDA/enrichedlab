@@ -25,7 +25,7 @@ import type { SiteAdapter } from "./adapter.ts";
 import { fetchRepo, sendRepo } from "./repo_handoff.ts";
 import type { SandboxApi } from "./sandbox_workspace.ts";
 import type { SiteConfig, SiteRoute } from "./sites.ts";
-import { type CheckRow, CONTRACT, contractProblem, DESCRIPTOR_PATH, type Endpoint, type LabDescriptor, type LabEvent, SCHEMAS, validate } from "./contract.ts";
+import { type CheckRow, CONTRACT, contractProblem, DESCRIPTOR_PATH, type Endpoint, type LabAppEntry, type LabDescriptor, type LabEvent, type LabSigner, SCHEMAS, validate } from "./contract.ts";
 
 interface GateModel {
 	id: string;
@@ -49,6 +49,8 @@ interface GateMe {
 	sandboxes?: { enabled?: boolean; idle_minutes?: number };
 	quotas?: unknown[];
 }
+
+const title = (entry: LabAppEntry) => `${entry.title || entry.name} ${entry.version}`;
 
 export class GateSite implements SiteAdapter, SandboxApi {
 	who?: string;
@@ -291,6 +293,29 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		return this.sandboxOn ? this : undefined;
 	}
 
+	/** Apps this person's groups may install (GET /v1/apps), withdrawn versions included. */
+	async labApps(): Promise<LabAppEntry[]> {
+		if (!this.offers("apps")) return [];
+		return (await this.cached<{ data?: LabAppEntry[] }>("/v1/apps", AbortSignal.timeout(15_000))).data ?? [];
+	}
+
+	/** Signers the lab vouches for (GET /v1/signers), revoked ones included. */
+	async signers(): Promise<LabSigner[]> {
+		if (!this.offers("signers") && !this.offers("apps")) return [];
+		return (await this.cached<{ data?: LabSigner[] }>("/v1/signers", AbortSignal.timeout(15_000))).data ?? [];
+	}
+
+	/** An app package from the lab, checked against its listing's size and checksum before anything reads it. */
+	async appPackage(entry: LabAppEntry, signal?: AbortSignal): Promise<Uint8Array> {
+		if (!entry.package.startsWith("/v1/apps/")) throw new Error(`${this.title} listed a package outside /v1/apps.`);
+		const response = await this.call("GET", entry.package, { headers: { accept: "application/octet-stream" }, signal: signal ?? AbortSignal.timeout(300_000) });
+		const bytes = new Uint8Array(await response.arrayBuffer());
+		if (bytes.length !== entry.bytes || createHash("sha256").update(bytes).digest("hex") !== entry.sha256) {
+			throw new Error(`The package ${title(entry)} that arrived doesn't match ${this.title}'s listing, so it wasn't installed.`);
+		}
+		return bytes;
+	}
+
 	/** Bundles this person's role is granted, from GET /v1/bundles. A Gate that doesn't serve it grants none. */
 	async bundles(): Promise<BundleGrant[]> {
 		if (!this.offers("bundles")) return [];
@@ -508,6 +533,17 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				await connection.close();
 			});
 		} else skip("MCP tools");
+
+		if (has("apps")) {
+			await attempt("GET /v1/apps", async () => {
+				const list = await this.json<{ data?: unknown[] }>("GET", "/v1/apps", { signal: t() });
+				fits("GET /v1/apps", "apps", list, `${list.data?.length ?? 0} app versions`);
+			});
+			await attempt("GET /v1/signers", async () => {
+				const list = await this.json<{ data?: unknown[] }>("GET", "/v1/signers", { signal: t() });
+				fits("GET /v1/signers", "signers", list, `${list.data?.length ?? 0} signers`);
+			});
+		} else skip("GET /v1/apps");
 
 		if (has("bundles")) await attempt("GET /v1/bundles", async () => fits("GET /v1/bundles", "bundles", await this.json("GET", "/v1/bundles", { signal: t() })));
 		else skip("GET /v1/bundles");

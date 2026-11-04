@@ -8,6 +8,22 @@
 		appsOpen = !appsOpen;
 		if (appsOpen) void lab.refreshApps();
 	}
+	// Installed apps say where they came from; a lab's offers are grouped under the lab.
+	const source = (s: string) =>
+		s === "project"
+			? "project"
+			: s.startsWith("bundle:")
+				? s.slice(7)
+				: s.startsWith("mcp:")
+					? s.slice(4)
+					: s.startsWith("lab:")
+						? (lab.sites.find((x) => x.name === s.slice(4))?.title ?? s.slice(4))
+						: "installed";
+	const offersByLab = $derived.by(() => {
+		const groups = new Map<string, typeof lab.labOffers>();
+		for (const offer of lab.labOffers) groups.set(offer.lab, [...(groups.get(offer.lab) ?? []), offer]);
+		return [...groups];
+	});
 	const terminalNote = $derived(lab.place.id === "local" ? "Your shell, in the project folder" : `A command console in the ${lab.place.title} sandbox`);
 </script>
 
@@ -26,10 +42,22 @@
 						{#each lab.apps as app (app.id)}
 							<button class="menu-item" role="menuitem" onclick={() => ((appsOpen = false), lab.openApp(app))}>
 								<span class="app-title">{app.title}</span>
-								<span class="app-meta">{app.source === "project" ? "project" : app.source.startsWith("bundle:") ? app.source.slice(7) : app.source.startsWith("mcp:") ? app.source.slice(4) : "installed"}</span>
+								<span class="app-meta">{source(app.source)}</span>
 							</button>
 						{:else}
-							<p class="none">No apps yet. Ask the agent to build one, such as "make an app to explore plots.csv".</p>
+							{#if !lab.labOffers.length}
+								<p class="none">No apps yet. Ask the agent to build one, such as "make an app to explore plots.csv".</p>
+							{/if}
+						{/each}
+						{#each offersByLab as [labTitle, offers] (labTitle)}
+							<p class="menu-label">From {labTitle}</p>
+							{#each offers as offer (`${offer.site}/${offer.name}`)}
+								{@const busy = lab.installing.has(`${offer.site}/${offer.name}`)}
+								<button class="menu-item" role="menuitem" disabled={busy} title={offer.description || offer.title} onclick={() => void lab.installLabApp(offer)}>
+									<span class="app-title">{offer.title}</span>
+									<span class="app-meta">{busy ? "Installing…" : offer.installed ? `Update to ${offer.version}` : "Install"}</span>
+								</button>
+							{/each}
 						{/each}
 					</div>
 				{/if}

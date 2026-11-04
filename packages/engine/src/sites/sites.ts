@@ -2,9 +2,9 @@
 // engine reads what it was granted and applies it. `sites.json` holds addresses; `credentials/<site>.json` holds
 // tokens, owner-only. A site can also be reached on the LAN with a key file and a private CA.
 
-import { existsSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { LabNotice, SiteSummary } from "@enrichedlab/protocol";
+import type { LabApp, LabNotice, SiteSummary } from "@enrichedlab/protocol";
 import type { ModelProfile } from "../models/types.ts";
 import type { Paths } from "../paths.ts";
 import type { Tool } from "../tools/types.ts";
@@ -12,7 +12,8 @@ import { errorText, expandHome, readJson, readSecret, redact, writeJson } from "
 import { syncSiteBundles } from "../bundles.ts";
 import type { ModelSource } from "../models/registry.ts";
 import { SITE_KINDS, type SiteAdapter } from "./adapter.ts";
-import type { CheckRow, LabEvent } from "./contract.ts";
+import type { CheckRow, LabAppEntry, LabEvent, LabSigner } from "./contract.ts";
+import { type AppOrigin, installApp } from "../apps/package.ts";
 import type { SandboxApi } from "./sandbox_workspace.ts";
 import { login, refresh, type SavedClient, type SiteCredentials } from "./oauth.ts";
 
@@ -70,6 +71,10 @@ export class Sites {
 
 	/** Event streams being followed, one per connected lab. */
 	private following = new Map<string, () => void>();
+	/** Each lab's app list and signers, read after connect and when the lab says they changed. */
+	private catalog = new Map<string, { apps: LabAppEntry[]; signers: LabSigner[] }>();
+	/** Set by the engine: a lab's app list changed. */
+	onAppsChanged?: (site: string) => void;
 
 	constructor(
 		private p: Paths,
@@ -93,6 +98,7 @@ export class Sites {
 			event: (event) => {
 				// What was granted changed: read it again. A revoked sign-in shows as one.
 				if (event.type === "models.changed" || event.type === "bundles.changed") void this.connect(name).catch(() => undefined);
+				if (event.type === "app.published" || event.type === "app.withdrawn") void this.readCatalog(name, adapter);
 				const title = this.title(name);
 				const text = noticeText(title, event);
 				if (text) this.onNotice({ site: name, type: event.type, at: event.at, text, session: event.session });
@@ -109,6 +115,89 @@ export class Sites {
 			const bases = [state?.route?.base, origin(state?.config.url ?? "")].filter(Boolean) as string[];
 			if (bases.some((b) => uri === b || uri.startsWith(`${b}/`))) return adapter;
 		}
+		return undefined;
+	}
+
+	private async readCatalog(name: string, adapter: SiteAdapter): Promise<void> {
+		if (!adapter.labApps) return;
+		try {
+			const [apps, signers] = await Promise.all([adapter.labApps(), adapter.signers?.() ?? Promise.resolve([])]);
+			this.catalog.set(name, { apps, signers });
+			this.onAppsChanged?.(name);
+		} catch {
+			// Keep the last list; the next connect or event reads it again.
+		}
+	}
+
+	/** Every lab's apps for this person, newest version first per name, with whether each may still be installed. */
+	labApps(): LabApp[] {
+		const out: LabApp[] = [];
+		for (const [site, { apps, signers }] of this.catalog) {
+			for (const a of apps) {
+				const signer = signers.find((s) => s.fingerprint === a.signer.fingerprint);
+				out.push({
+					site,
+					lab: this.title(site),
+					name: a.name,
+					title: a.title,
+					version: a.version,
+					description: a.description ?? "",
+					signer: { fingerprint: a.signer.fingerprint, name: a.signer.name ?? signer?.name },
+					runtime: a.runtime,
+					permissions: a.permissions ?? {},
+					published: a.published,
+					withdrawn: Boolean(a.withdrawn_at),
+					signerRevoked: !signer || Boolean(signer.revoked_at),
+				});
+			}
+		}
+		return out;
+	}
+
+	/** Install an app from a lab's list: the package is checked against the listing, then fully verified. */
+	async installLabApp(site: string, name: string, version?: string): Promise<{ name: string; version: string }> {
+		const adapter = this.adapters.get(site) ?? (await this.connect(site), this.adapters.get(site));
+		if (!adapter?.appPackage) throw new Error(`${this.title(site)} doesn't offer apps.`);
+		// Read the list again (an ETag makes it cheap), so an install never goes by a withdrawn or changed listing.
+		await this.readCatalog(site, adapter);
+		const catalog = this.catalog.get(site);
+		const offered = (catalog?.apps ?? []).filter((a) => a.name === name && !a.withdrawn_at);
+		const entry = version ? offered.find((a) => a.version === version) : offered[0];
+		if (!entry) throw new Error(`${this.title(site)} doesn't offer ${name}${version ? ` ${version}` : ""} to you.`);
+		const live = (catalog?.signers ?? []).filter((s) => !s.revoked_at);
+		if (!live.some((s) => s.fingerprint === entry.signer.fingerprint)) throw new Error(`${this.title(site)} doesn't vouch for the key that signed ${name} ${entry.version}.`);
+		const bytes = await adapter.appPackage(entry);
+		mkdirSync(this.p.run, { recursive: true });
+		const file = join(this.p.run, `lab_app_${name}_${process.pid}.labapp`);
+		writeFileSync(file, bytes, { mode: 0o600 });
+		try {
+			const installed = await installApp(this.p, file, {
+				vouched: { lab: site, signers: live.map((s) => ({ fingerprint: s.fingerprint, publicKey: s.public_key })) },
+				origin: { lab: site, name, version: entry.version, sha256: entry.sha256 },
+			});
+			return { name: installed.name, version: installed.version };
+		} finally {
+			rmSync(file, { force: true });
+		}
+	}
+
+	/** A lab by its short name here, or by its own name (its descriptor's), as apps a lab publishes name it. */
+	resolve(name: string): string | undefined {
+		if (this.exists(name)) return name;
+		for (const [site, adapter] of this.adapters) if (adapter.descriptor?.name === name) return site;
+		return undefined;
+	}
+
+	/** Why an app installed from a lab may not open, if the lab withdrew it or stopped vouching for its signer. */
+	appBlocked(origin: AppOrigin): string | undefined {
+		const catalog = this.catalog.get(origin.lab);
+		if (!catalog) return undefined;
+		const lab = this.title(origin.lab);
+		const signer = catalog.signers.find((s) => s.fingerprint === origin.signer);
+		if (!signer || signer.revoked_at) return `${lab} no longer vouches for the key that signed ${origin.name}.`;
+		const entry = catalog.apps.find((a) => a.name === origin.name && a.version === origin.version);
+		if (!entry) return `${lab} no longer offers ${origin.name} ${origin.version} to you.`;
+		if (entry.withdrawn_at) return `${lab} withdrew ${origin.name} ${origin.version}.`;
 		return undefined;
 	}
 
@@ -245,6 +334,7 @@ export class Sites {
 		await this.adapters.get(name)?.forget?.().catch(() => undefined);
 		rmSync(this.deviceFile(name), { force: true });
 		rmSync(this.credPath(name), { force: true });
+		if (this.catalog.delete(name)) this.onAppsChanged?.(name);
 		this.adapters.get(name)?.close();
 		this.adapters.delete(name);
 		this.states.delete(name);
@@ -274,6 +364,7 @@ export class Sites {
 				await adapter.connect();
 				this.adapters.set(name, adapter);
 				this.follow(name, adapter);
+				void this.readCatalog(name, adapter);
 				if (adapter.bundles) {
 					try {
 						syncSiteBundles(this.p, name, await adapter.bundles());

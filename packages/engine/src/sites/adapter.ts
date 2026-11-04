@@ -3,7 +3,7 @@
 // a research broker is the next kind. Add a kind by writing an adapter and registering it in SITE_KINDS.
 
 import type { BundleGrant } from "../bundles.ts";
-import type { CheckRow, LabDescriptor, LabEvent } from "./contract.ts";
+import type { CheckRow, LabAppEntry, LabDescriptor, LabEvent, LabSigner } from "./contract.ts";
 import type { ModelProfile } from "../models/types.ts";
 import type { Tool } from "../tools/types.ts";
 import { GateSite } from "./gate.ts";
@@ -11,6 +11,12 @@ import type { SandboxApi } from "./sandbox_workspace.ts";
 import type { SiteConfig, SiteRoute } from "./sites.ts";
 
 export interface SiteAdapter {
+	/** Apps the lab offers this person, withdrawn versions included (GET /v1/apps). */
+	labApps?(): Promise<LabAppEntry[]>;
+	/** Signers the lab vouches for, revoked ones included (GET /v1/signers). */
+	signers?(): Promise<LabSigner[]>;
+	/** One app package, checked against its listing. */
+	appPackage?(entry: LabAppEntry, signal?: AbortSignal): Promise<Uint8Array>;
 	/** Set by Sites: notices the adapter has for the person (a sandbox restored from its archive, or replaced). */
 	onNotice?: (text: string) => void;
 	/** On sign-out: revoke this computer's device key at the lab (best effort) and delete it here. */

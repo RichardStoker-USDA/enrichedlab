@@ -1,19 +1,7 @@
 // The web surface's state. Everything comes from the engine; this file mirrors it and sends requests. The workbench
 // layout is the one piece kept here: it belongs to this person's screen, per session, in local storage.
 
-import type { AppSummary,
-	CanvasSummary,
-	ModelInfo,
-	Partial_,
-	Part,
-	PermissionDecision,
-	PermissionRequest,
-	SessionEvent,
-	SessionStatus,
-	SessionSummary,
-	SiteSummary,
-	UiPrefs,
-} from "@enrichedlab/protocol";
+import type { AppSummary, CanvasSummary, LabApp, ModelInfo, Part, Partial_, PermissionDecision, PermissionRequest, SessionEvent, SessionStatus, SessionSummary, SiteSummary, UiPrefs } from "@enrichedlab/protocol";
 import { close as closeTab, emptyLayout, move, type Node, open as openTab, resize as resizeSplit, revive, sync, type Edge, type PaneKind, type Tab, uid, activate, groups } from "./layout.ts";
 import { placeOf, places, type Place } from "./places.ts";
 import { rpc } from "./rpc.ts";
@@ -46,6 +34,10 @@ class Lab {
 	sites = $state<SiteSummary[]>([]);
 	/** The person's apps: the library, bundles, and project apps opened before. */
 	apps = $state<AppSummary[]>([]);
+	/** Apps the person's labs offer, every listed version (newest first per app). */
+	labApps = $state<LabApp[]>([]);
+	/** Lab apps being installed, by "site/name". */
+	installing = $state(new Set<string>());
 	models = $state<ModelInfo[]>([]);
 	ui = $state<UiPrefs>({ theme: "auto", showReasoning: true });
 	current = $state<string | undefined>();
@@ -122,6 +114,10 @@ class Lab {
 			rpc.call("model.list", {}),
 			rpc.call("app.list", {}).catch(() => []),
 		]);
+		void rpc
+			.call("lab.apps", {})
+			.then((offered) => (this.labApps = offered))
+			.catch(() => undefined);
 		this.sessions = sessions;
 		this.sites = sites;
 		this.apps = apps;
@@ -295,7 +291,36 @@ class Lab {
 	}
 
 	async refreshApps(): Promise<void> {
-		this.apps = await rpc.call("app.list", {}).catch(() => this.apps);
+		const [apps, offered] = await Promise.all([rpc.call("app.list", {}).catch(() => this.apps), rpc.call("lab.apps", {}).catch(() => this.labApps)]);
+		this.apps = apps;
+		this.labApps = offered;
+	}
+
+	/** What each lab offers that isn't installed at its newest version: one entry per app. */
+	get labOffers(): LabApp[] {
+		const seen = new Set<string>();
+		return this.labApps.filter((a) => {
+			const key = `${a.site}/${a.name}`;
+			if (seen.has(key) || a.withdrawn || a.signerRevoked) return false;
+			seen.add(key);
+			return a.installed !== a.version;
+		});
+	}
+
+	/** Install (or update) an app from a lab's list, then open it. */
+	async installLabApp(app: LabApp): Promise<void> {
+		const key = `${app.site}/${app.name}`;
+		this.installing = new Set([...this.installing, key]);
+		try {
+			const summary = await rpc.call("lab.app.install", { site: app.site, name: app.name, version: app.version });
+			await this.refreshApps();
+			this.say(`Installed ${summary.title} ${summary.version} from ${app.lab}.`);
+			this.openApp(summary);
+		} catch (error) {
+			this.say((error as Error).message);
+		} finally {
+			this.installing = new Set([...this.installing].filter((k) => k !== key));
+		}
 	}
 
 	/** Point at a view's step: open its pane. */
@@ -465,6 +490,7 @@ class Lab {
 			this.sites = known ? this.sites.map((s) => (s.name === site.name ? site : s)) : [...this.sites, site];
 		});
 		rpc.on("lab.notice", (notice) => this.say(notice.text));
+		rpc.on("lab.apps.changed", () => void this.refreshApps());
 		rpc.on("provider.auth", (auth) => {
 			window.open(auth.url, "_blank", "noopener");
 		});

@@ -41,6 +41,9 @@
 			if (lab.ui.theme !== theme) list.push({ id: `theme-${theme}`, label: theme === "auto" ? "Match the system's light or dark mode" : `Use ${theme} mode`, group: "Appearance", run: () => void lab.setTheme(theme) });
 		}
 		for (const app of lab.apps) list.push({ id: `app-${app.id}`, label: `Open ${app.title}`, hint: app.source === "project" ? "app" : app.source.replace(/^(bundle|mcp):/, ""), group: "Apps", run: () => lab.openApp(app) });
+		for (const offer of lab.labOffers) {
+			list.push({ id: `lab-app-${offer.site}-${offer.name}`, label: `${offer.installed ? "Update" : "Install"} ${offer.title}`, hint: `from ${offer.lab}`, group: "Apps", run: () => void lab.installLabApp(offer) });
+		}
 		for (const s of lab.sessions) list.push({ id: s.id, label: s.title, hint: folderName(s.cwd), group: "Sessions", run: () => lab.go(s.id) });
 		const q = query.trim().toLowerCase();
 		if (!q) return list.filter((i) => i.group !== "Sessions" && i.group !== "Apps").concat(list.filter((i) => i.group === "Apps").slice(0, 6), list.filter((i) => i.group === "Sessions").slice(0, 8));

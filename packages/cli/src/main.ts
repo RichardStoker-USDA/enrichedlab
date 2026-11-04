@@ -59,13 +59,15 @@ const HELP = `EnrichedLab ${VERSION}
                                   install one; a Claude Code plugin folder works too
   el bundle remove <name>
 
-  el apps                         your apps: installed, from bundles, and opened in projects
+  el apps                         your apps, and the apps your labs offer
   el app new <name> [--template data|blank|shiny|shiny-python]
                                   start an app in ./apps/<name>; the agent can build it with you
   el app pack <folder> [--out <folder>]
                                   one signed .labapp file to share
   el app add <file.labapp> [--trust]
                                   check and install one; --trust accepts a signer you haven't used before
+  el app add <lab>/<name>[@version]
+                                  install an app your lab offers (el apps lists them)
   el app remove <name>
 
   el models [--refresh]           models you can use now
@@ -105,7 +107,20 @@ async function appCommand(action: string, target: string | undefined, flags: Fla
 			return;
 		}
 		case "add": {
-			const file = resolve(target ?? fail("el app add <file.labapp> [--trust]"));
+			const wanted = target ?? fail("el app add <file.labapp> [--trust] | el app add <lab>/<name>[@version]");
+			const fromLab = /^([a-z0-9][\w-]*)\/([a-z0-9][a-z0-9-]*)(?:@(.+))?$/i.exec(wanted);
+			if (fromLab && !existsSync(resolve(wanted))) {
+				// From a lab's app list: the engine checks the package against the listing and the lab's signers.
+				const [, site, name, version] = fromLab;
+				const client = await connect();
+				const app = await client.call("lab.app.install", { site: site!, name: name!, ...(version ? { version } : {}) });
+				client.close();
+				out(`Installed ${app.title} ${app.version} from ${site}, signed ${app.signer ?? "?"}.`);
+				const asks = describePermissions(app.permissions);
+				if (asks.length) out(`When it first opens it asks to:\n  ${asks.join("\n  ")}`);
+				return;
+			}
+			const file = resolve(wanted);
 			const added = await installApp(p, file, { trust: flags.trust === true });
 			const manifest = readManifest(added.dir);
 			out(`Installed ${manifest.title} ${added.version}, signed ${added.fingerprint}${added.newSigner ? " (now trusted)" : ""}.`);
@@ -121,9 +136,19 @@ async function appCommand(action: string, target: string | undefined, flags: Fla
 		case "list": {
 			const client = await connect();
 			const apps = await client.call("app.list", {});
+			const offered = await client.call("lab.apps", {}).catch(() => []);
 			client.close();
-			if (!apps.length) out("No apps yet. Start one with el app new <name>, or add one with el app add <file>.");
+			if (!apps.length && !offered.length) out("No apps yet. Start one with el app new <name>, or add one with el app add <file>.");
 			for (const a of apps) out(`${a.title} ${a.version}  ${a.source}${a.backend ? `  ${a.backend} backend` : ""}${a.granted ? "" : "  (asks when opened)"}\n  ${a.description || a.dir}`);
+			// What each lab offers: the newest installable version per app, and what's installed already.
+			const seen = new Set<string>();
+			for (const a of offered) {
+				const key = `${a.site}/${a.name}`;
+				if (seen.has(key) || a.withdrawn || a.signerRevoked) continue;
+				seen.add(key);
+				const state = a.installed === a.version ? "installed" : a.installed ? `update from ${a.installed}: el app add ${key}` : `el app add ${key}`;
+				out(`${a.title} ${a.version}  from ${a.lab}  ${state}\n  ${a.description || "(no description)"}  signed ${a.signer.name ?? a.signer.fingerprint}`);
+			}
 			return;
 		}
 		default:

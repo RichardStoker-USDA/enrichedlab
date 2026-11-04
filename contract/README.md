@@ -13,5 +13,7 @@ descriptor, and a client refuses a different major. New fields are optional and 
 | `guard.schema.json` | `POST /v1/guard` answer |
 | `usage.schema.json` | `GET /v1/usage` |
 | `container.schema.json` | `POST /v1/containers` answer |
+| `apps.schema.json` | `GET /v1/apps` |
+| `signers.schema.json` | `GET /v1/signers` |
 
 `el lab check <lab>` checks a running lab against these. What each endpoint is for: [docs/labs.md](../docs/labs.md).

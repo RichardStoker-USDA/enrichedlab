@@ -24,6 +24,16 @@ macOS, Windows and Linux, and `pixi.lock` records exactly what was installed, so
 environment into a sandbox image. The consent card lists the packages. `command` and `serve` backends then run
 inside that environment, contained; `$PORT` in a served app's command is its port.
 
+## From a lab
+
+A lab can offer apps to people by group (`GET /v1/apps`, docs/labs.md). They show under *From <lab>* in the Apps
+menu and in `el apps`; `el app add <lab>/<name>[@version]` installs one. The package has to match the listing (size
+and sha256), then pass the same checks as any package: every file's hash and the Ed25519 signature. A signer the lab
+vouches for (`GET /v1/signers`) is trusted for that lab's apps only, never for a package added by hand. The install
+records where it came from (`.lab/origin.json`); when the lab withdraws that version or revokes its signer, the app
+stops opening and its data stays until the person updates or removes it. An app a lab publishes names that lab in
+`permissions.labs` by the lab's own name (its descriptor's `name`), which EnrichedLab maps to the person's site.
+
 ## In a lab session
 
 When the session works in a lab, an app's backend runs in that lab's sandbox, next to the project and its data. The

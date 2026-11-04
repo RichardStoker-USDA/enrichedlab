@@ -300,6 +300,27 @@ export interface AppPermissions {
 	network?: string[];
 }
 
+/** An app version a lab offers this person (its /v1/apps), as the Apps list shows it. */
+export interface LabApp {
+	/** The lab's short name on this computer. */
+	site: string;
+	/** The lab's title. */
+	lab: string;
+	name: string;
+	title: string;
+	version: string;
+	description: string;
+	signer: { fingerprint: string; name?: string };
+	runtime?: string;
+	permissions: Record<string, unknown>;
+	published?: string;
+	/** The lab withdrew this version, or stopped vouching for its signer: it can't be installed. */
+	withdrawn: boolean;
+	signerRevoked: boolean;
+	/** The version installed on this computer, if any. */
+	installed?: string;
+}
+
 export interface AppSummary {
 	id: string;
 	name: string;
@@ -438,6 +459,10 @@ export interface Requests {
 	/** Download, verify and install the newer release. `restart` means the app should quit and start again. */
 	"update.apply": { params: Record<string, never>; result: { version: string; restart: boolean } };
 	"app.list": { params: Record<string, never>; result: AppSummary[] };
+	/** Apps the person's labs offer them, every listed version, with what's installed. */
+	"lab.apps": { params: Record<string, never>; result: LabApp[] };
+	/** Install (or update to) an app from a lab's list; the package is checked against the listing and its signature. */
+	"lab.app.install": { params: { site: string; name: string; version?: string }; result: AppSummary };
 	/** Open an app for a session: a library app by id, or a folder with an app.json. The page lives at `url`. */
 	"app.open": {
 		params: { sessionId?: string; id?: string; path?: string };
@@ -511,6 +536,8 @@ export interface Notifications {
 	"canvas.updated": CanvasSummary;
 	/** An app's files changed: open views reload. */
 	"app.changed": { id: string };
+	/** A lab's app list changed (read again, or an app was published or withdrawn). */
+	"lab.apps.changed": { site: string };
 	/** The agent opened an app in a session: surfaces show it. */
 	"app.opened": { sessionId: string; app: AppSummary };
 	"ui.updated": UiPrefs;

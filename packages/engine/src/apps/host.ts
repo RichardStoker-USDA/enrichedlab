@@ -18,6 +18,7 @@ import type { Paths } from "../paths.ts";
 import type { SandboxApi } from "../sites/sandbox_workspace.ts";
 import type { Workspace } from "../tools/workspace.ts";
 import { readJson, writeJson } from "../util.ts";
+import { type AppOrigin, ORIGIN_FILE } from "./package.ts";
 import { type Backend, type McpBackend, startBackend } from "./backends.ts";
 import { environmentSummary } from "./environments.ts";
 import { type AppManifest, describePermissions, permissionKey, readManifest } from "./manifest.ts";
@@ -47,6 +48,10 @@ export interface AppHostDeps {
 	/** Installed bundles' folders. */
 	bundles(): { name: string; dir: string }[];
 	origin(): string;
+	/** The local site for a lab name an app uses: its short name here, or the lab's own name from its descriptor. */
+	resolveLab?(name: string): string | undefined;
+	/** Why an app installed from a lab may not open (the lab withdrew it or revoked its signer), if so. */
+	labAppBlocked?(origin: AppOrigin): string | undefined;
 }
 
 /** An MCP server's view: its HTML, its CSP request, and calls to its server's tools. */
@@ -67,6 +72,8 @@ interface Loaded {
 	manifest: AppManifest;
 	source: string;
 	signer?: string;
+	/** Installed from a lab's app list. */
+	origin?: AppOrigin;
 }
 
 interface Opened {
@@ -198,7 +205,8 @@ export class AppHost {
 		const manifest = readManifest(real);
 		const id = source === "library" ? manifest.name : source.startsWith("bundle:") ? `${source.slice(7)}.${manifest.name}` : `${manifest.name}-${short(real)}`;
 		const signer = readJson<{ signer?: { fingerprint?: string } }>(join(real, ".lab", "lock.json"), {}).signer?.fingerprint;
-		const loaded: Loaded = { id, dir: real, manifest, source, signer };
+		const origin = source === "library" ? readJson<AppOrigin | undefined>(join(real, ORIGIN_FILE), undefined) : undefined;
+		const loaded: Loaded = { id, dir: real, manifest, source, signer, ...(origin?.lab ? { origin } : {}) };
 		this.known.set(id, loaded);
 		if (source === "project" && this.state.known[id]?.dir !== real) {
 			this.state.known[id] = { dir: real, source };
@@ -249,6 +257,12 @@ export class AppHost {
 		return { lines, key: `${permissionKey(m.permissions)}|${program}|${packages ?? ""}` };
 	}
 
+	/** An app from a lab that the lab withdrew, or whose signer it revoked, doesn't open or run. Its data stays. */
+	private refuseBlocked(app: Loaded): void {
+		const reason = app.origin ? this.deps.labAppBlocked?.(app.origin) : undefined;
+		if (reason) throw new Error(`${reason} It won't open; your data for it is kept. Update or remove it (el apps).`);
+	}
+
 	private summary(app: Loaded): AppSummary {
 		const asks = this.asks(app.manifest, app.dir);
 		const grant = this.state.grants[app.id];
@@ -259,7 +273,7 @@ export class AppHost {
 			version: app.manifest.version,
 			description: app.manifest.description,
 			dir: app.dir,
-			source: app.source,
+			source: app.origin ? `lab:${app.origin.lab}` : app.source,
 			backend: app.manifest.backend?.runtime,
 			permissions: app.manifest.permissions,
 			granted: asks.lines.length === 0 || (grant?.allow === true && grant.key === asks.key),
@@ -299,6 +313,7 @@ export class AppHost {
 			app = this.register(dir, "project");
 		} else if (params.id) app = this.find(params.id);
 		else throw new Error("Which app? Give an id or a folder.");
+		this.refuseBlocked(app);
 		const summary = this.summary(app);
 		const asks = this.asks(app.manifest, app.dir).lines;
 		const token = this.mint(app.id, params.sessionId);
@@ -497,6 +512,7 @@ export class AppHost {
 		const view = this.views.get(open.id);
 		if (view) return view.call(name, args);
 		const app = this.find(open.id);
+		this.refuseBlocked(app);
 		const summary = this.summary(app);
 		if (!summary.granted) throw new Error("The person hasn't allowed this app yet.");
 		if (name.startsWith("lab_")) return this.hostTool(app, open.sessionId, name, args, signal);
@@ -595,8 +611,10 @@ export class AppHost {
 				return ok({ text }, text);
 			}
 			case "lab_cluster_run": {
-				const lab = arg("lab");
-				need(p.labs?.includes(lab), `run commands in ${lab}`);
+				// Apps a lab publishes name it by its own name; the person's apps may use the short name here.
+				const named = arg("lab");
+				const lab = this.deps.resolveLab?.(named) ?? named;
+				need(p.labs?.some((l) => l === named || (this.deps.resolveLab?.(l) ?? l) === lab), `run commands in ${named}`);
 				if (this.deps.isolated(lab) && session.site !== lab) throw new Error(`${lab} keeps its data inside; open this app in a ${lab} session.`);
 				if (session.sealed && session.site !== lab) throw new Error("This session's lab keeps its data inside; other labs are out of reach.");
 				const api = this.deps.sandbox(lab);

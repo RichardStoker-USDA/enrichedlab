@@ -29,7 +29,7 @@ look the same to EnrichedLab.
 | `POST /v1/devices` | registers the client's device key (ES256) for sender-bound tokens; `GET` lists them; `DELETE /v1/devices/{id}` revokes one | built: proofs on every request; `el lab check` tries a proof for another token, another address, and one used twice |
 | `/v1/containers/{id}/ports/{port}/…` | HTTP and WebSocket into a port of the sandbox, header auth only, every app page served with `Content-Security-Policy: sandbox` | built: `<lab>_sandbox_open_port` opens the app in the browser pane through a loopback proxy |
 | `/v1/containers/{id}/attach` | a process with stdin and output streamed over a WebSocket of JSON frames: the command first, then `{stdin}`, `{eof}`, `{signal}` in and `{stdout}`, `{stderr}`, `{exit_code}` out | built: app backends in a lab session run this way (apps.md); `el lab check` runs one |
-| `/v1/apps`, `/v1/signers` | the apps a group may install, and whose signatures to trust | to add |
+| `GET /v1/apps`, `GET /v1/signers` | the app versions a person's groups may install (withdrawn ones stay listed with `withdrawn_at`), each package at `/v1/apps/{name}/{version}/package` with ETag = its sha256; and the signers the lab vouches for (`revoked_at` once revoked) | built: the Apps menu and `el apps` list them; installs check size and sha256 against the listing, then the package's signature and every file hash |
 
 Events carry `{type, at, id, session?}` plus fields of their own. Known types: `job.finished`, `agent.finished`,
 `sandbox.idle_stopping`, `sandbox.stopped`, `sandbox.archived` (`delete_after`), `sandbox.restored`,

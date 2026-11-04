@@ -2,6 +2,7 @@
 // JSON Schemas in contract/ are the source; docs/labs.md is the prose. A lab describes itself at
 // GET /.well-known/enrichedlab-lab, and `el lab check <lab>` checks a lab against these schemas.
 
+import appsSchema from "../../../../contract/apps.schema.json" with { type: "json" };
 import bundleSchema from "../../../../contract/bundles.schema.json" with { type: "json" };
 import containerSchema from "../../../../contract/container.schema.json" with { type: "json" };
 import eventSchema from "../../../../contract/event.schema.json" with { type: "json" };
@@ -9,6 +10,7 @@ import guardSchema from "../../../../contract/guard.schema.json" with { type: "j
 import labSchema from "../../../../contract/lab.schema.json" with { type: "json" };
 import meSchema from "../../../../contract/me.schema.json" with { type: "json" };
 import modelsSchema from "../../../../contract/models.schema.json" with { type: "json" };
+import signersSchema from "../../../../contract/signers.schema.json" with { type: "json" };
 import usageSchema from "../../../../contract/usage.schema.json" with { type: "json" };
 
 /** The contract this client speaks. A lab on another major is refused; a newer minor ("2026-11.1") is fine. */
@@ -24,7 +26,34 @@ export const SCHEMAS = {
 	guard: guardSchema,
 	usage: usageSchema,
 	container: containerSchema,
+	apps: appsSchema,
+	signers: signersSchema,
 } as const;
+
+/** One version of an app a lab offers (GET /v1/apps). */
+export interface LabAppEntry {
+	name: string;
+	title: string;
+	version: string;
+	description?: string;
+	signer: { fingerprint: string; name?: string };
+	sha256: string;
+	bytes: number;
+	runtime?: string;
+	permissions?: Record<string, unknown>;
+	published?: string;
+	withdrawn_at?: string | null;
+	package: string;
+}
+
+/** A signer the lab vouches for (GET /v1/signers). */
+export interface LabSigner {
+	fingerprint: string;
+	public_key: string;
+	name?: string;
+	added?: string;
+	revoked_at?: string | null;
+}
 
 export type Endpoint = "models" | "mcp" | "bundles" | "events" | "guard" | "devices" | "containers" | "ports" | "attach" | "files" | "apps" | "signers" | "usage" | "agents";
 

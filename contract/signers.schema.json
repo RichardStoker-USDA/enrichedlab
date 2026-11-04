@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Signers the lab vouches for: GET /v1/signers",
+  "type": "object",
+  "required": ["data"],
+  "properties": {
+    "data": {
+      "type": "array",
+      "description": "revoked signers stay listed with revoked_at",
+      "items": {
+        "type": "object",
+        "required": ["fingerprint", "public_key"],
+        "properties": {
+          "fingerprint": { "type": "string", "pattern": "^[0-9a-f]{4}( [0-9a-f]{4}){3}$", "description": "first 16 hex of sha256 of the raw key, in groups of 4" },
+          "public_key": { "type": "string", "minLength": 40, "description": "base64 of the raw 32-byte Ed25519 key" },
+          "name": { "type": "string" },
+          "added": { "type": "string", "format": "date-time" },
+          "revoked_at": { "type": ["string", "null"] }
+        }
+      }
+    }
+  }
+}

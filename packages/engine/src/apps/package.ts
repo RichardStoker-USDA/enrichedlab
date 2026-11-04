@@ -97,11 +97,32 @@ export async function packApp(p: Paths, dir: string, out: string): Promise<{ fil
 }
 
 interface Trusted {
-	[fingerprint: string]: { publicKey: string; added: string };
+	/** `via` "lab:<site>": trusted because that lab vouches for it, for that lab's apps only. */
+	[fingerprint: string]: { publicKey: string; added: string; via?: string };
 }
 
-/** Open a package, check it fully, and install it. `trust` accepts a signer this person hasn't trusted before. */
-export async function installApp(p: Paths, file: string, options: { trust?: boolean } = {}): Promise<{ name: string; version: string; dir: string; fingerprint: string; newSigner: boolean }> {
+/** Where an app installed from a lab came from (.lab/origin.json): the host checks it is still offered before opening. */
+export interface AppOrigin {
+	lab: string;
+	name: string;
+	version: string;
+	sha256: string;
+	signer: string;
+	installed: string;
+}
+
+export const ORIGIN_FILE = ".lab/origin.json";
+
+/**
+ * Open a package, check it fully, and install it. `trust` accepts a signer this person hasn't trusted before.
+ * `vouched` comes from a lab's /v1/signers when the package came from that lab's /v1/apps: a signer it lists (same
+ * key, not revoked) is accepted for that lab's apps only, never for packages added by hand.
+ */
+export async function installApp(
+	p: Paths,
+	file: string,
+	options: { trust?: boolean; vouched?: { lab: string; signers: { fingerprint: string; publicKey: string }[] }; origin?: Omit<AppOrigin, "signer" | "installed"> } = {},
+): Promise<{ name: string; version: string; dir: string; fingerprint: string; newSigner: boolean; vouchedBy?: string }> {
 	const archive = new Archive(new Uint8Array(readFileSync(file)));
 	const files = await archive.files();
 	const lockBlob = files.get(LOCK);
@@ -134,7 +155,12 @@ export async function installApp(p: Paths, file: string, options: { trust?: bool
 	const trusted = readJson<Trusted>(trustFile, {});
 	const own = existsSync(join(p.home, "keys", "app_signing.jwk")) && fingerprint === (await ownFingerprint(p));
 	if (trusted[fingerprint] && trusted[fingerprint].publicKey !== lock.signer.publicKey) throw new Error(`The package claims trusted signer ${fingerprint} with a different key; refusing it.`);
-	const newSigner = !own && !trusted[fingerprint];
+	const via = options.vouched ? `lab:${options.vouched.lab}` : undefined;
+	const trustedHere = Boolean(trusted[fingerprint]) && (!trusted[fingerprint]!.via || trusted[fingerprint]!.via === via);
+	const vouched = options.vouched?.signers.some((s) => s.fingerprint === fingerprint && s.publicKey === lock.signer!.publicKey) ? options.vouched.lab : undefined;
+	if (options.origin && options.origin.name !== lock.name) throw new Error(`The lab listed ${options.origin.name}, but the package is ${lock.name}.`);
+	if (options.origin && options.origin.version !== lock.version) throw new Error(`The lab listed version ${options.origin.version}, but the package is ${lock.version}.`);
+	const newSigner = !own && !trustedHere && !vouched;
 	if (newSigner && !options.trust) throw new Error(`Signed by ${fingerprint}, a key you haven't trusted. If you know who that is, add it again with --trust.`);
 
 	// Install: write to a staging folder, check it reads as an app, then swap it in.
@@ -149,12 +175,19 @@ export async function installApp(p: Paths, file: string, options: { trust?: bool
 	}
 	mkdirSync(join(staging, ".lab"), { recursive: true });
 	writeFileSync(join(staging, LOCK), `${JSON.stringify(lock, null, 2)}\n`);
+	if (options.origin) {
+		const origin: AppOrigin = { ...options.origin, signer: fingerprint, installed: new Date().toISOString() };
+		writeFileSync(join(staging, ORIGIN_FILE), `${JSON.stringify(origin, null, 2)}\n`);
+	}
 	const manifest = readManifest(staging);
 	if (manifest.name !== lock.name) throw new Error("The package's app.json names a different app than its lock.");
 	rmSync(target, { recursive: true, force: true });
 	renameSync(staging, target);
-	if (newSigner) writeJson(trustFile, { ...trusted, [fingerprint]: { publicKey: lock.signer.publicKey, added: new Date().toISOString() } });
-	return { name: lock.name, version: lock.version, dir: target, fingerprint, newSigner };
+	if (!own && !trustedHere && (options.trust || vouched)) {
+		// Trusted by the person (--trust) for everything; vouched by a lab, for that lab's apps only.
+		writeJson(trustFile, { ...trusted, [fingerprint]: { publicKey: lock.signer.publicKey, added: new Date().toISOString(), ...(options.trust ? {} : { via }) } });
+	}
+	return { name: lock.name, version: lock.version, dir: target, fingerprint, newSigner: newSigner && options.trust === true, ...(vouched ? { vouchedBy: vouched } : {}) };
 }
 
 export function removeApp(p: Paths, name: string): boolean {
