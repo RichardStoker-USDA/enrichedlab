@@ -236,6 +236,13 @@ class Lab {
 	/** Open a pane (or bring it forward) and show the workbench. */
 	openPane(kind: PaneKind, ref?: string, title?: string): string {
 		const view = ref ? this.canvases.find((c) => c.id === ref) : undefined;
+		const openFiles = kind === "files" && !ref ? groups(this.layout).flatMap((g) => g.tabs).find((t) => t.kind === "files") : undefined;
+		if (openFiles) {
+			this.focusPane(openFiles.id);
+			this.workbench = true;
+			this.saveLayout();
+			return openFiles.id;
+		}
 		const tab: Tab = view ? this.tabFor(view) : { id: uid("t"), kind, title: title ?? TITLES[kind], ref };
 		// Terminals and browsers are new each time; views and files come forward if open.
 		const fresh = (kind === "terminal" || kind === "browser") && !ref ? { ...tab, id: uid("t") } : tab;

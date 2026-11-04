@@ -181,10 +181,15 @@
 								{/each}
 							</div>
 						{/if}
+						{#if onPlan}
+							<p class="menu-plan">Using ChatGPT plan · <a href={USAGE_URL} target="_blank" rel="noreferrer">Manage usage</a></p>
+						{/if}
 						<div class="menu-foot">
 							<span>{gauge ? `${leftPct}% context left · ${tokens(gauge.used)} of ${tokens(gauge.threshold)}` : ""}</span>
-							<button type="button" class="link" onclick={() => ((lab.services = true), (menuOpen = false))}>Add a service</button>
-							<button type="button" class="link" onclick={() => lab.compact()} disabled={lab.busy}>Summarize now</button>
+							<span class="foot-actions">
+								<button type="button" class="link" onclick={() => ((lab.services = true), (menuOpen = false))}>Model services</button>
+								<button type="button" class="link" onclick={() => lab.compact()} disabled={lab.busy}>Summarize now</button>
+							</span>
 						</div>
 					</div>
 				{/if}
@@ -422,16 +427,31 @@
 		background: var(--primary-bg);
 		color: var(--primary-fg);
 	}
+	.menu-plan {
+		margin: 4px 10px 0;
+		font-size: 12px;
+		color: var(--text-muted);
+	}
+	.menu-plan a {
+		color: var(--link);
+	}
 	.menu-foot {
 		display: flex;
+		flex-wrap: wrap;
 		justify-content: space-between;
 		align-items: center;
-		gap: 8px;
+		gap: 4px 8px;
 		border-top: 1px solid var(--rule);
 		margin-top: 6px;
 		padding: 8px 10px 4px;
 		font-size: 12px;
 		color: var(--text-faint);
+	}
+	.foot-actions {
+		display: flex;
+		gap: 14px;
+		margin-left: auto;
+		white-space: nowrap;
 	}
 	.link {
 		color: var(--link);
@@ -481,8 +501,9 @@
 		.rate {
 			display: none;
 		}
+		/* The menu says it on narrow screens. */
 		.plan {
-			font-size: 11.5px;
+			display: none;
 		}
 		.chip {
 			max-width: 220px;

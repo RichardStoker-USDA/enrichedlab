@@ -22,7 +22,13 @@
 <div class="switch" bind:this={root}>
 	<button class="pill" onclick={() => (open = !open)} aria-haspopup="menu" aria-expanded={open} disabled={Boolean(lab.moving) || lab.busy} title={lab.busy ? "Moves happen between turns" : "Where this session's files and commands act"}>
 		<span class="place-dot" class:local={lab.place.id === "local"} style:--dot={`var(${lab.place.color})`}></span>
-		<span>{lab.moving ? `Moving to ${lab.places.find((p) => p.id === lab.moving)?.title ?? lab.moving}…` : runsOn(lab.place)}</span>
+		{#if lab.moving}
+			<span class="label">Moving to {lab.places.find((p) => p.id === lab.moving)?.title ?? lab.moving}…</span>
+		{:else}
+			<!-- Narrow windows show the place's name alone; the full phrase stays for screen readers. -->
+			<span class="label full">{runsOn(lab.place)}</span>
+			<span class="label short" aria-hidden="true">{lab.place.title}</span>
+		{/if}
 		<svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4.5 3 3 3-3" /></svg>
 	</button>
 	{#if open}
@@ -99,11 +105,29 @@
 	.check {
 		color: var(--accent-text);
 	}
+	.short {
+		display: none;
+	}
 	@media (max-width: 560px) {
-		.pill span:not(.place-dot) {
-			max-width: 120px;
+		.pill {
+			gap: 6px;
+			padding: 0 8px 0 10px;
+		}
+		.full {
+			position: absolute;
+			width: 1px;
+			height: 1px;
+			overflow: hidden;
+			clip-path: inset(50%);
+		}
+		.short {
+			display: inline;
+			max-width: 96px;
 			overflow: hidden;
 			text-overflow: ellipsis;
+		}
+		.menu {
+			width: min(320px, calc(100vw - 32px));
 		}
 	}
 </style>

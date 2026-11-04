@@ -231,4 +231,9 @@
 			padding: 12px 18px 40px;
 		}
 	}
+	@media (pointer: coarse) {
+		kbd {
+			display: none;
+		}
+	}
 </style>

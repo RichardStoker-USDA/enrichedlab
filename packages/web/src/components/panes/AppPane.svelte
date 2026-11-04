@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tokenColor } from "../../lib/theme.ts";
 	import { onDestroy } from "svelte";
 	import type { AppBridge, McpUiHostContext, McpUiStyles } from "@modelcontextprotocol/ext-apps/app-bridge";
 	import type { AppToolResult, Result } from "@enrichedlab/protocol";
@@ -58,20 +59,22 @@
 	function hostContext(): McpUiHostContext {
 		const css = getComputedStyle(document.documentElement);
 		const v = (name: string) => css.getPropertyValue(name).trim() || undefined;
+		// Colors resolved for the current mode: the page can't evaluate the window's light-dark() tokens.
+		const c = (name: string) => tokenColor(name, frame ?? document.documentElement);
 		const rect = frame?.getBoundingClientRect();
 		return {
 			theme: dark() ? ("dark" as const) : ("light" as const),
 			styles: {
 				variables: {
-					"--color-background-primary": v("--canvas"),
-					"--color-background-secondary": v("--surface"),
-					"--color-background-tertiary": v("--raised"),
-					"--color-text-primary": v("--text"),
-					"--color-text-secondary": v("--text-muted"),
-					"--color-text-tertiary": v("--text-faint"),
-					"--color-border-primary": v("--rule-strong"),
-					"--color-border-secondary": v("--rule"),
-					"--color-ring-primary": v("--focus-inner"),
+					"--color-background-primary": c("--canvas"),
+					"--color-background-secondary": c("--surface"),
+					"--color-background-tertiary": c("--raised"),
+					"--color-text-primary": c("--text"),
+					"--color-text-secondary": c("--text-muted"),
+					"--color-text-tertiary": c("--text-faint"),
+					"--color-border-primary": c("--rule-strong"),
+					"--color-border-secondary": c("--rule"),
+					"--color-ring-primary": c("--focus-inner"),
 					"--font-sans": v("--font-ui"),
 					"--font-mono": v("--font-mono"),
 					"--border-radius-sm": v("--radius-small"),

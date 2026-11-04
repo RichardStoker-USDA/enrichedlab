@@ -8,6 +8,8 @@
 		id: string;
 		label: string;
 		hint?: string;
+		/** A keyboard shortcut; hidden on touch screens. */
+		shortcut?: string;
 		group: string;
 		run: () => void;
 	}
@@ -20,12 +22,12 @@
 		const list: Item[] = [{ id: "new", label: "New session", group: "Actions", run: () => lab.startNew() }];
 		if (lab.current) {
 			list.push(
-				{ id: "bench", label: lab.workbench ? "Close the workbench" : "Open the workbench", hint: mac ? "⌘\\" : "Ctrl \\", group: "Actions", run: () => lab.toggleWorkbench() },
+				{ id: "bench", label: lab.workbench ? "Close the workbench" : "Open the workbench", shortcut: mac ? "⌘\\" : "Ctrl \\", group: "Actions", run: () => lab.toggleWorkbench() },
 				{ id: "files", label: "Open files", group: "Actions", run: () => lab.openPane("files") },
-				{ id: "term", label: "Open a terminal", hint: mac ? "⌃`" : "Ctrl `", group: "Actions", run: () => lab.openPane("terminal") },
+				{ id: "term", label: "Open a terminal", shortcut: mac ? "⌃`" : "Ctrl `", group: "Actions", run: () => lab.openPane("terminal") },
 				{ id: "browser", label: "Open a browser", group: "Actions", run: () => lab.openPane("browser") },
 				{ id: "compact", label: "Summarize older turns now", group: "Actions", run: () => void lab.compact() },
-				{ id: "services", label: "Add a model service", group: "Actions", run: () => (lab.services = true) },
+				{ id: "services", label: "Model services", hint: "ChatGPT plan, keys", group: "Actions", run: () => (lab.services = true) },
 				{ id: "join", label: "Add a lab", group: "Actions", run: () => (lab.join = {}) },
 			);
 			if (!lab.pinned && !lab.busy) {
@@ -36,7 +38,7 @@
 			}
 		}
 		for (const theme of ["auto", "light", "dark"] as const) {
-			if (lab.ui.theme !== theme) list.push({ id: `theme-${theme}`, label: `Appearance: ${theme === "auto" ? "match the system" : theme}`, group: "Actions", run: () => void lab.setTheme(theme) });
+			if (lab.ui.theme !== theme) list.push({ id: `theme-${theme}`, label: theme === "auto" ? "Match the system's light or dark mode" : `Use ${theme} mode`, group: "Appearance", run: () => void lab.setTheme(theme) });
 		}
 		for (const app of lab.apps) list.push({ id: `app-${app.id}`, label: `Open ${app.title}`, hint: app.source === "project" ? "app" : app.source.replace(/^(bundle|mcp):/, ""), group: "Apps", run: () => lab.openApp(app) });
 		for (const s of lab.sessions) list.push({ id: s.id, label: s.title, hint: folderName(s.cwd), group: "Sessions", run: () => lab.go(s.id) });
@@ -82,6 +84,7 @@
 				<button id={`p-${item.id}`} class="item" class:on={i === index} role="option" aria-selected={i === index} onclick={() => run(item)} onpointermove={() => (index = i)}>
 					<span>{item.label}</span>
 					{#if item.hint}<span class="hint">{item.hint}</span>{/if}
+					{#if item.shortcut}<kbd class="hint key">{item.shortcut}</kbd>{/if}
 				</button>
 			{:else}
 				<p class="none">Nothing matches.</p>
@@ -166,5 +169,13 @@
 		margin: 14px;
 		color: var(--text-faint);
 		font-size: 13px;
+	}
+	kbd.key {
+		font: inherit;
+	}
+	@media (pointer: coarse) {
+		.key {
+			display: none;
+		}
 	}
 </style>

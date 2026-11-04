@@ -451,9 +451,48 @@ export class SessionRuntime {
 			} finally {
 				this.abort = undefined;
 				this.changed = this.changesSinceUser();
+				const first = this.meta.turns === 0;
 				this.touch({ turns: this.meta.turns + 1 });
+				if (first) this.naming = this.nameSession();
 			}
 		}
+	}
+
+	/** The title request after the first turn, so a one-off run can wait for it before exiting. */
+	naming?: Promise<void>;
+
+	/**
+	 * After the first turn, the session's model names it in a few words. The first line of the request stays the title
+	 * if the model can't, and a title the person set is never replaced.
+	 */
+	private async nameSession(): Promise<void> {
+		const firstUser = this.events.find((e) => e.t === "user") as Ev<"user"> | undefined;
+		const model = this.model() ?? this.fallbackModel();
+		if (!firstUser || !model) return;
+		const auto = clip(firstUser.text.trim().split("\n")[0] || "Session", 72);
+		const quick = ["off", "none", "minimal", "low"].find((e) => model.efforts.includes(e)) ?? model.efforts[0];
+		let text = "";
+		try {
+			const request = {
+				model,
+				system: "You name conversations so a person can find them again. Reply with the name only: 3 to 6 words, sentence case, file and product names written as they are, no quotes, no ending punctuation.",
+				messages: [{ role: "user" as const, content: [{ type: "text" as const, text: `Name this conversation by what it's about:\n\n${clip(firstUser.text, 1_200)}` }] }],
+				tools: [],
+				toolChoice: "none" as const,
+				effort: quick,
+				maxTokens: Math.min(1_024, model.maxOutput),
+			};
+			for await (const event of adapterFor(model).stream(request, AbortSignal.timeout(45_000))) {
+				if (event.type === "text") text += event.delta;
+				if (event.type === "done" && event.stop === "error") return;
+			}
+		} catch {
+			return;
+		}
+		const title = text.trim().split("\n")[0]!.replace(/^["'“”‘’`*#\s]+|["'“”‘’`*.!?:;\s]+$/g, "").trim();
+		if (title.length < 3 || title.length > 70 || this.meta.title !== auto) return;
+		this.append({ t: "title", id: newId("e"), at: now(), title });
+		this.touch({ title });
 	}
 
 	private appendUser(message: { text: string; images?: Part[] }): void {

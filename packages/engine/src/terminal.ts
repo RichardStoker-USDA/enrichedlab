@@ -24,9 +24,20 @@ export class Terminals {
 	/** Start a terminal where `workspace` acts. Returns its id and a label for the pane. */
 	start(workspace: Workspace, title: string, cols: number, rows: number): { termId: string; label: string } {
 		const termId = newId("t");
-		const output = (data: string) => this.emit("term.output", { termId, data });
+		// The window learns the terminal's id from this call's answer, so output from the first moments (the shell's
+		// prompt, the sandbox console's banner) waits one turn of the event loop instead of going to nobody.
+		let held: string[] | undefined = [];
+		setTimeout(() => {
+			const early = held?.join("");
+			held = undefined;
+			if (early) this.emit("term.output", { termId, data: early });
+		}, 0);
+		const output = (data: string) => (held ? held.push(data) : this.emit("term.output", { termId, data }));
 		const exit = (code: number | null) => {
 			this.open.delete(termId);
+			const early = held?.join("");
+			held = undefined;
+			if (early) this.emit("term.output", { termId, data: early });
 			this.emit("term.exit", { termId, code });
 		};
 		if (workspace.kind === "local") {

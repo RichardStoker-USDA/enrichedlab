@@ -208,6 +208,8 @@ async function runHeadless(prompt: string, flags: Flags): Promise<void> {
 	session.prompt(prompt);
 	while (session.isRunning) await new Promise((r) => setTimeout(r, 100));
 	if (!json) process.stdout.write("\n");
+	// The session's name comes from one short model request after the first turn.
+	await Promise.race([session.naming, new Promise((r) => setTimeout(r, 20_000))]);
 	await engine.stop();
 	const last = [...session.events].reverse().find((e) => e.t === "assistant") as Extract<SessionEvent, { t: "assistant" }> | undefined;
 	process.exit(last && last.stop !== "error" ? 0 : 1);

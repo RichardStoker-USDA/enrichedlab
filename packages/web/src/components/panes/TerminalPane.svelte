@@ -3,6 +3,7 @@
 	import "@xterm/xterm/css/xterm.css";
 	import { lab } from "../../lib/store.svelte.ts";
 	import { rpc } from "../../lib/rpc.ts";
+	import { onThemeChange, tokenColor } from "../../lib/theme.ts";
 
 	let { active }: { active: boolean } = $props();
 	let host: HTMLDivElement | undefined = $state();
@@ -15,16 +16,16 @@
 
 	onMount(async () => {
 		const [{ Terminal }, { FitAddon }] = await Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit")]);
-		const css = getComputedStyle(document.documentElement);
-		const v = (name: string) => css.getPropertyValue(name).trim();
+		const colors = () => ({ background: tokenColor("--canvas", host), foreground: tokenColor("--text", host), cursor: tokenColor("--accent", host), selectionBackground: "rgba(128,128,128,0.3)" });
 		const term = new Terminal({
-			fontFamily: v("--font-mono"),
+			fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim(),
 			fontSize: 12.5,
 			lineHeight: 1.25,
 			cursorBlink: false,
 			allowProposedApi: false,
-			theme: { background: v("--canvas") || undefined, foreground: v("--text") || undefined, cursor: v("--accent") || undefined, selectionBackground: "rgba(128,128,128,0.3)" },
+			theme: colors(),
 		});
+		const stopTheme = onThemeChange(() => (term.options.theme = colors()));
 		const fit = new FitAddon();
 		term.loadAddon(fit);
 		term.open(host!);
@@ -39,21 +40,30 @@
 		}
 		fit.fit();
 		let termId: string | undefined;
+		// The shell's first output (its prompt) can arrive before term.open answers: listen first, keep it, replay it.
+		const early: { termId: string; data: string }[] = [];
+		const offOut = rpc.on("term.output", (m) => {
+			if (termId === undefined) early.push(m);
+			else if (m.termId === termId) term.write(m.data);
+		});
 		try {
 			const opened = await rpc.call("term.open", { sessionId: lab.current, cols: term.cols, rows: term.rows });
 			termId = opened.termId;
 			label = opened.label;
 			if (gone) {
+				offOut();
 				void rpc.call("term.close", { termId }).catch(() => undefined);
 				term.dispose();
 				return;
 			}
+			for (const m of early) if (m.termId === termId) term.write(m.data);
+			early.length = 0;
 		} catch (e) {
+			offOut();
 			error = (e as Error).message;
 			term.dispose();
 			return;
 		}
-		const offOut = rpc.on("term.output", (m) => m.termId === termId && term.write(m.data));
 		const offExit = rpc.on("term.exit", (m) => {
 			if (m.termId !== termId) return;
 			ended = true;
@@ -65,6 +75,7 @@
 		observer.observe(host!);
 		term.focus();
 		cleanup = () => {
+			stopTheme();
 			observer.disconnect();
 			input.dispose();
 			resize.dispose();

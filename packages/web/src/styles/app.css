@@ -405,6 +405,14 @@ kbd {
 	font-variant-numeric: tabular-nums;
 }
 
+/* Cells wrap between words only; a table wider than the column scrolls sideways instead of splitting words. */
+.prose th,
+.prose td,
+.prose td code {
+	overflow-wrap: normal;
+	word-break: normal;
+}
+
 .prose th,
 .prose td {
 	padding: 6px 14px 6px 0;

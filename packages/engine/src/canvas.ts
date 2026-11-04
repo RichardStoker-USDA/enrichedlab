@@ -18,6 +18,8 @@ interface StoredCanvas extends CanvasSummary {
 
 const escape = (text: string) => text.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
+// Pages follow the window's light or dark mode. Figures (an outer <svg>, an <img>) keep the colors they were drawn
+// with: in dark mode they sit on white paper rather than being recolored, so black axis text stays readable.
 const BASE_STYLE = `
 :root{color-scheme:light dark;--fg:#0b1a2e;--muted:#5a6779;--rule:#d6dce4;--bg:#ffffff;--accent:#022851}
 @media (prefers-color-scheme:dark){:root{--fg:#f2f2f2;--muted:#a3a3a3;--rule:#333333;--bg:#000000;--accent:#ffbf00}}
@@ -29,7 +31,8 @@ table{border-collapse:collapse;font-variant-numeric:tabular-nums}
 th,td{border-bottom:1px solid var(--rule);padding:6px 12px;text-align:left}
 code,pre{font:12.5px/1.5 ui-monospace,"SF Mono",Menlo,Consolas,monospace}
 pre{background:color-mix(in srgb,var(--fg) 5%,transparent);padding:12px;border-radius:8px;overflow:auto}
-img,svg{max-width:100%;height:auto}`;
+img,svg{max-width:100%;height:auto}
+@media (prefers-color-scheme:dark){svg:not(svg svg):not(button svg):not(a svg),img{background:#fff;color:#0b1a2e;border-radius:6px}}`;
 
 export class CanvasStore implements CanvasPublisher {
 	private canvases = new Map<string, StoredCanvas>();

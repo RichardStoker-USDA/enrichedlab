@@ -9,6 +9,13 @@
 	const TYPE = "application/x-enrichedlab-tab";
 	let edge = $state<Edge | undefined>();
 	let body: HTMLDivElement | undefined = $state();
+	let strip: HTMLDivElement | undefined = $state();
+
+	// The active tab is always in sight, also in a narrow pane where the strip scrolls.
+	$effect(() => {
+		const id = group.active;
+		strip?.querySelector<HTMLElement>(`#tab-${CSS.escape(id ?? "")}`)?.closest(".tab")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+	});
 
 	function edgeAt(e: DragEvent): Edge {
 		const r = body!.getBoundingClientRect();
@@ -70,7 +77,7 @@
 </script>
 
 <section class="group">
-	<div class="tabs" role="tablist" aria-label="Open panes" tabindex="-1" ondragover={(e) => e.dataTransfer?.types.includes(TYPE) && e.preventDefault()} ondrop={(e) => drop(e, "center")}>
+	<div class="tabs" bind:this={strip} role="tablist" aria-label="Open panes" tabindex="-1" ondragover={(e) => e.dataTransfer?.types.includes(TYPE) && e.preventDefault()} ondrop={(e) => drop(e, "center")}>
 		{#each group.tabs as tab, index (tab.id)}
 			{@const place = placeFor(tab.ref)}
 			{@const active = tab.id === group.active}
@@ -79,7 +86,8 @@
 					title="Arrows switch, Delete closes, Alt+Shift+arrow moves the pane"
 					onclick={() => lab.focusPane(tab.id)} onkeydown={(e) => keys(e, index)}>
 					{#if place}<span class="place-dot" style:--dot={`var(${place.color})`} title={`From the ${place.title} sandbox`}></span>{/if}
-					<span class="kind">{tab.kind === "view" ? "" : tab.kind}</span>
+					<!-- The kind says what a pane is when its title doesn't (a table named "Field plots"); never twice. -->
+					{#if tab.kind !== "view" && tab.title.toLowerCase() !== tab.kind}<span class="kind">{tab.kind}</span>{/if}
 					<span class="name">{tab.title}</span>
 				</button>
 				<button class="close" tabindex="-1" onclick={() => lab.closePane(tab.id)} aria-label={`Close ${tab.title}`}>
@@ -124,7 +132,8 @@
 		display: flex;
 		align-items: center;
 		gap: 6px;
-		max-width: 220px;
+		max-width: min(220px, 70vw);
+		flex: none;
 		padding: 0 4px 0 12px;
 		font-size: 12.5px;
 		color: var(--text-muted);

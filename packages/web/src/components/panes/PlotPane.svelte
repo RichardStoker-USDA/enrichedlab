@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onThemeChange, tokenColor } from "../../lib/theme.ts";
 	import { onDestroy } from "svelte";
 	import { lab } from "../../lib/store.svelte.ts";
 	import { rpc } from "../../lib/rpc.ts";
@@ -134,8 +135,8 @@
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 		ctx.clearRect(0, 0, W, H);
 		const style = getComputedStyle(box!);
-		const faint = style.getPropertyValue("--text-faint").trim();
-		const rule = style.getPropertyValue("--rule").trim();
+		const faint = tokenColor("--text-faint", box!);
+		const rule = tokenColor("--rule", box!);
 		ctx.font = `11px ${style.getPropertyValue("--font-ui")}`;
 		ctx.fillStyle = faint;
 		ctx.strokeStyle = rule;
@@ -220,6 +221,8 @@
 	$effect(() => {
 		if (active) layout();
 	});
+	// Axis text and grid follow light and dark mode.
+	$effect(() => onThemeChange(() => draw()));
 	onDestroy(() => renderer?.destroy());
 </script>
 
