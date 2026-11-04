@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { quoteArg } from "../packages/engine/src/tools/windows_contain.ts";
+import { commandLine, quoteArg } from "../packages/engine/src/tools/windows_contain.ts";
 import { contained } from "../packages/engine/src/tools/workspace.ts";
 
 describe("Windows command lines", () => {
@@ -12,6 +12,8 @@ describe("Windows command lines", () => {
 		expect(quoteArg('say "hi"')).toBe('"say \\"hi\\""');
 		expect(quoteArg("C:\\path with space\\")).toBe('"C:\\path with space\\\\"');
 		expect(quoteArg("")).toBe('""');
+		expect(commandLine(["cmd.exe", "/d", "/c", 'echo hi> "C:\\a b\\x.txt"'])).toBe('cmd.exe /d /c echo hi> "C:\\a b\\x.txt"');
+		expect(commandLine(["pwsh.exe", "-Command", "Get-Item 'a b'"])).toBe('pwsh.exe -Command "Get-Item \'a b\'"');
 	});
 });
 

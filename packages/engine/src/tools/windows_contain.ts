@@ -35,6 +35,13 @@ export function quoteArg(arg: string): string {
 	return `${out}"`;
 }
 
+/** The command line for `argv`. cmd.exe reads what follows /c as it stands, so that part isn't quoted. */
+export function commandLine(argv: string[]): string {
+	const at = /(^|[\\/])cmd(\.exe)?$/i.test(argv[0] ?? "") ? argv.findIndex((a) => /^\/c$/i.test(a)) : -1;
+	if (at < 0) return argv.map(quoteArg).join(" ");
+	return [...argv.slice(0, at + 1).map(quoteArg), ...argv.slice(at + 1)].join(" ");
+}
+
 /** This install's sandbox SID, made once (a random SID in the local-authority range, not tied to any account). */
 export function sandboxSid(home: string): string {
 	const file = join(home, "sandbox_sid");
@@ -139,8 +146,8 @@ export async function runContained(home: string, writable: string[], argv: strin
 		s.setBigUint64(80 + index * 8, BigInt(Number(handle ?? 0)), true);
 	}
 	const info = new Uint8Array(24);
-	const commandLine = wide(argv.map(quoteArg).join(" "));
-	if (!adv.CreateProcessAsUserW(Number(newToken[0]), null, ptr(commandLine), null, null, 1, CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT, null, null, ptr(startup), ptr(info))) {
+	const line = wide(commandLine(argv));
+	if (!adv.CreateProcessAsUserW(Number(newToken[0]), null, ptr(line), null, null, 1, CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT, null, null, ptr(startup), ptr(info))) {
 		fail(`Starting ${argv[0]}`);
 	}
 	const process_ = Number(read.u64(ptr(info), 0));
