@@ -31,6 +31,17 @@ look the same to EnrichedLab.
 | `/v1/containers/{id}/attach` | a process with stdin and output streamed over a WebSocket of JSON frames: the command first, then `{stdin}`, `{eof}`, `{signal}` in and `{stdout}`, `{stderr}`, `{exit_code}` out | built: app backends in a lab session run this way (apps.md); `el lab check` runs one |
 | `/v1/apps`, `/v1/signers` | the apps a group may install, and whose signatures to trust | to add |
 
+Events carry `{type, at, id, session?}` plus fields of their own. Known types: `job.finished`, `agent.finished`,
+`sandbox.idle_stopping`, `sandbox.stopped`, `sandbox.archived` (`delete_after`), `sandbox.restored`,
+`sandbox.deleted`, `app.published`, `app.withdrawn`, `ticket.updated`, `models.changed`, `bundles.changed`,
+`quota.warning`, `signin.revoked`. A lab may add types; clients ignore ones they don't know.
+
+A sandbox has a lifecycle (`status`: running, starting, stopped, archived, restoring, deleted). An idle one stops
+with its files kept; the next use answers `409 sandbox_starting` with `Retry-After` while it starts, and EnrichedLab
+waits and sends the request again. A stopped one is archived after a while (`409 sandbox_archived`): EnrichedLab
+calls `POST /v1/containers/{id}/restore` (202, same id), tells the person, and polls until it runs. A deleted one
+reads 404 (using it, `410 container_expired`), and EnrichedLab starts a new one and says the old files are gone.
+
 Tools and results carry two markers. `_meta["org.enrichedlab/tier"]: "unvalidated"` marks a tool no person has
 reviewed yet: EnrichedLab shows it as unreviewed and asks before every call, in every permission mode. Data tools return
 files as references (MCP `resource_link` with `_meta["org.enrichedlab/sha256"]`), never rows through the model, plus

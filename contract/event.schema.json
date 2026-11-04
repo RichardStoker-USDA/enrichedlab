@@ -4,10 +4,7 @@
   "type": "object",
   "required": ["type", "at", "id"],
   "properties": {
-    "type": {
-      "type": "string",
-      "enum": ["job.finished", "agent.finished", "sandbox.idle_stopping", "sandbox.stopped", "sandbox.archived", "app.published", "ticket.updated", "models.changed", "bundles.changed", "quota.warning", "signin.revoked"]
-    },
+    "type": { "type": "string", "pattern": "^[a-z]+(\\.[a-z_]+)+$", "description": "known types are listed in docs/labs.md; clients ignore types they do not know" },
     "at": { "type": "string", "format": "date-time" },
     "id": { "type": "string", "minLength": 1 },
     "session": { "type": "string" },

@@ -11,6 +11,8 @@ import type { SandboxApi } from "./sandbox_workspace.ts";
 import type { SiteConfig, SiteRoute } from "./sites.ts";
 
 export interface SiteAdapter {
+	/** Set by Sites: notices the adapter has for the person (a sandbox restored from its archive, or replaced). */
+	onNotice?: (text: string) => void;
 	/** On sign-out: revoke this computer's device key at the lab (best effort) and delete it here. */
 	forget?(): Promise<void>;
 	/** Who the site says the person is. */

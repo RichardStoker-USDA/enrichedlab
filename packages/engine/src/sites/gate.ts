@@ -69,6 +69,8 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	private device?: DeviceKey;
 	/** The latest DPoP nonce the lab handed out, if it uses them. */
 	private nonce?: string;
+	/** Plain-language notices for the person (a sandbox restored or replaced); Sites passes them to every surface. */
+	onNotice?: (text: string) => void;
 	/** Sandbox ports opened on this computer, by container and port. */
 	private ports = new Map<string, OpenPort>();
 
@@ -120,7 +122,18 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	private async call(
 		method: string,
 		path: string,
-		init: { json?: unknown; body?: BodyInit; headers?: Record<string, string>; signal?: AbortSignal; /** a proof to send instead of a fresh one (el lab check) */ dpop?: string } = {},
+		init: {
+			json?: unknown;
+			body?: BodyInit;
+			headers?: Record<string, string>;
+			signal?: AbortSignal;
+			/** a proof to send instead of a fresh one (el lab check) */
+			dpop?: string;
+			/** don't wait for a sandbox that's starting; answer at once */
+			noWait?: boolean;
+			/** milliseconds already spent waiting for the sandbox to start */
+			waited?: number;
+		} = {},
 		retried = false,
 	): Promise<Response> {
 		const headers: Record<string, string> = { accept: "application/json", ...init.headers, ...(await this.authHeaders(method, path)) };
@@ -170,6 +183,23 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				this.device?.markRevoked();
 				throw Object.assign(new Error(`${this.title} revoked this computer's key. Sign in again (el login ${this.config.name}) to register a new one.`), { status: 401 });
 			}
+		}
+		if (response.status === 409 && !streamed && !init.noWait) {
+			const code = ((await response.clone().json().catch(() => undefined)) as { error?: { code?: string } } | undefined)?.error?.code;
+			const waited = init.waited ?? 0;
+			if (code === "sandbox_starting" && waited < 180_000) {
+				// The lab is starting a stopped sandbox for this request: wait as long as it says, then send it again.
+				const after = Number(response.headers.get("retry-after"));
+				const wait = (Number.isFinite(after) && response.headers.has("retry-after") ? Math.min(after, 30) : 5) * 1000;
+				await response.arrayBuffer();
+				await sleep(Math.max(wait, 1_000), init.signal);
+				return this.call(method, path, { ...init, waited: waited + Math.max(wait, 1_000) }, retried);
+			}
+		}
+		if (response.status === 410 && this.container && path.startsWith(`/v1/containers/${this.container}`)) {
+			this.container = undefined;
+			await response.arrayBuffer();
+			throw Object.assign(new ToolError(`Your ${this.title} sandbox expired, with its files. The next command starts a new one.`), { status: 410 });
 		}
 		if (!response.ok) {
 			const challenge = response.headers.get("www-authenticate") ?? "";
@@ -593,13 +623,14 @@ export class GateSite implements SiteAdapter, SandboxApi {
 
 	private async sandbox(signal?: AbortSignal): Promise<string> {
 		if (this.container) {
-			try {
-				const current = await this.json<{ status?: string }>("GET", `/v1/containers/${this.container}`, { signal });
-				if (current.status !== "expired" && current.status !== "deleted") return this.container;
-			} catch {
-				// Gone; make a new one.
+			const id = this.container;
+			const status = await this.containerStatus(id, signal);
+			if (status !== "deleted") {
+				await this.wake(id, status, signal);
+				return id;
 			}
 			this.container = undefined;
+			this.onNotice?.(`Your ${this.title} sandbox was deleted, with its files. A new one starts now.`);
 		}
 		this.starting ??= this.json<{ id: string }>("POST", "/v1/containers", { json: { name: "EnrichedLab" }, signal: AbortSignal.timeout(300_000) })
 			.then((made) => {
@@ -610,6 +641,43 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				this.starting = undefined;
 			});
 		return this.starting;
+	}
+
+	/** A sandbox's lifecycle status; "deleted" when the lab no longer has it (404 or 410). */
+	private async containerStatus(id: string, signal?: AbortSignal): Promise<string> {
+		try {
+			return (await this.json<{ status?: string }>("GET", `/v1/containers/${encodeURIComponent(id)}`, { signal })).status ?? "running";
+		} catch (error) {
+			const status = (error as { status?: number }).status;
+			if (status === 404 || status === 410) return "deleted";
+			throw error;
+		}
+	}
+
+	/** Bring a stopped or archived sandbox back before using it: any use starts a stopped one; an archived one is restored. */
+	private async wake(id: string, status: string, signal?: AbortSignal): Promise<void> {
+		if (status === "running") return;
+		const slow = status === "archived" || status === "restoring";
+		if (status === "archived") {
+			this.onNotice?.(`Restoring your ${this.title} sandbox from its archive. Its files come back with it.`);
+			await this.json("POST", `/v1/containers/${encodeURIComponent(id)}/restore`, { json: {}, signal });
+		} else if (status === "stopped") {
+			// Listing one file is the lightest use; the lab starts the sandbox on it.
+			await this.call("GET", `/v1/containers/${encodeURIComponent(id)}/files?limit=1`, { signal, noWait: true }).then(
+				(r) => r.arrayBuffer(),
+				() => undefined,
+			);
+		}
+		const until = Date.now() + (slow ? 15 * 60_000 : 3 * 60_000);
+		for (;;) {
+			const now = await this.containerStatus(id, signal);
+			if (now === "running") return;
+			if (now === "deleted") throw new ToolError(`Your ${this.title} sandbox is gone. Try again to start a new one.`);
+			if (now === "archived" && slow) throw new ToolError(`Restoring your ${this.title} sandbox didn't work; it's still archived. Try again in a while.`);
+			if (now === "stopped" && status !== "stopped") throw new ToolError(`Your ${this.title} sandbox didn't start. Try again.`);
+			if (Date.now() > until) throw new ToolError(`Your ${this.title} sandbox is taking long to ${slow ? "restore" : "start"}. Try again in a minute.`);
+			await sleep(slow ? 5_000 : 2_000, signal);
+		}
 	}
 
 	/** Run a command in the sandbox: its exit code and output streams. */

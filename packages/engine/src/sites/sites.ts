@@ -269,6 +269,7 @@ export class Sites {
 		for (const route of routes) {
 			if (!factory) break;
 			const adapter = factory(config, route, container, this.deviceFile(name));
+			adapter.onNotice = (text) => this.onNotice({ site: name, type: "sandbox.notice", at: new Date().toISOString(), text });
 			try {
 				await adapter.connect();
 				this.adapters.set(name, adapter);
@@ -395,7 +396,13 @@ function noticeText(lab: string, e: LabEvent): string | undefined {
 		case "sandbox.stopped":
 			return `${lab}: your sandbox stopped. Its files are kept; it starts again when you use it.`;
 		case "sandbox.archived":
-			return `${lab}: an old sandbox was archived${typeof e.delete_after === "string" ? `; the archive is kept until ${e.delete_after.slice(0, 10)}` : ""}.`;
+			return `${lab}: an unused sandbox was archived${typeof e.delete_after === "string" ? `; the archive is kept until ${e.delete_after.slice(0, 10)}` : ""}. Using it again restores it.`;
+		case "sandbox.restored":
+			return `${lab}: your sandbox is back from its archive, with its files.`;
+		case "sandbox.deleted":
+			return `${lab}: a sandbox was deleted, with its files.`;
+		case "app.withdrawn":
+			return `${lab}: the app ${typeof e.name === "string" ? e.name : ""}${typeof e.version === "string" ? ` ${e.version}` : ""} was withdrawn.`;
 		case "quota.warning":
 			return `${lab}: you've used ${typeof e.used === "number" && typeof e.limit === "number" ? `${Math.round((e.used / e.limit) * 100)}%` : "most"} of your ${typeof e.kind === "string" ? e.kind : "allowance"}.`;
 		case "app.published":
