@@ -35,6 +35,8 @@ export interface BackendTool {
 
 export interface McpBackend {
 	kind: "mcp";
+	/** The process or its connection ended (a lab closes an idle attach); the host starts it again on next use. */
+	readonly closed?: boolean;
 	tools: BackendTool[];
 	call(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<AppToolResult>;
 	close(): Promise<void>;
@@ -112,8 +114,17 @@ async function connectTransport(transport: Transport): Promise<McpBackend> {
 		const ui = (t._meta as { ui?: { visibility?: string[] } } | undefined)?.ui;
 		return { name: t.name, description: t.description ?? t.name, inputSchema: t.inputSchema as Record<string, unknown>, visibility: ui?.visibility ?? ["model", "app"] };
 	});
+	let closed = false;
+	const ended = transport.onclose;
+	transport.onclose = () => {
+		closed = true;
+		ended?.();
+	};
 	return {
 		kind: "mcp",
+		get closed() {
+			return closed;
+		},
 		tools,
 		async call(name, args, signal) {
 			const result = await client.callTool({ name, arguments: args }, { signal, timeout: 300_000 });

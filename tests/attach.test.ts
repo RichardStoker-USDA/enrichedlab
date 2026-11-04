@@ -115,14 +115,22 @@ describe.skipIf(process.platform === "win32")("app backends in a lab sandbox", (
 	test("an MCP backend is copied into the sandbox and answers from there", async () => {
 		const app = join(box, "yield_app");
 		mkdirSync(app, { recursive: true });
-		writeFileSync(join(app, "backend.ts"), `export const tools = { where: { description: "Where it runs", async run(_args, app) { return "data at " + app.dataDir; } } };\n`);
+		writeFileSync(
+			join(app, "backend.ts"),
+			`export const tools = { where: { description: "Where it runs", async run(_args, app) { return "data at " + app.dataDir; } }, quit: { description: "Stop", async run() { setTimeout(() => process.exit(0), 50); return "bye"; } } };\n`,
+		);
 		const manifest = { name: "yield_app", version: "1.0.0", backend: { runtime: "bun", main: "backend.ts" } } as unknown as AppManifest;
 		const lines: string[] = [];
 		const backend = await startBackend(manifest, { dir: app, dataDir: join(box, "local_data"), runDir: join(box, "run"), toolsDir: join(box, "tools"), network: false, log: (l) => lines.push(l), sandbox, sandboxOnly: true });
 		if (backend.kind !== "mcp") throw new Error("expected an MCP backend");
-		expect(backend.tools.map((t) => t.name)).toEqual(["where"]);
+		expect(backend.tools.map((t) => t.name)).toEqual(["where", "quit"]);
 		const result = await backend.call("where", {});
 		expect(result.content[0]).toEqual({ type: "text", text: `data at ${home}/.el-apps/yield_app/data` });
+		// A process that ends (or a lab closing an idle connection) shows as closed, so the host starts it again.
+		expect(backend.closed).toBe(false);
+		await backend.call("quit", {});
+		for (let i = 0; i < 60 && !backend.closed; i++) await Bun.sleep(50);
+		expect(backend.closed).toBe(true);
 		await backend.close();
 	});
 

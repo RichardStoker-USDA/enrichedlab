@@ -162,6 +162,8 @@ export class AppHost {
 	private starting = new Set<string>();
 	private opened = new Map<string, Opened>();
 	private backends = new Map<string, Promise<Backend>>();
+	/** Started backends, to notice one whose process ended. */
+	private live = new Map<string, Backend>();
 	private idle = new Map<string, ReturnType<typeof setTimeout>>();
 	private watchers = new Map<string, FSWatcher>();
 	private logs = new Map<string, string[]>();
@@ -425,6 +427,11 @@ export class AppHost {
 
 	private backend(app: Loaded, sessionId: string | undefined): Promise<Backend> {
 		const key = `${app.id}|${sessionId ?? ""}`;
+		const current = this.live.get(key);
+		if (current?.kind === "mcp" && current.closed) {
+			this.backends.delete(key);
+			this.live.delete(key);
+		}
 		let running = this.backends.get(key);
 		if (!running) {
 			const session = sessionId ? this.deps.session(sessionId) : undefined;
@@ -449,7 +456,10 @@ export class AppHost {
 					log,
 				});
 			const started = running;
-			running.catch(() => this.backends.get(key) === started && this.backends.delete(key));
+			running.then(
+				(backend) => this.backends.get(key) === started && this.live.set(key, backend),
+				() => this.backends.get(key) === started && this.backends.delete(key),
+			);
 			// Starting can build the app's environment, whose install scripts write and remove files in the app's
 			// folder: those aren't edits, so the watcher waits until two seconds after the backend is up.
 			this.starting.add(app.id);
@@ -462,6 +472,7 @@ export class AppHost {
 	private async stopBackend(key: string): Promise<void> {
 		const running = this.backends.get(key);
 		this.backends.delete(key);
+		this.live.delete(key);
 		this.idle.delete(key);
 		await running?.then((b) => b.close()).catch(() => undefined);
 	}
