@@ -10,10 +10,10 @@
   ],
   "scripts": {
     "el": "bun packages/cli/src/main.ts",
-    "dev:web": "bun --cwd packages/web run dev",
-    "build:web": "bun --cwd packages/web run build",
+    "dev:web": "bun run --cwd packages/web dev",
+    "build:web": "bun run --cwd packages/web build",
     "build": "bun scripts/build.ts",
-    "check": "tsc -p tsconfig.json --noEmit && bun --cwd packages/web run check",
+    "check": "tsc -p tsconfig.json --noEmit && bun run --cwd packages/web check",
     "test": "bun test tests"
   },
   "devDependencies": {
