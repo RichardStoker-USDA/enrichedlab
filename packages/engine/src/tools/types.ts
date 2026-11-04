@@ -1,0 +1,87 @@
+import type { AgentHost } from "./agents.ts";
+import type { AppSummary, CanvasSummary, Part, StepView, SurfaceAnswer } from "@enrichedlab/protocol";
+import type { McpView } from "../apps/host.ts";
+import type { SessionLog } from "../session/log.ts";
+import type { Workspace } from "./workspace.ts";
+
+/** How a tool is gated. */
+export type ToolKind =
+	| "read" // reads inside the workspace: runs
+	| "write" // changes files: asks unless allowed
+	| "exec" // runs commands: asks unless read-only or allowed
+	| "net" // reaches a host: asks once per host
+	| "local" // harness-only effects (canvas, plan, recall): runs
+	| "site-read" // a site tool marked read-only: runs
+	| "site-write" // any other site tool: asks
+	| "sandbox"; // runs in an isolated site sandbox: runs
+
+export interface ToolContext {
+	sessionId: string;
+	callId: string;
+	workspace: Workspace;
+	log: SessionLog;
+	signal: AbortSignal;
+	vision: boolean;
+	/** Stream partial output to watching surfaces. */
+	output(text: string): void;
+	canvas: CanvasPublisher;
+	/** Where the session works: "local" or a site name. */
+	place: string;
+	/** The project's folder on this computer (its git root, or the session's folder). */
+	project: string;
+	/** Set in a session bound to an isolated lab: nothing the tool makes may reach the network. */
+	sealed?: boolean;
+	/** Opening apps in this session's workbench, and showing an MCP server's view. */
+	apps?: { open(path: string): Promise<AppSummary>; publishView(view: McpView): AppSummary };
+	/** Asking the desktop window showing this session to act (its browser); absent when none is open. */
+	surface?: { call(capability: string, op: string, args: Record<string, unknown>, signal: AbortSignal): Promise<SurfaceAnswer> };
+	/** Starting and collecting subagents; absent inside a subagent. */
+	agents?: AgentHost;
+}
+
+export type CanvasInput = { sessionId: string; id?: string; title: string; kind: CanvasSummary["kind"]; content: string; sealed?: boolean } & Pick<CanvasSummary, "source" | "plot" | "href">;
+
+export interface CanvasPublisher {
+	publish(input: CanvasInput): CanvasSummary;
+}
+
+export interface ToolResult {
+	ok: boolean;
+	content: string;
+	images?: Part[];
+	view?: Partial<StepView>;
+}
+
+export interface Tool<A = Record<string, unknown>> {
+	name: string;
+	description: string;
+	parameters: Record<string, unknown>;
+	kind: ToolKind;
+	/** The step line, before it runs (also what a permission question shows). */
+	view(args: A): StepView;
+	/** Extra reason to ask even when the kind would run, e.g. a path outside the project. */
+	/** For "net" tools without a url argument: the host a call reaches, for the once-per-host question. */
+	host?(args: A): string;
+	/** Files this call may change, so they can be checkpointed first (absolute or project-relative). */
+	touches?(args: A): string[];
+	ask?(args: A, ctx: { workspace: Workspace }): string | undefined;
+	run(args: A, ctx: ToolContext): Promise<ToolResult>;
+}
+
+export class ToolError extends Error {}
+
+/** Read a required string argument or explain what was missing. */
+export function str(args: Record<string, unknown>, key: string, required = true): string {
+	const value = args[key];
+	if (typeof value === "string") return value;
+	if (value === undefined && !required) return "";
+	throw new ToolError(`"${key}" must be a string.`);
+}
+
+export function num(args: Record<string, unknown>, key: string): number | undefined {
+	const value = args[key];
+	if (value === undefined || value === null) return undefined;
+	const n = typeof value === "string" ? Number(value) : value;
+	if (typeof n !== "number" || !Number.isFinite(n)) throw new ToolError(`"${key}" must be a number.`);
+	return n;
+}

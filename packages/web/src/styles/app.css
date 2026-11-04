@@ -1,0 +1,486 @@
+/* EnrichedLab: tokens (UC Davis primitives, then roles), base elements, and the few shared pieces every region uses:
+   controls, menus, prose, code. Components use roles only. Light and dark come from one definition per token through
+   light-dark(): color-scheme picks the side, and data-theme pins it. Dark mode follows BFI Index. See
+   docs/design.md. */
+
+:root {
+	/* Primitives: UC Davis published values */
+	--aggie-blue: #022851;
+	--aggie-blue-80: #1d4776;
+	--aggie-blue-60: #4f7094;
+	--aggie-blue-30: #9aadc2;
+	--aggie-blue-20: #b3c1d1;
+	--aggie-blue-10: #cdd6e0;
+	--aggie-gold: #ffbf00;
+	--aggie-gold-70: #ffd24c;
+	--black-90: #191919;
+	--black-80: #333333;
+	--black-70: #4c4c4c;
+	--redwood: #266041;
+	--sage: #6cca98;
+	--putah-creek: #008eaa;
+	--tahoe: #00b2e3;
+
+	color-scheme: light dark;
+
+	/* Roles */
+	--canvas: light-dark(#ffffff, #000000);
+	--surface: light-dark(#f5f7fa, var(--black-90));
+	--surface-2: light-dark(#eef1f5, #222222);
+	--raised: light-dark(#ffffff, #1f1f1f);
+	--rail: light-dark(rgb(245 247 250 / 0.84), rgb(20 20 20 / 0.8));
+	--rule: light-dark(#e1e6ed, var(--black-80));
+	--rule-strong: light-dark(var(--aggie-blue-10), var(--black-70));
+	--text: light-dark(#0b1a2e, #f2f2f2);
+	--text-muted: light-dark(#4f6278, #a8a8a8);
+	--text-faint: light-dark(#7d8fa5, #767676);
+	--prompt: light-dark(var(--aggie-blue), #ffffff);
+	--accent: light-dark(var(--aggie-blue), var(--aggie-gold));
+	--accent-text: light-dark(var(--aggie-blue-80), var(--aggie-gold-70));
+	--link: var(--accent-text);
+	--primary-bg: light-dark(var(--aggie-blue), var(--aggie-gold));
+	--primary-fg: light-dark(#ffffff, var(--aggie-blue));
+	--focus-inner: light-dark(var(--aggie-blue), var(--aggie-gold));
+	--focus-outer: light-dark(var(--aggie-gold), rgb(255 191 0 / 0.35));
+	--live: light-dark(var(--aggie-blue), var(--aggie-gold));
+	--notch: var(--aggie-gold);
+	--notch-edge: light-dark(var(--aggie-blue), var(--aggie-gold));
+	--ok: light-dark(#1e6b43, #7fc8a0);
+	--bad: light-dark(#b3261e, #ff8a80);
+	--added: light-dark(#1e6b43, #8fd3a6);
+	--removed: light-dark(#b3261e, #ff9c93);
+	--added-bg: light-dark(rgb(30 107 67 / 0.07), rgb(143 211 166 / 0.08));
+	--removed-bg: light-dark(rgb(179 38 30 / 0.06), rgb(255 156 147 / 0.07));
+	--code-bg: light-dark(rgb(2 40 81 / 0.04), rgb(255 255 255 / 0.05));
+	--hover: light-dark(rgb(2 40 81 / 0.055), rgb(255 255 255 / 0.07));
+	--selected: light-dark(rgb(2 40 81 / 0.09), rgb(255 255 255 / 0.11));
+	--shadow-color: light-dark(rgb(2 40 81 / 0.1), rgb(0 0 0 / 0.6));
+	--shadow: 0 1px 2px var(--shadow-color), 0 12px 32px var(--shadow-color);
+
+	/* Places: markers only, always beside the place's name */
+	--place-local: var(--text-faint);
+	--place-1: light-dark(var(--aggie-blue), var(--aggie-gold));
+	--place-2: light-dark(var(--redwood), var(--sage));
+	--place-3: var(--putah-creek);
+	--place-4: var(--tahoe);
+
+	--font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, "Noto Sans", sans-serif;
+	--font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+	--font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "Cascadia Mono", Consolas, monospace;
+	--measure: 72ch;
+	--rail-width: 260px;
+	--radius: 10px;
+	--radius-small: 6px;
+	--ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+	--row: 28px;
+}
+
+:root[data-theme="light"] {
+	color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+	color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	margin: 0;
+	height: 100%;
+	background: var(--canvas);
+	color: var(--text);
+	font: 14.5px/1.5 var(--font-ui);
+	-webkit-font-smoothing: antialiased;
+	text-rendering: optimizeLegibility;
+}
+
+#app {
+	height: 100%;
+	overflow: hidden;
+}
+
+button,
+input,
+textarea,
+select {
+	font: inherit;
+	color: inherit;
+}
+
+button {
+	cursor: pointer;
+	background: none;
+	border: 0;
+	padding: 0;
+}
+
+button:disabled {
+	cursor: default;
+}
+
+a {
+	color: var(--accent-text);
+	text-underline-offset: 2px;
+}
+
+:focus-visible {
+	outline: 2px solid var(--focus-inner);
+	outline-offset: 2px;
+	box-shadow: 0 0 0 5px var(--focus-outer);
+	border-radius: var(--radius-small);
+}
+
+code,
+pre,
+kbd {
+	font-family: var(--font-mono);
+	font-size: 12.5px;
+}
+
+kbd {
+	font-size: 11px;
+	color: var(--text-faint);
+	letter-spacing: 0.02em;
+}
+
+::selection {
+	background: light-dark(rgb(2 40 81 / 0.16), rgb(255 191 0 / 0.3));
+}
+
+* {
+	scrollbar-width: thin;
+	scrollbar-color: var(--rule-strong) transparent;
+}
+
+.visually-hidden {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}
+
+/* ── Controls ─────────────────────────────────────────────────────────────────────────────────────────────────── */
+
+.btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	height: 30px;
+	padding: 0 12px;
+	border-radius: var(--radius-small);
+	border: 1px solid var(--rule-strong);
+	background: var(--raised);
+	font-size: 13px;
+	font-weight: 500;
+	white-space: nowrap;
+	transition: background 120ms, border-color 120ms;
+}
+
+.btn:hover:not(:disabled) {
+	background: var(--hover);
+}
+
+.btn:disabled {
+	opacity: 0.5;
+}
+
+.btn.primary {
+	background: var(--primary-bg);
+	color: var(--primary-fg);
+	border-color: transparent;
+}
+
+.btn.primary:hover:not(:disabled) {
+	background: color-mix(in srgb, var(--primary-bg) 88%, var(--text));
+}
+
+.btn.quiet {
+	border-color: transparent;
+	background: transparent;
+	color: var(--text-muted);
+}
+
+.icon-btn {
+	display: inline-grid;
+	place-items: center;
+	width: 30px;
+	height: 30px;
+	border-radius: var(--radius-small);
+	color: var(--text-muted);
+	transition: background 120ms, color 120ms;
+}
+
+.icon-btn:hover:not(:disabled) {
+	background: var(--hover);
+	color: var(--text);
+}
+
+.icon-btn svg {
+	width: 16px;
+	height: 16px;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.6;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+.field {
+	height: 32px;
+	padding: 0 10px;
+	border-radius: var(--radius-small);
+	border: 1px solid var(--rule-strong);
+	background: var(--canvas);
+	outline: none;
+}
+
+.field:focus {
+	border-color: var(--accent);
+}
+
+/* A menu that floats: the only kind of thing with a shadow besides the command palette. */
+.menu {
+	position: absolute;
+	z-index: 40;
+	min-width: 240px;
+	padding: 6px;
+	border-radius: var(--radius);
+	border: 1px solid var(--rule);
+	background: var(--raised);
+	box-shadow: var(--shadow);
+	animation: menu-in 140ms var(--ease-out);
+}
+
+.menu-item {
+	display: grid;
+	grid-template-columns: 14px 1fr auto;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	min-height: 34px;
+	padding: 6px 10px;
+	border-radius: var(--radius-small);
+	text-align: left;
+}
+
+.menu-item:hover:not(:disabled),
+.menu-item.on {
+	background: var(--hover);
+}
+
+.menu-item:disabled {
+	color: var(--text-faint);
+}
+
+.menu-item small {
+	display: block;
+	color: var(--text-faint);
+	font-size: 12px;
+}
+
+.menu-label {
+	padding: 8px 10px 4px;
+	font-size: 11.5px;
+	color: var(--text-faint);
+}
+
+@keyframes menu-in {
+	from {
+		opacity: 0;
+		transform: translateY(-4px) scale(0.98);
+	}
+}
+
+/* A place's marker: the colored dot always sits next to the place's name. */
+.place-dot {
+	display: inline-block;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--dot, var(--place-local));
+	flex: none;
+}
+
+.place-dot.local {
+	background: transparent;
+	box-shadow: inset 0 0 0 1.5px var(--place-local);
+}
+
+/* ── Prose: the agent's answers ───────────────────────────────────────────────────────────────────────────────── */
+
+.prose {
+	font-size: 15.5px;
+	line-height: 1.6;
+	max-width: var(--measure);
+	overflow-wrap: anywhere;
+}
+
+.prose > :first-child {
+	margin-top: 0;
+}
+
+.prose > :last-child {
+	margin-bottom: 0;
+}
+
+.prose p,
+.prose ul,
+.prose ol,
+.prose blockquote,
+.prose .code,
+.prose table {
+	margin: 0 0 0.85em;
+}
+
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4 {
+	font-family: var(--font-display);
+	line-height: 1.3;
+	letter-spacing: -0.01em;
+	margin: 1.4em 0 0.5em;
+}
+
+.prose h1 {
+	font-size: 1.35em;
+}
+
+.prose h2 {
+	font-size: 1.2em;
+}
+
+.prose h3,
+.prose h4 {
+	font-size: 1.04em;
+}
+
+.prose ul,
+.prose ol {
+	padding-left: 1.3em;
+}
+
+.prose li + li {
+	margin-top: 0.25em;
+}
+
+.prose li::marker {
+	color: var(--text-faint);
+}
+
+.prose blockquote {
+	padding-left: 14px;
+	border-left: 2px solid var(--rule-strong);
+	color: var(--text-muted);
+}
+
+.prose hr {
+	border: 0;
+	border-top: 1px solid var(--rule);
+	margin: 1.4em 0;
+}
+
+.prose :not(pre) > code {
+	padding: 1px 5px;
+	border-radius: 4px;
+	background: var(--code-bg);
+	font-size: 0.86em;
+	overflow-wrap: anywhere;
+}
+
+.prose table {
+	display: block;
+	max-width: 100%;
+	overflow-x: auto;
+	border-collapse: collapse;
+	font-size: 14px;
+	font-variant-numeric: tabular-nums;
+}
+
+.prose th,
+.prose td {
+	padding: 6px 14px 6px 0;
+	border-bottom: 1px solid var(--rule);
+	text-align: left;
+	vertical-align: top;
+}
+
+.prose th {
+	font-weight: 600;
+	color: var(--text-muted);
+	font-size: 12.5px;
+	border-bottom-color: var(--rule-strong);
+}
+
+.prose img {
+	max-width: 100%;
+	border-radius: var(--radius-small);
+}
+
+/* Code blocks: a quiet frame with the language and a copy button; colors from Shiki's two themes. */
+.code {
+	border: 1px solid var(--rule);
+	border-radius: var(--radius);
+	overflow: hidden;
+	background: var(--code-bg);
+}
+
+.code-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	height: 30px;
+	padding: 0 6px 0 12px;
+	border-bottom: 1px solid var(--rule);
+	font: 11.5px var(--font-mono);
+	color: var(--text-faint);
+}
+
+.code-head button {
+	height: 22px;
+	padding: 0 8px;
+	border-radius: 4px;
+	font: 11.5px var(--font-ui);
+	color: var(--text-muted);
+}
+
+.code-head button:hover {
+	background: var(--hover);
+	color: var(--text);
+}
+
+.code pre {
+	margin: 0;
+	padding: 12px 14px;
+	overflow-x: auto;
+	font-size: 12.5px;
+	line-height: 1.6;
+	background: transparent !important;
+}
+
+.shiki span {
+	color: light-dark(var(--shiki-light), var(--shiki-dark));
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		transition-duration: 0.01ms !important;
+	}
+}
+
+/* Inside the desktop shell on macOS and Windows 11 the window material shows through the rail. */
+html.material,
+html.material body {
+	background: transparent;
+}

@@ -1,0 +1,12 @@
+{
+	"GHSA-gcqx-w48m-w2h4": {
+		"packages": ["deepmerge"],
+		"reason": "Build time only: @sveltejs/vite-plugin-svelte merges our own config. Not in the shipped binary. No fixed release yet.",
+		"review": "2026-12-04"
+	},
+	"GHSA-g3hv-75wg-m249": {
+		"packages": ["minimatch"],
+		"reason": "Build time only: electron-builder's packaging globs our own patterns. Fixed in 11.0.1, which its dependencies don't take yet; recheck when electron-builder updates.",
+		"review": "2026-12-04"
+	}
+}

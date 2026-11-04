@@ -1,0 +1,6 @@
+{
+	"name": "build an app",
+	"files": { "plots.csv": "plot,treatment,height_cm,yield_g\nP1,control,40,80\nP2,high N,52,170\n" },
+	"prompt": "Make an app named plot-viewer from the data template with app_create, set its default file to plots.csv, then app_open it.",
+	"checks": [{ "file": "apps/plot-viewer/app.json", "contains": "plot-viewer" }, { "file": "apps/plot-viewer/main.js", "contains": "plots.csv" }, { "opened": "plot-viewer" }]
+}

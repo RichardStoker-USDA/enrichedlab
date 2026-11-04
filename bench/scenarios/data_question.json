@@ -1,0 +1,6 @@
+{
+	"name": "answer from data",
+	"files": { "yields.csv": "plot,treatment,yield_g\nP1,control,80\nP2,control,82\nP3,high N,170\nP4,high N,178\n" },
+	"prompt": "What is the mean yield_g for the high N treatment in yields.csv? Answer with the number.",
+	"checks": [{ "answer": "174" }]
+}

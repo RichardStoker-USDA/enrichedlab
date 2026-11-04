@@ -1,0 +1,838 @@
+// One live session: the agent loop, steering, cancel, permissions, context management and fan-out to surfaces.
+//
+// A turn is one or more steps. A step is one model request plus the tool calls it made. Read-only calls in a step
+// run together; anything that changes state runs in order. A message sent while a turn runs joins the next step.
+
+import type {
+	Activity,
+	Notifications,
+	Partial_,
+	Part,
+	PermissionDecision,
+	PermissionRequest,
+	SessionEvent,
+	SessionStatus,
+	SessionSummary,
+	StepView,
+	ToolCall,
+	Usage,
+} from "@enrichedlab/protocol";
+import type { LabConfig } from "../config.ts";
+import { adapterFor, type ModelRegistry } from "../models/registry.ts";
+import { ModelHttpError, type ModelProfile, type ToolSchema } from "../models/types.ts";
+import { Checkpoints } from "./checkpoint.ts";
+import { changedSince, repoRoot, restoreSnapshot, snapshot } from "../git.ts";
+import { isReadOnlyCommand } from "../tools/shell.ts";
+import { runHooks } from "../hooks.ts";
+import { projectRoot } from "../prompt.ts";
+import { findSkills, type Skill, skillDirs, skillTool } from "../skills.ts";
+import type { AgentResult } from "../tools/agents.ts";
+import { join } from "node:path";
+import { decide } from "../permissions.ts";
+import type { CanvasPublisher, Tool, ToolContext } from "../tools/types.ts";
+import { ToolError } from "../tools/types.ts";
+import type { Workspace } from "../tools/workspace.ts";
+import { clip, errorText, estimateTokens, newId, now, redact, sleep } from "../util.ts";
+import { summarize } from "./compaction.ts";
+import { budget, cutPoint, derive, ELIDE_MIN_CHARS, elisionCandidates, gauge, INLINE_MAX_CHARS } from "./context.ts";
+import { type SessionLog, type SessionMeta, toSummary } from "./log.ts";
+
+const MAX_STEPS = 400;
+const MAX_ATTEMPTS = 5;
+const DELTA_FLUSH_MS = 24;
+const PARALLEL_KINDS = new Set(["read", "net", "site-read"]);
+
+export interface RuntimeDeps {
+	config(): LabConfig;
+	registry: ModelRegistry;
+	/** Every tool a session can use right now: built-ins, MCP tools, and the tools of the sites it sees. */
+	tools(site?: string): Tool[];
+	/** Whether a session bound to `site` (or unbound) may use this model. */
+	allows(model: ModelProfile, site?: string): boolean;
+	/** Subagents: start a child session on a task, wait for children, stop a session's children. */
+	spawn(parent: SessionRuntime, task: string, options: { mode: "read" | "full"; model?: string }): string;
+	waitAgents(parent: string, agents: string[], timeoutMs: number, signal: AbortSignal): Promise<AgentResult[]>;
+	/** True for a session bound to an isolated lab. */
+	sealed?(site: string | undefined): boolean;
+	/** Apps for a tool call in this session: opening one in the workbench, showing an MCP server's view. */
+	apps?(sessionId: string): ToolContext["apps"];
+	surface?(sessionId: string): ToolContext["surface"];
+	cancelChildren(parent: string): void;
+	canvas: CanvasPublisher;
+	notify<N extends keyof Notifications>(name: N, params: Notifications[N]): void;
+	ask(request: PermissionRequest, signal: AbortSignal): Promise<PermissionDecision | "cancelled">;
+}
+
+type Ev<T extends SessionEvent["t"]> = Extract<SessionEvent, { t: T }>;
+
+export class SessionRuntime {
+	readonly id: string;
+	events: SessionEvent[];
+	meta: SessionMeta;
+	activity: Activity = "idle";
+	private queue: { text: string; images?: Part[] }[] = [];
+	private abort?: AbortController;
+	private running?: Promise<void>;
+	private allowed = new Set<string>();
+	private partial: Partial_ = { text: "", reasoning: "", tools: [], output: {} };
+	private pendingDelta: { kind: "text" | "reasoning"; text: string } | undefined;
+	private deltaTimer?: ReturnType<typeof setTimeout>;
+	private rate?: number;
+	private detail?: string;
+	readonly pending = new Map<string, PermissionRequest>();
+
+	private checkpoints: Checkpoints;
+
+	private current: Workspace;
+	/** Set while the session moves between places; prompts wait for the move to finish. */
+	moving = false;
+	/** What the last turn changed, worked out when it ends; undo offers to put these back. */
+	private changed?: string[];
+
+	constructor(
+		readonly log: SessionLog,
+		workspace: Workspace,
+		private deps: RuntimeDeps,
+	) {
+		this.current = workspace;
+		this.checkpoints = new Checkpoints(join(log.dir, "checkpoints"));
+		this.id = log.id;
+		this.events = log.read();
+		this.meta = log.meta() ?? {
+			id: log.id,
+			cwd: workspace.root,
+			title: "Session",
+			created: this.events[0]?.at ?? now(),
+			updated: now(),
+			model: "",
+			turns: 0,
+		};
+	}
+
+	get system(): string {
+		return this.header?.system ?? "";
+	}
+
+	/** The site this session is bound to, if any. */
+	get site(): string | undefined {
+		return this.header?.site;
+	}
+
+	/** Set when this session is a subagent. */
+	get parent(): string | undefined {
+		return this.header?.parent;
+	}
+
+	private get agentMode(): "read" | "full" | undefined {
+		return this.header?.parent ? (this.header.mode ?? "read") : undefined;
+	}
+
+	/** Tools this session can use: a subagent can't start agents of its own; skills when the project has any. */
+	private visibleTools(): Tool[] {
+		const tools = this.deps.tools(this.site);
+		const visible = this.parent ? tools.filter((t) => !t.name.startsWith("agent_")) : tools;
+		return this.skills().length ? [...visible, this.skillTool] : visible;
+	}
+
+	private skillTool = skillTool(() => this.skills());
+	private skillCache?: { at: number; skills: Skill[] };
+
+	/** The person's and the project's skills, read again at most every 10 seconds. */
+	skills(): Skill[] {
+		if (!this.skillCache || Date.now() - this.skillCache.at > 10_000) {
+			this.skillCache = { at: Date.now(), skills: findSkills(skillDirs(this.deps.config().skills.dirs, projectRoot(this.cwd))) };
+		}
+		return this.skillCache.skills;
+	}
+
+	private get header(): Ev<"header"> | undefined {
+		return this.events.find((e) => e.t === "header") as Ev<"header"> | undefined;
+	}
+
+	get modelRef(): string | undefined {
+		for (let i = this.events.length - 1; i >= 0; i--) {
+			const e = this.events[i];
+			if (e.t === "model") return e.model;
+		}
+		return this.meta.model || undefined;
+	}
+
+	get effort(): string | undefined {
+		for (let i = this.events.length - 1; i >= 0; i--) {
+			const e = this.events[i];
+			if (e.t === "model") return e.effort;
+		}
+		return undefined;
+	}
+
+	get isRunning(): boolean {
+		return this.running !== undefined;
+	}
+
+	summary(): SessionSummary {
+		return toSummary(this.meta, this.isRunning);
+	}
+
+	/** Where files and commands act now. */
+	get workspace(): Workspace {
+		return this.current;
+	}
+
+	/** The latest move: "local" or a site name, and what came along. */
+	get placement(): Ev<"place"> | undefined {
+		return [...this.events].reverse().find((e) => e.t === "place") as Ev<"place"> | undefined;
+	}
+
+	get place(): string {
+		return this.placement?.place ?? "local";
+	}
+
+	/** Reattach the place a reopened session last worked in (no event: it is already in the log). */
+	useWorkspace(workspace: Workspace): void {
+		this.current = workspace;
+	}
+
+	/** Act somewhere else from the next turn on. The model is told in its next request. */
+	moveTo(workspace: Workspace, move: Omit<Ev<"place">, "t" | "id" | "at">): void {
+		if (this.running) throw new Error("Wait for the current turn to finish, or cancel it.");
+		this.current = workspace;
+		this.append({ t: "place", id: newId("e"), at: now(), ...move });
+		this.touch({ place: move.place });
+	}
+
+	snapshot() {
+		return { summary: this.summary(), events: this.events, status: this.status(), pending: [...this.pending.values()], partial: this.isRunning ? this.partial : undefined };
+	}
+
+	model(): ModelProfile | undefined {
+		return this.deps.registry.resolve(this.modelRef) ?? undefined;
+	}
+
+	private toolSchemas(): ToolSchema[] {
+		return this.visibleTools().map((t) => ({ name: t.name, description: t.description, parameters: t.parameters }));
+	}
+
+	status(): SessionStatus {
+		const model = this.model();
+		const window = model?.context ?? 32_768;
+		const b = budget(window, this.compactAt());
+		const derived = derive(this.events);
+		const fixed = estimateTokens(this.system) + estimateTokens(JSON.stringify(this.toolSchemas()));
+		return {
+			sessionId: this.id,
+			activity: this.activity,
+			model: this.modelRef ?? "",
+			effort: this.effort ?? model?.defaultEffort,
+			context: gauge(this.events, derived, fixed, b, this.modelRef),
+			undoable: this.changed?.length ? this.changed : undefined,
+			rate: this.rate,
+			queued: this.queue.length,
+			detail: this.detail,
+		};
+	}
+
+	private compactAt(): number | undefined {
+		const value = this.deps.config().compactAt;
+		return typeof value === "number" && value > 0 ? value : undefined;
+	}
+
+	// ── Writing events ─────────────────────────────────────────────────────────────────────────────────────────────
+
+	append(event: SessionEvent): void {
+		this.log.append(event);
+		this.events.push(event);
+		this.deps.notify("session.event", { sessionId: this.id, event });
+	}
+
+	private setActivity(activity: Activity, detail?: string): void {
+		this.activity = activity;
+		this.detail = detail;
+		this.deps.notify("session.status", this.status());
+	}
+
+	private touch(changes: Partial<SessionMeta> = {}): void {
+		this.meta = { ...this.meta, ...changes, updated: now() };
+		this.log.writeMeta(this.meta);
+		this.deps.notify("session.updated", this.summary());
+	}
+
+	notice(level: "info" | "warn" | "error", text: string): void {
+		this.append({ t: "notice", id: newId("e"), at: now(), level, text: redact(text) });
+	}
+
+	private delta(kind: "text" | "reasoning", text: string): void {
+		if (kind === "text") this.partial.text += text;
+		else this.partial.reasoning += text;
+		if (this.pendingDelta && this.pendingDelta.kind !== kind) this.flushDelta();
+		if (this.pendingDelta) this.pendingDelta.text += text;
+		else this.pendingDelta = { kind, text };
+		this.deltaTimer ??= setTimeout(() => this.flushDelta(), DELTA_FLUSH_MS);
+	}
+
+	private flushDelta(): void {
+		if (this.deltaTimer) clearTimeout(this.deltaTimer);
+		this.deltaTimer = undefined;
+		const pending = this.pendingDelta;
+		this.pendingDelta = undefined;
+		if (pending?.text) this.deps.notify("session.delta", { sessionId: this.id, kind: pending.kind, text: pending.text });
+	}
+
+	// ── Controls ───────────────────────────────────────────────────────────────────────────────────────────────────
+
+	setModel(model: string | undefined, effort: string | undefined): void {
+		const ref = model ?? this.modelRef;
+		if (!ref) throw new Error("Choose a model first.");
+		const profile = this.deps.registry.resolve(ref);
+		if (!profile) throw new Error(`No model named ${ref} is available.`);
+		if (!this.deps.allows(profile, this.site)) {
+			throw new Error(this.site ? `This session works with ${this.site}; ${profile.ref} belongs elsewhere.` : `${profile.ref} is only for sessions bound to ${profile.provider}.`);
+		}
+		const level = effort ?? (model && model !== this.modelRef ? profile.defaultEffort : this.effort);
+		if (level && profile.efforts.length && !profile.efforts.includes(level)) {
+			throw new Error(`${profile.id} takes reasoning levels ${profile.efforts.join(", ")}.`);
+		}
+		this.append({ t: "model", id: newId("e"), at: now(), model: profile.ref, effort: level });
+		this.touch({ model: profile.ref });
+		this.deps.notify("session.status", this.status());
+	}
+
+	prompt(text: string, images?: Part[]): { queued: boolean } {
+		if (!text.trim() && !images?.length) throw new Error("The message is empty.");
+		if (this.moving) throw new Error("The session is moving; send this once the move finishes.");
+		this.queue.push({ text, images });
+		if (this.running) {
+			this.deps.notify("session.status", this.status());
+			return { queued: true };
+		}
+		this.startDrain();
+		return { queued: false };
+	}
+
+	private startDrain(): void {
+		this.running = this.drain().finally(() => {
+			this.running = undefined;
+			this.setActivity("idle");
+		});
+	}
+
+	cancel(): void {
+		this.queue = [];
+		this.abort?.abort(new Error("Cancelled by the person."));
+		this.deps.cancelChildren(this.id);
+	}
+
+	/** Where the session stands, for a lead agent waiting on it. */
+	result(): AgentResult {
+		const last = [...this.events].reverse().find((e) => e.t === "assistant") as Ev<"assistant"> | undefined;
+		const state = this.isRunning ? "running" : last?.stop === "error" ? "failed" : last?.stop === "cancelled" ? "cancelled" : "done";
+		return { agent: this.id, state, answer: clip(last?.text ?? "", 20_000) };
+	}
+
+	/** The folder the session works in. */
+	get cwd(): string {
+		return this.header?.cwd ?? "";
+	}
+
+	/** In a git repository, keep the whole working tree as it was before the turn, so undo covers shell changes. */
+	private snapshotTurn(): void {
+		if (this.workspace.kind !== "local" || !repoRoot(this.cwd)) return;
+		try {
+			const commit = snapshot(this.cwd, this.id, `before: ${clip(this.summary().title, 60)}`);
+			this.append({ t: "checkpoint", id: newId("e"), at: now(), callId: "turn", files: [], git: commit });
+		} catch (error) {
+			this.notice("warn", `Couldn't snapshot the working tree for undo: ${redact(errorText(error))}`);
+		}
+	}
+
+	/** What an open app reports (MCP Apps ui/update-model-context); the model reads the newest on its next request. */
+	appContext(app: string, title: string, text: string): void {
+		this.append({ t: "app_context", id: newId("e"), at: now(), app, title, text });
+	}
+
+	/** One answer from the session's model, outside the conversation: an app's lab.ask(). */
+	async ask(prompt: string, system: string | undefined, signal: AbortSignal): Promise<string> {
+		const model = this.model() ?? this.fallbackModel();
+		if (!model) throw new Error("This session has no model to ask.");
+		const request = {
+			model,
+			system: system ?? "Answer the request from an app the person is using. Be brief and exact.",
+			messages: [{ role: "user" as const, content: [{ type: "text" as const, text: prompt }] }],
+			tools: [],
+			toolChoice: "none" as const,
+			effort: model.efforts.includes("low") ? "low" : model.efforts[0],
+			maxTokens: Math.min(4_096, model.maxOutput),
+		};
+		let text = "";
+		for await (const event of adapterFor(model).stream(request, signal)) {
+			if (event.type === "text") text += event.delta;
+			if (event.type === "done" && event.stop === "error") throw new Error(event.error ?? "The model request failed.");
+		}
+		return text.trim();
+	}
+
+	/** Files changed since the person's last message: from the turn's git snapshot, or the per-file copies. */
+	private changesSinceUser(): string[] {
+		if (this.workspace.kind !== "local") return [];
+		const since: Ev<"checkpoint">[] = [];
+		for (let i = this.events.length - 1; i >= 0; i--) {
+			const e = this.events[i]!;
+			if (e.t === "user" || e.t === "undo") break;
+			if (e.t === "checkpoint") since.unshift(e);
+		}
+		const git = since.find((c) => c.git)?.git;
+		try {
+			if (git) return changedSince(this.cwd, git);
+		} catch {
+			// Fall back to the per-file record.
+		}
+		return [...new Set(since.flatMap((c) => c.files.map((f) => this.workspace.display(f.path))))];
+	}
+
+	/** Put back the files this session changed since the person's last message (or the last undo). */
+	undo(): { ok: boolean; files: string[]; detail: string } {
+		if (this.running) return { ok: false, files: [], detail: "Wait for the current turn to finish, or cancel it." };
+		if (this.workspace.kind !== "local") return { ok: false, files: [], detail: "Undo works on this computer; in a lab sandbox, ask the agent to revert with git." };
+		const changes: Ev<"checkpoint">["files"][] = [];
+		for (let i = this.events.length - 1; i >= 0; i--) {
+			const e = this.events[i]!;
+			if (e.t === "undo" || e.t === "user") break;
+			if (e.t === "checkpoint") changes.unshift(e.files);
+		}
+		// A git snapshot taken before the turn covers everything, shell changes included; otherwise the per-file copies.
+		const turn = [...this.events].reverse().find((e, k, all) => e.t === "checkpoint" && e.git && !all.slice(0, k).some((x) => x.t === "user" || x.t === "undo")) as Ev<"checkpoint"> | undefined;
+		if (turn?.git) {
+			const files = restoreSnapshot(this.cwd, turn.git);
+			if (!files.length) return { ok: false, files: [], detail: "Nothing changed since your last message." };
+			this.append({ t: "undo", id: newId("e"), at: now(), files, all: true });
+			this.changed = undefined;
+			return { ok: true, files, detail: `Restored ${files.length} file${files.length === 1 ? "" : "s"}: ${files.join(", ")}.` };
+		}
+		if (!changes.length) return { ok: false, files: [], detail: "No file changes to undo since your last message." };
+		const files = this.checkpoints.restore(changes).map((path) => this.workspace.display(path));
+		this.append({ t: "undo", id: newId("e"), at: now(), files });
+		this.changed = undefined;
+		return { ok: true, files, detail: `Restored ${files.length} file${files.length === 1 ? "" : "s"}: ${files.join(", ")}.` };
+	}
+
+	async compactNow(): Promise<{ ok: boolean; detail: string }> {
+		if (this.running) return { ok: false, detail: "Wait for the current turn to finish, or cancel it." };
+		const model = this.model();
+		if (!model) return { ok: false, detail: "Choose a model first." };
+		const controller = new AbortController();
+		this.abort = controller;
+		// Holds the session like a turn does: a message sent meanwhile waits in the queue and runs after.
+		let done = false;
+		const work = this.compact(model, controller.signal, true).then((ok) => {
+			done = ok;
+		});
+		this.running = work.finally(() => {
+			this.abort = undefined;
+			this.running = undefined;
+			if (this.queue.length) this.startDrain();
+			else this.setActivity("idle");
+		});
+		await this.running;
+		return { ok: done, detail: done ? "Compacted." : "Nothing old enough to summarize yet." };
+	}
+
+	// ── The loop ───────────────────────────────────────────────────────────────────────────────────────────────────
+
+	private async drain(): Promise<void> {
+		while (this.queue.length) {
+			const next = this.queue.splice(0, this.queue.length);
+			const controller = new AbortController();
+			this.abort = controller;
+			try {
+				for (const message of next) this.appendUser(message);
+				this.snapshotTurn();
+				await this.turn(controller.signal);
+			} catch (error) {
+				if (!controller.signal.aborted) this.notice("error", errorText(error));
+			} finally {
+				this.abort = undefined;
+				this.changed = this.changesSinceUser();
+				this.touch({ turns: this.meta.turns + 1 });
+			}
+		}
+	}
+
+	private appendUser(message: { text: string; images?: Part[] }): void {
+		this.changed = undefined;
+		const first = !this.events.some((e) => e.t === "user");
+		this.append({ t: "user", id: newId("e"), at: now(), text: message.text, images: message.images });
+		if (first) {
+			const title = clip(message.text.trim().split("\n")[0] || "Session", 72);
+			this.append({ t: "title", id: newId("e"), at: now(), title });
+			this.touch({ title });
+		}
+	}
+
+	private async turn(signal: AbortSignal): Promise<void> {
+		for (let step = 0; step < MAX_STEPS; step++) {
+			if (signal.aborted) return;
+			const model = this.model() ?? this.fallbackModel();
+			if (!model) {
+				this.notice("error", "No model is available. Start a local model server, add a provider to ~/.enriched/config.json, or sign in to a site with enriched login.");
+				return;
+			}
+			if (model.ref !== this.modelRef) this.setModel(model.ref, undefined);
+			// Context is managed where a turn starts. Inside a tool round only the hard limit triggers a summary: an edit
+			// there throws away the round's reasoning and the prompt cache.
+			await this.manageContext(model, signal, step === 0);
+			const assistant = await this.request(model, signal);
+			this.append(assistant);
+			if (assistant.stop === "cancelled" || assistant.stop === "error") return;
+			if (assistant.stop === "length" && !assistant.toolCalls?.length) {
+				this.notice("warn", "The answer reached the output limit and stopped.");
+				return;
+			}
+			if (!assistant.toolCalls?.length) {
+				if (this.queue.length) for (const message of this.queue.splice(0)) this.appendUser(message);
+				else return;
+				continue;
+			}
+			await this.runTools(assistant.toolCalls, model, signal);
+			if (signal.aborted) return;
+			// Steering: messages sent during the step join before the next request.
+			for (const message of this.queue.splice(0)) this.appendUser(message);
+		}
+		this.notice("warn", `Stopped after ${MAX_STEPS} steps in one turn.`);
+	}
+
+	/** The default model when the session has none, among those it may use. */
+	private fallbackModel(): ModelProfile | undefined {
+		const preferred = this.deps.registry.preferred();
+		if (preferred && this.deps.allows(preferred, this.site)) return preferred;
+		return this.deps.registry.all().find((m) => this.deps.allows(m, this.site));
+	}
+
+	private effortFor(model: ModelProfile): string | undefined {
+		const effort = this.effort ?? model.defaultEffort ?? this.deps.config().effort;
+		return effort && model.efforts.includes(effort) ? effort : model.defaultEffort;
+	}
+
+	/** One model request, retried on rate limits, overload and network errors before any output arrives. */
+	private async request(model: ModelProfile, signal: AbortSignal): Promise<Ev<"assistant">> {
+		let overflowRetried = false;
+		for (let attempt = 1; ; attempt++) {
+			this.partial = { text: "", reasoning: "", tools: [], output: {} };
+			this.setActivity("thinking");
+			const started = Date.now();
+			let firstByte = 0;
+			let text = "";
+			let reasoning = "";
+			let reasoningData: unknown;
+			const calls = new Map<number, ToolCall>();
+			let usage: Usage | undefined;
+			let stop: Ev<"assistant">["stop"] = "end";
+			let error: string | undefined;
+			let produced = false;
+			try {
+				const derived = derive(this.events);
+				const stream = adapterFor(model).stream(
+					{ model, system: this.system, messages: derived.messages, tools: this.toolSchemas(), effort: this.effortFor(model) },
+					signal,
+				);
+				for await (const event of stream) {
+					if (!firstByte && event.type !== "usage") firstByte = Date.now();
+					switch (event.type) {
+						case "text":
+							produced = true;
+							if (this.activity !== "writing") this.setActivity("writing");
+							text += event.delta;
+							this.delta("text", event.delta);
+							break;
+						case "reasoning":
+							produced = true;
+							reasoning += event.delta;
+							this.delta("reasoning", event.delta);
+							break;
+						case "reasoning_data":
+							reasoningData = event.data;
+							break;
+						case "tool_start":
+							produced = true;
+							this.flushDelta();
+							calls.set(event.index, { id: event.id, name: event.name, args: "" });
+							this.partial.tools.push({ index: event.index, name: event.name, args: "" });
+							this.deps.notify("session.delta", { sessionId: this.id, kind: "tool", text: "", index: event.index, name: event.name });
+							break;
+						case "tool_args": {
+							const call = calls.get(event.index);
+							if (call) call.args += event.delta;
+							const shown = this.partial.tools.find((t) => t.index === event.index);
+							if (shown) shown.args += event.delta;
+							this.deps.notify("session.delta", { sessionId: this.id, kind: "tool", text: event.delta, index: event.index });
+							break;
+						}
+						case "usage":
+							usage = event.usage;
+							break;
+						case "done":
+							stop = event.stop === "error" ? "error" : event.stop;
+							error = event.error;
+							break;
+					}
+				}
+			} catch (caught) {
+				this.flushDelta();
+				if (signal.aborted) {
+					stop = "cancelled";
+				} else if (caught instanceof ModelHttpError && caught.contextOverflow && !overflowRetried && !produced) {
+					overflowRetried = true;
+					this.notice("info", "The model refused the request as too long; compacting and retrying.");
+					await this.compact(model, signal, true);
+					continue;
+				} else if (!produced && attempt < MAX_ATTEMPTS && (caught instanceof ModelHttpError ? caught.retryable : transient(caught))) {
+					const wait = caught instanceof ModelHttpError && caught.retryAfterMs ? Math.min(caught.retryAfterMs, 60_000) : 1_000 * 2 ** (attempt - 1);
+					this.setActivity("retrying", `${redact(errorText(caught))}; retrying in ${Math.round(wait / 1000)}s`);
+					try {
+						await sleep(wait, signal);
+					} catch {
+						stop = "cancelled";
+						break;
+					}
+					continue;
+				} else {
+					stop = "error";
+					error = redact(errorText(caught));
+				}
+			}
+			this.flushDelta();
+			const ms = Date.now() - started;
+			if (usage?.output && firstByte) {
+				const seconds = Math.max(0.05, (Date.now() - firstByte) / 1000);
+				this.rate = Math.round((usage.output / seconds) * 10) / 10;
+			}
+			// A cancelled answer keeps its text but drops calls that never finished streaming.
+			const toolCalls = stop === "cancelled" ? [] : [...calls.values()];
+			if (toolCalls.length && stop !== "error") stop = "tool_use";
+			return {
+				t: "assistant",
+				id: newId("e"),
+				at: now(),
+				model: model.ref,
+				text,
+				reasoning: reasoning || undefined,
+				reasoningData,
+				toolCalls: toolCalls.length ? toolCalls : undefined,
+				usage,
+				stop,
+				error,
+				ms,
+			};
+		}
+		return { t: "assistant", id: newId("e"), at: now(), model: model.ref, text: "", stop: "cancelled" };
+	}
+
+	// ── Tools ──────────────────────────────────────────────────────────────────────────────────────────────────────
+
+	private async runTools(calls: ToolCall[], model: ModelProfile, signal: AbortSignal): Promise<void> {
+		const tools = new Map(this.visibleTools().map((t) => [t.name, t]));
+		// Group consecutive read-only calls so they run at once; everything else runs alone, in order.
+		const groups: ToolCall[][] = [];
+		for (const call of calls) {
+			const parallel = PARALLEL_KINDS.has(tools.get(call.name)?.kind ?? "");
+			const last = groups[groups.length - 1];
+			if (parallel && last && last.every((c) => PARALLEL_KINDS.has(tools.get(c.name)?.kind ?? ""))) last.push(call);
+			else groups.push([call]);
+		}
+		for (const group of groups) {
+			if (signal.aborted) {
+				for (const call of group) this.appendToolResult(call, { ok: false, content: "Cancelled before it ran.", decision: "refused" });
+				continue;
+			}
+			this.setActivity("tool", group.map((c) => c.name).join(", "));
+			const results = await Promise.all(group.map((call) => this.runOne(call, tools.get(call.name), model, signal)));
+			results.forEach((result, i) => this.appendToolResult(group[i], result));
+		}
+	}
+
+	private async runOne(
+		call: ToolCall,
+		tool: Tool | undefined,
+		model: ModelProfile,
+		signal: AbortSignal,
+	): Promise<{ ok: boolean; content: string; images?: Part[]; view?: Partial<StepView>; decision?: Ev<"tool">["decision"]; tool?: Tool; args?: Record<string, unknown> }> {
+		if (!tool) return { ok: false, content: `There is no tool named "${call.name}".`, decision: "refused" };
+		let args: Record<string, unknown>;
+		try {
+			const parsed = JSON.parse(call.args || "{}");
+			args = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+		} catch (error) {
+			return { ok: false, content: `The arguments were not valid JSON (${errorText(error)}). Send the call again with valid JSON.`, decision: "refused", tool };
+		}
+		let decision: Ev<"tool">["decision"] = "auto";
+		const verdict = decide(tool, args, this.workspace, this.deps.config(), this.allowed);
+		// A read-only subagent is read-only whatever the person's permission mode or sandbox would allow.
+		if (this.agentMode === "read" && !readOnlyCall(tool, args, this.workspace, this.deps.config().permissions.allowCommands)) {
+			return { ok: false, content: "Refused: this subagent works read-only. Say in your answer what should change.", decision: "refused", tool, args };
+		}
+		if (verdict.action === "ask") {
+			const request: PermissionRequest = {
+				requestId: newId("p"),
+				// A subagent's question goes to whoever watches the session that started it.
+				sessionId: this.parent ?? this.id,
+				callId: call.id,
+				tool: tool.name,
+				view: safeView(tool, args),
+				reason: this.parent ? `A subagent asks: ${verdict.reason}` : verdict.reason,
+			};
+			this.pending.set(request.requestId, request);
+			this.setActivity("waiting", tool.name);
+			const answer = await this.deps.ask(request, signal);
+			this.pending.delete(request.requestId);
+			if (answer === "cancelled") return { ok: false, content: "Cancelled while waiting for the person.", decision: "refused", tool, args };
+			if (answer === "deny") return { ok: false, content: "The person declined this call. Ask what they would like instead, or take another approach.", decision: "denied", tool, args };
+			if (answer === "allow_session") this.allowed.add(verdict.key);
+			decision = answer === "allow_session" ? "allowed_session" : "allowed";
+			this.setActivity("tool", tool.name);
+		}
+		const hooks = this.deps.config().hooks;
+		if (hooks.beforeTool?.length) {
+			const pre = await runHooks(hooks.beforeTool, { tool: tool.name, args }, this.cwd);
+			if (pre.blocked) return { ok: false, content: `Blocked by a hook: ${pre.blocked}`, decision: "refused", tool, args };
+		}
+		// Keep the files this call may change, so the turn can be undone.
+		const touched = this.workspace.kind === "local" ? (tool.touches?.(args).filter(Boolean).map((path) => this.workspace.resolve(path)) ?? []) : [];
+		const before = touched.length ? this.checkpoints.capture(touched) : [];
+		if (before.length) this.append({ t: "checkpoint", id: newId("e"), at: now(), callId: call.id, files: before });
+		try {
+			const result = await tool.run(args, {
+				sessionId: this.id,
+				callId: call.id,
+				workspace: this.workspace,
+				place: this.place,
+				project: projectRoot(this.cwd),
+				sealed: this.deps.sealed?.(this.site),
+				apps: this.deps.apps?.(this.id),
+				surface: this.deps.surface?.(this.id),
+				log: this.log,
+				signal,
+				vision: model.vision,
+				canvas: this.deps.canvas,
+				agents: this.parent
+					? undefined
+					: {
+							start: (task, options) => this.deps.spawn(this, task, options),
+							wait: (agents, timeoutMs, waitSignal) => this.deps.waitAgents(this.id, agents, timeoutMs, waitSignal),
+						},
+				output: (text) => {
+					this.partial.output[call.id] = clip((this.partial.output[call.id] ?? "") + text, 200_000);
+					this.deps.notify("session.delta", { sessionId: this.id, kind: "output", text, callId: call.id });
+				},
+			});
+			if (hooks.afterTool?.length) {
+				const post = await runHooks(hooks.afterTool, { tool: tool.name, args, result: { ok: result.ok } }, this.cwd);
+				if (post.note) return { ...result, content: `${result.content}\n\n[hook] ${post.note}`, decision, tool, args };
+			}
+			return { ...result, decision, tool, args };
+		} catch (error) {
+			const message = error instanceof ToolError ? error.message : `${tool.name} failed: ${redact(errorText(error))}`;
+			return { ok: false, content: message, decision, tool, args };
+		} finally {
+			delete this.partial.output[call.id];
+		}
+	}
+
+	private appendToolResult(
+		call: ToolCall,
+		result: { ok: boolean; content: string; images?: Part[]; view?: Partial<StepView>; decision?: Ev<"tool">["decision"]; tool?: Tool; args?: Record<string, unknown> },
+	): void {
+		let content = result.content;
+		let handle: string | undefined;
+		if (content.length >= ELIDE_MIN_CHARS) handle = this.log.storeOutput(content);
+		if (content.length > INLINE_MAX_CHARS) {
+			const head = content.slice(0, 12_000);
+			const tail = content.slice(-6_000);
+			content = `${head}\n\n[… ${((content.length - 18_000) / 1024).toFixed(0)} KB not shown. recall with handle "${handle}" pages the full output …]\n\n${tail}`;
+		}
+		const base = result.tool && result.args ? safeView(result.tool, result.args) : { verb: call.name, target: "" };
+		const view: StepView = { ...base, ...result.view };
+		if (!result.ok && !view.result) view.result = "failed";
+		if (!view.detail && !result.ok) view.detail = result.content.slice(0, 4_000);
+		this.append({
+			t: "tool",
+			id: newId("e"),
+			at: now(),
+			callId: call.id,
+			name: call.name,
+			ok: result.ok,
+			content,
+			images: result.images,
+			view: { ...view, detail: view.detail ? clip(view.detail, 20_000) : undefined },
+			handle,
+			decision: result.decision,
+		});
+	}
+
+	// ── Context ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+	private async manageContext(model: ModelProfile, signal: AbortSignal, boundary: boolean): Promise<void> {
+		const b = budget(model.context, this.compactAt());
+		const fixed = estimateTokens(this.system) + estimateTokens(JSON.stringify(this.toolSchemas()));
+		let g = gauge(this.events, derive(this.events), fixed, b, model.ref);
+		if (!boundary) {
+			const hard = b.threshold + Math.round((b.window - b.threshold) / 2);
+			if (g.used >= hard) await this.compact(model, signal, false);
+			return;
+		}
+		if (g.used >= b.elideAt && g.used < b.threshold) {
+			const candidates = elisionCandidates(this.events);
+			if (candidates.length) {
+				this.append({ t: "elide", id: newId("e"), at: now(), ids: candidates.map((c) => c.id), tokensBefore: g.used });
+				g = gauge(this.events, derive(this.events), fixed, b, model.ref);
+			}
+		}
+		if (g.used >= b.threshold) await this.compact(model, signal, false);
+	}
+
+	private async compact(model: ModelProfile, signal: AbortSignal, force: boolean): Promise<boolean> {
+		const b = budget(model.context, this.compactAt());
+		const fixed = estimateTokens(this.system) + estimateTokens(JSON.stringify(this.toolSchemas()));
+		const derived = derive(this.events);
+		const before = gauge(this.events, derived, fixed, b, this.modelRef).used;
+		const keep = Math.min(20_000, Math.round(b.threshold * 0.25));
+		const cut = cutPoint(this.events, derived, keep);
+		if (cut === undefined || cut <= 0) {
+			if (force) this.notice("info", "Nothing old enough to summarize yet.");
+			return false;
+		}
+		const firstKept = this.events[derived.sources[cut]];
+		if (!firstKept) return false;
+		this.setActivity("compacting", `summarizing ${derived.messages.slice(0, cut).length} messages`);
+		const summaryModel = this.deps.registry.resolve(this.deps.config().summaryModel) ?? model;
+		try {
+			const summary = await summarize(summaryModel, derived.messages.slice(0, cut), signal, this.toolSchemas());
+			this.append({ t: "compaction", id: newId("e"), at: now(), summary, firstKeptId: firstKept.id, tokensBefore: before, model: summaryModel.ref });
+			return true;
+		} catch (error) {
+			if (signal.aborted) return false;
+			this.notice("warn", `Compaction failed: ${redact(errorText(error))}. Continuing without it.`);
+			return false;
+		}
+	}
+}
+
+/** A tool's step line, guarded against a view function that throws on odd arguments. */
+function safeView(tool: Tool, args: Record<string, unknown>): StepView {
+	try {
+		const view = tool.view(args);
+		return { ...view, target: clip(view.target, 2_000) };
+	} catch {
+		return { verb: tool.name, target: "" };
+	}
+}
+
+/** Network trouble worth another try; a bug in the adapter or a bad request is not. */
+function transient(error: unknown): boolean {
+	const e = error as { code?: string; name?: string; message?: string };
+	if (e?.code && /^(ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|EAI_AGAIN|ENOTFOUND|UND_ERR_.*|ConnectionRefused|ConnectionClosed|ConnectionReset)$/.test(e.code)) return true;
+	return /network|socket|connection|timed? ?out|terminated|fetch failed|ended early|EOF|ECONN/i.test(e?.message ?? "");
+}
+
+/** What a read-only subagent may do: read, search, look things up, and run commands that only read the project. */
+function readOnlyCall(tool: Tool, args: Record<string, unknown>, workspace: Workspace, allowCommands: string[]): boolean {
+	if (tool.kind === "exec") return isReadOnlyCommand(String(args.command ?? ""), allowCommands, (path) => workspace.inside(path));
+	return tool.kind === "read" || tool.kind === "site-read" || tool.kind === "net" || (tool.kind === "local" && !tool.name.startsWith("agent_") && tool.name !== "remember");
+}

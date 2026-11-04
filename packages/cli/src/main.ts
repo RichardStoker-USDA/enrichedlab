@@ -1,0 +1,449 @@
+#!/usr/bin/env bun
+// enriched: the EnrichedLab command. With no arguments it opens the terminal surface for the current folder.
+
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import type { PermissionRequest, SessionEvent } from "@enrichedlab/protocol";
+import {
+	describePermissions,
+	Engine,
+	EngineClient,
+	ensureEngine,
+	findEngine,
+	installApp,
+	installBundle,
+	listBundles,
+	packApp,
+	paths,
+	PUSH_REASON,
+	readManifest,
+	removeApp,
+	removeBundle,
+	removeWorktree,
+	repoRoot,
+	serve,
+	Sites,
+	stopEngine,
+	type Template,
+	TEMPLATES,
+	templateFiles,
+	VERSION,
+} from "@enrichedlab/engine";
+import { openBrowser, openSurface } from "./open.ts";
+
+const HELP = `EnrichedLab ${VERSION}
+
+  enriched                        open the terminal surface in this folder
+      --site <name>               work with one site only: its tools and models, and no other site's
+      --worktree                  work on a new branch in its own git worktree, away from your checkout
+  enriched app                    open the desktop or browser surface
+  enriched run "prompt"           run one task without a surface and print the answer
+      --model <ref>  --effort <level>  --site <name>  --worktree  --json
+      --allow                     run commands and edits without asking
+      --push                      let it push to a remote (refused otherwise, even with --allow)
+  enriched worktrees [--prune]    worktrees sessions made in this repository; --prune removes merged ones
+
+  enriched login <site>           sign in to a site in your browser
+  enriched logout <site>
+  enriched site add <name> <https://address> [--title "<Lab name>"] [--lan <https://address> --key <file> --ca <file>] [--isolated]
+                                  --isolated: research data; its sessions work in its sandbox with its models only
+  enriched site rename <name> <new-name> [--title "Display name"]
+  enriched sites                  sites, who you are on each, and what they grant
+
+  enriched bundles                installed add-ons (skills, instructions, MCP servers, hooks)
+  enriched bundle add <folder | https git address>
+                                  install one; a Claude Code plugin folder works too
+  enriched bundle remove <name>
+
+  enriched apps                   your apps: installed, from bundles, and opened in projects
+  enriched app new <name> [--template data|blank|shiny|shiny-python]
+                                  start an app in ./apps/<name>; the agent can build it with you
+  enriched app pack <folder> [--out <folder>]
+                                  one signed .labapp file to share
+  enriched app add <file.labapp> [--trust]
+                                  check and install one; --trust accepts a signer you haven't used before
+  enriched app remove <name>
+
+  enriched models [--refresh]     models you can use now
+  enriched model <ref> [effort]   set the default model
+  enriched sessions               recent sessions in this folder (--all for every folder)
+  enriched service add <service>  use your own key: openai, anthropic, gemini, openrouter, custom --address <url>
+  enriched doctor                 check the setup
+  enriched update [--check]       install the newest release (signed; no administrator)
+  enriched engine status|stop|restart
+  enriched serve [--foreground] [--port N]
+
+Settings and sessions live in ~/.enriched (ENRICHED_HOME moves them).`;
+
+/** enriched app new | pack | add | remove | list. */
+async function appCommand(action: string, target: string | undefined, flags: Flags): Promise<void> {
+	const p = paths();
+	switch (action) {
+		case "new": {
+			const name = target ?? fail("enriched app new <name> [--template data|blank|shiny|shiny-python]");
+			const template = (typeof flags.template === "string" ? flags.template : "data") as Template;
+			if (!TEMPLATES.includes(template)) fail(`--template is one of ${TEMPLATES.join(", ")}.`);
+			const dir = resolve("apps", name);
+			if (existsSync(join(dir, "app.json"))) fail(`${dir} already has an app.`);
+			const title = name.replace(/-/g, " ").replace(/^./, (c) => c.toUpperCase());
+			for (const [rel, body] of Object.entries(templateFiles(template, name, title, ""))) {
+				mkdirSync(dirname(join(dir, rel)), { recursive: true });
+				writeFileSync(join(dir, rel), body);
+			}
+			readManifest(dir);
+			out(`Started ${title} in ${dir}. Open it from the workbench (⌘K, "Open app"), or ask the agent to build on it.`);
+			return;
+		}
+		case "pack": {
+			const packed = await packApp(p, resolve(target ?? "."), resolve(typeof flags.out === "string" ? flags.out : "."));
+			out(`Packed ${packed.files} files into ${packed.file} (${Math.round(packed.bytes / 1024)} KB), signed ${packed.fingerprint}.`);
+			return;
+		}
+		case "add": {
+			const file = resolve(target ?? fail("enriched app add <file.labapp> [--trust]"));
+			const added = await installApp(p, file, { trust: flags.trust === true });
+			const manifest = readManifest(added.dir);
+			out(`Installed ${manifest.title} ${added.version}, signed ${added.fingerprint}${added.newSigner ? " (now trusted)" : ""}.`);
+			const asks = describePermissions(manifest.permissions);
+			if (asks.length) out(`When it first opens it asks to:\n  ${asks.join("\n  ")}`);
+			return;
+		}
+		case "remove": {
+			if (!removeApp(p, target ?? fail("enriched app remove <name>"))) fail(`No installed app named ${target}.`);
+			out(`Removed ${target}.`);
+			return;
+		}
+		case "list": {
+			const client = await connect();
+			const apps = await client.call("app.list", {});
+			client.close();
+			if (!apps.length) out("No apps yet. Start one with enriched app new <name>, or add one with enriched app add <file>.");
+			for (const a of apps) out(`${a.title} ${a.version}  ${a.source}${a.backend ? `  ${a.backend} backend` : ""}${a.granted ? "" : "  (asks when opened)"}\n  ${a.description || a.dir}`);
+			return;
+		}
+		default:
+			fail("enriched app new|pack|add|remove <…>, or enriched apps");
+	}
+}
+
+interface Flags {
+	[key: string]: string | boolean;
+}
+
+/** Flags that take the next word as their value; every other flag is a switch. */
+const VALUE_FLAGS = new Set(["address", "name", "model", "effort", "port", "lan", "key", "ca", "cwd", "session", "site", "title", "template", "out"]);
+
+function parse(argv: string[]): { args: string[]; flags: Flags } {
+	const args: string[] = [];
+	const flags: Flags = {};
+	for (let i = 0; i < argv.length; i++) {
+		const a = argv[i];
+		if (a === "-p") continue;
+		if (a.startsWith("--")) {
+			const [key, inline] = a.slice(2).split("=", 2);
+			const next = argv[i + 1];
+			if (inline !== undefined) flags[key] = inline;
+			else if (next !== undefined && !next.startsWith("--") && VALUE_FLAGS.has(key)) {
+				flags[key] = next;
+				i++;
+			} else flags[key] = true;
+		} else args.push(a);
+	}
+	return { args, flags };
+}
+
+const out = (text: string): void => {
+	process.stdout.write(`${text}\n`);
+};
+const fail = (text: string): never => {
+	process.stderr.write(`enriched: ${text}\n`);
+	process.exit(1);
+};
+
+async function connect(name = "enriched-cli"): Promise<EngineClient> {
+	const file = await ensureEngine();
+	const client = new EngineClient(file, name);
+	await client.ready();
+	return client;
+}
+
+async function runHeadless(prompt: string, flags: Flags): Promise<void> {
+	const allow = flags.allow === true;
+	const push = flags.push === true;
+	const json = flags.json === true;
+	const engine = new Engine({
+		headlessAnswer: (request: PermissionRequest) => {
+			const pushing = request.reason === PUSH_REASON;
+			if (pushing ? push : allow) return "allow";
+			process.stderr.write(`enriched: refused ${request.tool} (${request.reason}): pass ${pushing ? "--push" : "--allow"} to permit\n`);
+			return "deny";
+		},
+	});
+	await engine.start();
+	const cwd = resolve(String(flags.cwd ?? process.cwd()));
+	const session = engine.createSession(cwd, typeof flags.model === "string" ? flags.model : undefined, typeof flags.site === "string" ? flags.site : undefined, undefined, flags.worktree === true);
+	if (typeof flags.effort === "string") session.setModel(undefined, flags.effort);
+	let lastKind = "";
+	engine.onNotify((name, params) => {
+		if (json) {
+			if (name === "session.event") out(JSON.stringify((params as { event: SessionEvent }).event));
+			return;
+		}
+		if (name === "session.delta") {
+			const d = params as { kind: string; text: string };
+			if (d.kind === "text") {
+				if (lastKind === "reasoning") process.stderr.write("\n");
+				process.stdout.write(d.text);
+			} else if (d.kind === "reasoning" && process.stderr.isTTY) process.stderr.write(`\x1b[2m${d.text}\x1b[0m`);
+			lastKind = d.kind;
+		} else if (name === "session.event") {
+			const e = (params as { event: SessionEvent }).event;
+			if (e.t === "tool") process.stderr.write(`\n${e.ok ? "✓" : "✗"} ${e.view?.verb ?? e.name} ${e.view?.target ?? ""}${e.view?.result ? `  ${e.view.result}` : ""}\n`);
+			if (e.t === "notice") process.stderr.write(`\n[${e.level}] ${e.text}\n`);
+			if (e.t === "assistant" && e.stop === "error") process.stderr.write(`\n[error] ${e.error}\n`);
+		}
+	});
+	session.prompt(prompt);
+	while (session.isRunning) await new Promise((r) => setTimeout(r, 100));
+	if (!json) process.stdout.write("\n");
+	await engine.stop();
+	const last = [...session.events].reverse().find((e) => e.t === "assistant") as Extract<SessionEvent, { t: "assistant" }> | undefined;
+	process.exit(last && last.stop !== "error" ? 0 : 1);
+}
+
+async function main(): Promise<void> {
+	// Windows containment: enriched __contain <writable folders as JSON> -- program args (see windows_contain.ts).
+	if (process.argv[2] === "__contain") {
+		const { runContained, paths } = await import("@enrichedlab/engine");
+		const split = process.argv.indexOf("--");
+		process.exit(await runContained(paths().home, JSON.parse(process.argv[3]!) as string[], process.argv.slice(split + 1)));
+	}
+	const { args, flags } = parse(process.argv.slice(2));
+	const [command, ...rest] = args;
+	if (flags.version || command === "version") return out(VERSION);
+	if (flags.help || command === "help") return out(HELP);
+
+	switch (command) {
+		case undefined: {
+			const { runTui } = await import("@enrichedlab/tui");
+			return runTui({
+				cwd: resolve(String(flags.cwd ?? process.cwd())),
+				sessionId: typeof flags.session === "string" ? flags.session : undefined,
+				resume: flags.resume === true || flags.continue === true,
+				site: typeof flags.site === "string" ? flags.site : undefined,
+				worktree: flags.worktree === true,
+				openWindow: (url, sessionId) => openSurface(url, sessionId),
+			});
+		}
+		case "serve":
+			return serve({ port: flags.port ? Number(flags.port) : undefined, foreground: flags.foreground === true });
+		case "run": {
+			const prompt = rest.join(" ") || (process.stdin.isTTY ? "" : await new Response(Bun.stdin.stream()).text());
+			if (!prompt.trim()) fail('give a task: enriched run "what does this project do?"');
+			return runHeadless(prompt, flags);
+		}
+		case "apps":
+		case "app": {
+			const [action, target] = command === "apps" ? ["list"] : rest;
+			if (action) {
+				await appCommand(action, target, flags);
+				return;
+			}
+			const client = await connect();
+			const next = typeof flags.session === "string" ? `/#/s/${flags.session}` : "/";
+			const { url } = await client.call("engine.pair", { next });
+			const how = openSurface(url, typeof flags.session === "string" ? flags.session : undefined, flags.browser ? "browser" : undefined);
+			out(how === "none" ? `Open this address in a browser: ${url}` : `Opened in ${how}.`);
+			client.close();
+			return;
+		}
+		case "login": {
+			const name = rest[0] ?? fail("which site? enriched login <site>");
+			const client = await connect();
+			client.on("site.auth", (auth) => {
+				if (auth.name !== name) return;
+				out(`Opening your browser to sign in to ${name}. If it doesn't open, visit:\n${auth.url}`);
+				openBrowser(auth.url);
+			});
+			const site = await client.call("site.login", { name });
+			if (site.signedIn && site.via === "oauth") out(`Signed in to ${name} as ${site.who ?? "you"}: ${site.models} models, ${site.tools} tools${site.sandbox ? ", sandbox" : ""}.`);
+			else if (site.signedIn) out(`${site.warning ?? "The browser sign-in wasn't used."}\nConnected to ${name} as ${site.who ?? "you"} with the LAN key.`);
+			else out(`The browser sign-in finished, but ${name} can't be reached with it: ${site.error ?? "no answer"}`);
+			client.close();
+			return;
+		}
+		case "logout": {
+			const client = await connect();
+			await client.call("site.logout", { name: rest[0] ?? fail("which site?") });
+			out(`Signed out of ${rest[0]}.`);
+			client.close();
+			return;
+		}
+		case "worktrees": {
+			const root = repoRoot(process.cwd());
+			if (!root) fail("Not inside a git repository.");
+			const listing = execFileSync("git", ["worktree", "list", "--porcelain"], { cwd: root, encoding: "utf8" });
+			const trees = listing.split("\n\n").map((block) => ({ path: /^worktree (.+)$/m.exec(block)?.[1] ?? "", branch: /^branch refs\/heads\/(.+)$/m.exec(block)?.[1] ?? "" })).filter((t) => t.path.includes("enriched-worktrees"));
+			const merged = new Set(execFileSync("git", ["branch", "--merged", "HEAD", "--format=%(refname:short)"], { cwd: root, encoding: "utf8" }).split("\n"));
+			if (!trees.length) out("No worktrees from EnrichedLab here.");
+			for (const t of trees) {
+				const done = merged.has(t.branch);
+				if (flags.prune === true && done) {
+					removeWorktree(root!, t.path, t.branch, true);
+					out(`removed ${t.branch} (merged)`);
+				} else out(`${t.branch}${done ? "  merged" : ""}\n  ${t.path}`);
+			}
+			return;
+		}
+		case "bundles":
+		case "bundle": {
+			const [action, target] = command === "bundles" ? ["list"] : rest;
+			if (action === "add" && target) {
+				const added = installBundle(paths(), target);
+				out(`Installed ${added.name} ${added.version}${added.description ? `: ${added.description}` : ""}`);
+			} else if (action === "remove" && target) {
+				if (!removeBundle(paths(), target)) fail(`No bundle named ${target}.`);
+				out(`Removed ${target}.`);
+			} else if (action === "list" || action === undefined) {
+				const all = listBundles(paths());
+				if (!all.length) out("No bundles. Add one with enriched bundle add <folder | https git address>.");
+				for (const b of all) out(`${b.name} ${b.version}  ${b.source}\n  ${b.description || "(no description)"}  sha256 ${b.sha256.slice(0, 12)}`);
+				return;
+			} else fail("enriched bundle add <folder | https git address> | enriched bundle remove <name> | enriched bundles");
+			// A running engine picks the change up now; new sessions see the bundle's skills and instructions.
+			const running = await findEngine();
+			if (running) {
+				const client = new EngineClient(running, "enriched-cli");
+				await client.call("config.reload", {});
+				client.close();
+			}
+			return;
+		}
+		case "site": {
+			if (rest[0] === "rename") {
+				const [, from, to] = rest;
+				if (!from || !to) fail('enriched site rename <name> <new-name> [--title "Display name"]');
+				const renamed = new Sites(paths(), () => undefined).rename(from, to, typeof flags.title === "string" ? flags.title : undefined);
+				const running = await findEngine();
+				if (running) {
+					const client = new EngineClient(running, "enriched-cli");
+					await client.call("site.refresh", {});
+					client.close();
+				}
+				out(`${from} is now ${renamed.name}, shown as ${renamed.title ?? renamed.name}. Its tools are named ${renamed.name}_….`);
+				return;
+			}
+			if (rest[0] !== "add") fail("enriched site add <name> <https://address> [--lan <https://address> --key <file> --ca <file>]");
+			const [, name, url] = rest;
+			if (!name || !url) fail("enriched site add <name> <https://address>");
+			const sites = new Sites(paths(), () => undefined);
+			const lan = typeof flags.lan === "string" && typeof flags.key === "string" ? { url: flags.lan, keyFile: flags.key, caFile: typeof flags.ca === "string" ? flags.ca : undefined } : undefined;
+			sites.add({ name, title: typeof flags.title === "string" ? flags.title : undefined, url: new URL(url).origin, kind: "gate", lan, isolated: flags.isolated === true || undefined });
+			const running = await findEngine();
+			if (running) {
+				const client = new EngineClient(running, "enriched-cli");
+				await client.call("site.refresh", { name });
+				client.close();
+			}
+			out(`Added ${name}. ${lan ? "It will use the LAN key until you run enriched login " + name + "." : `Run enriched login ${name} to sign in.`}`);
+			return;
+		}
+		case "sites": {
+			const client = await connect();
+			const list = await client.call("site.refresh", {});
+			if (!list.length) out("No sites yet. Add one with enriched site add <name> <https://address>.");
+			for (const s of list) {
+				const state = s.signedIn ? `signed in as ${s.who ?? "?"} (${s.via})` : s.error ? `not connected: ${s.error}` : "not signed in";
+				out(`${s.name}  ${s.url}\n  ${state}; ${s.models} models, ${s.tools} tools${s.sandbox ? ", sandbox" : ""}${s.signedIn && s.warning ? `\n  ${s.warning}` : ""}`);
+			}
+			client.close();
+			return;
+		}
+		case "services":
+		case "service": {
+			const client = await connect();
+			const [action, which] = command === "services" ? ["list"] : rest;
+			if (action === "add" && which) {
+				// The key is read from the terminal without echo, or from a pipe; it never appears on the command line.
+				process.stdout.write("Key: ");
+				if (process.stdin.isTTY) Bun.spawnSync(["stty", "-echo"], { stdin: "inherit" });
+				let key = "";
+				for await (const line of console) {
+					key = line;
+					break;
+				}
+				if (process.stdin.isTTY) Bun.spawnSync(["stty", "echo"], { stdin: "inherit" });
+				process.stdout.write("\n");
+				const result = await client.call("provider.add", { preset: which, key, baseUrl: typeof flags.address === "string" ? flags.address : undefined, name: typeof flags.name === "string" ? flags.name : undefined });
+				out(`Added ${result.name}: ${result.models} models. The key is in this computer's credential store.`);
+			} else if (action === "remove" && which) {
+				await client.call("provider.remove", { name: which });
+				out(`Removed ${which} and its key.`);
+			} else {
+				const { presets, added } = await client.call("provider.list", {});
+				for (const a of added) out(`${a.name}  ${a.label}  ${a.baseUrl}`);
+				if (!added.length) out("No services added.");
+				out(`\nAdd one: enriched service add <${presets.map((p) => p.id).join("|")}> [--address <url> for custom]`);
+			}
+			client.close();
+			return;
+		}
+		case "models": {
+			const client = await connect();
+			const { models, default: preferred } = await client.call("model.list", { refresh: flags.refresh === true });
+			if (!models.length) out("No models found. Sign in to your lab (enriched login <lab>), start Ollama or LM Studio, or enriched service add <service>.");
+			for (const m of models) {
+				const tags = [`${Math.round(m.context / 1024)}k`, m.vision ? "vision" : "", m.efforts.length ? `effort ${m.efforts.join("/")}` : ""].filter(Boolean).join(", ");
+				out(`${m.ref === preferred ? "*" : " "} ${m.ref}  (${m.source}; ${tags})`);
+			}
+			client.close();
+			return;
+		}
+		case "model": {
+			const client = await connect();
+			await client.call("model.default", { model: rest[0] ?? fail("enriched model <ref> [effort]"), effort: rest[1] });
+			out(`Default model: ${rest[0]}${rest[1] ? ` at ${rest[1]}` : ""}.`);
+			client.close();
+			return;
+		}
+		case "sessions": {
+			const client = await connect();
+			const list = await client.call("session.list", { cwd: flags.all ? undefined : process.cwd(), limit: 30 });
+			for (const s of list) out(`${s.id}  ${s.updated.slice(0, 16).replace("T", " ")}  ${s.title}${s.running ? "  (running)" : ""}`);
+			if (!list.length) out("No sessions here yet.");
+			client.close();
+			return;
+		}
+		case "doctor":
+			return (await import("./doctor.ts")).doctor();
+		case "update": {
+			const { applyUpdate, checkForUpdate } = await import("@enrichedlab/engine");
+			const status = await checkForUpdate(paths().update, true);
+			if (status.error) fail(`Couldn't check for updates: ${status.error}`);
+			if (!status.latest) return out(`EnrichedLab ${status.current} is the newest release.`);
+			out(`EnrichedLab ${status.latest} is out (you have ${status.current})${status.security ? "; it fixes a security problem" : ""}.`);
+			for (const note of status.notes ?? []) out(`  ${note}`);
+			if (flags.check) return;
+			// --if-security: what the desktop runs as it quits, so security fixes never wait for someone to click.
+			if (flags["if-security"] && !status.security) return;
+			await stopEngine();
+			const done = await applyUpdate((line) => out(line));
+			return out(done.restart ? `Installed ${done.version}. Open EnrichedLab again to use it.` : `Updated to ${done.version}.`);
+		}
+		case "engine": {
+			if (rest[0] === "stop") return out((await stopEngine()) ? "Engine stopped." : "No engine was running.");
+			if (rest[0] === "restart") {
+				await stopEngine();
+				const file = await ensureEngine();
+				return out(`Engine running on port ${file.port} (pid ${file.pid}).`);
+			}
+			const file = await findEngine();
+			return out(file ? `Engine ${file.version} on port ${file.port}, pid ${file.pid}, since ${file.started}.` : "No engine running. It starts on demand.");
+		}
+		default:
+			fail(`unknown command "${command}". enriched help lists commands.`);
+	}
+}
+
+main().catch((error) => fail(error instanceof Error ? error.message : String(error)));

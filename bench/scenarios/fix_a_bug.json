@@ -1,0 +1,9 @@
+{
+	"name": "fix a bug",
+	"files": {
+		"geom.py": "def area(r):\n    return 3.14 * r * 2\n",
+		"test_geom.py": "import math\nfrom geom import area\n\nassert abs(area(2) - math.pi * 4) < 1e-9, area(2)\nprint('ok')\n"
+	},
+	"prompt": "python3 test_geom.py fails. Fix geom.py so it passes; don't change the test.",
+	"checks": [{ "run": "python3 test_geom.py" }, { "file": "test_geom.py", "unchanged": true }]
+}

@@ -1,0 +1,90 @@
+{
+  "name": "enrichedlab-desktop",
+  "productName": "EnrichedLab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The EnrichedLab desktop window",
+  "license": "CC0-1.0",
+  "type": "module",
+  "main": "src/main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "45.2.2",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "org.enrichedlab.app",
+    "productName": "EnrichedLab",
+    "files": [
+      "src/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../../dist/stage/${os}-${arch}",
+        "to": "bin",
+        "filter": [
+          "enriched",
+          "enriched.exe"
+        ]
+      }
+    ],
+    "directories": {
+      "output": "../../dist/desktop"
+    },
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dir"
+      ],
+      "icon": "../../assets/icon.png",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "x64ArchFiles": "Contents/Resources/bin/enriched",
+      "notarize": false
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "../../assets/icon.png",
+      "artifactName": "EnrichedLab-Setup-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
+      "shortcutName": "EnrichedLab",
+      "deleteAppDataOnUninstall": false
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Science",
+      "icon": "../../assets/icon.png",
+      "artifactName": "EnrichedLab-linux-${arch}.${ext}"
+    },
+    "protocols": [
+      {
+        "name": "EnrichedLab",
+        "schemes": [
+          "enrichedlab"
+        ]
+      }
+    ]
+  },
+  "allowScripts": {
+    "electron@45.2.2": true
+  }
+}

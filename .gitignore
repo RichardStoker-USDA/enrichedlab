@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.archive/
+.DS_Store
+*.log
+packages/engine/src/server/ui_assets.gen.ts
+apps/desktop/out/
+*.bun-build
+packages/engine/src/apps/app_sdk.gen.ts

@@ -1,0 +1,461 @@
+// Focused checks for the parts most likely to break quietly: context derivation, compaction cut points, elision,
+// the read-only command check and permission keys, diffs and globs.
+
+import { afterAll, describe, expect, test } from "bun:test";
+import type { SessionEvent } from "../packages/protocol/src/index.ts";
+import { budget, cutPoint, derive, elisionCandidates, SUMMARY_PREFIX } from "../packages/engine/src/session/context.ts";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { LabConfig } from "../packages/engine/src/config.ts";
+import { allowKey, decide } from "../packages/engine/src/permissions.ts";
+import { isReadOnlyCommand } from "../packages/engine/src/tools/shell.ts";
+import type { Tool } from "../packages/engine/src/tools/types.ts";
+import { LocalWorkspace } from "../packages/engine/src/tools/workspace.ts";
+import { unifiedDiff } from "../packages/engine/src/tools/diff.ts";
+import { editTool, globToRegex } from "../packages/engine/src/tools/files.ts";
+import { splitBlocks } from "../packages/web/src/lib/blocks.ts";
+import { Sites } from "../packages/engine/src/sites/sites.ts";
+import { Checkpoints } from "../packages/engine/src/session/checkpoint.ts";
+import { findSkills } from "../packages/engine/src/skills.ts";
+import { runHooks } from "../packages/engine/src/hooks.ts";
+import { searchTool } from "../packages/engine/src/tools/search.ts";
+
+/** A temporary folder for one test; all of them are removed when the file's tests finish. */
+const made: string[] = [];
+function scratch(name: string): string {
+	const dir = mkdtempSync(join(tmpdir(), `lab-${name}-`));
+	made.push(dir);
+	return dir;
+}
+afterAll(() => {
+	for (const dir of made) rmSync(dir, { recursive: true, force: true });
+});
+
+let n = 0;
+const at = "2026-11-03T00:00:00Z";
+const user = (text: string): SessionEvent => ({ t: "user", id: `e${n++}`, at, text });
+const say = (text: string, calls?: { id: string; name: string; args: string }[]): SessionEvent => ({ t: "assistant", id: `e${n++}`, at, model: "m", text, toolCalls: calls, stop: calls ? "tool_use" : "end" });
+const tool = (callId: string, content: string, handle?: string): SessionEvent => ({ t: "tool", id: `e${n++}`, at, callId, name: "read", ok: true, content, handle });
+
+describe("context", () => {
+	test("derives messages and answers calls that never finished", () => {
+		const events = [user("hi"), say("", [{ id: "c1", name: "read", args: "{}" }]), user("again")];
+		const { messages } = derive(events);
+		expect(messages.map((m) => m.role)).toEqual(["user", "assistant", "tool", "user"]);
+	});
+
+	test("a compaction replaces older turns with the summary and keeps the tail", () => {
+		const events = [user("one"), say("a"), user("two"), say("b")];
+		const keep = events[2];
+		events.push({ t: "compaction", id: `e${n++}`, at, summary: "## Goal\nx", firstKeptId: keep.id, tokensBefore: 10, model: "m" });
+		events.push(user("three"));
+		const { messages } = derive(events);
+		expect(messages[0].role).toBe("user");
+		expect((messages[0] as { content: { text: string }[] }).content[0].text.startsWith(SUMMARY_PREFIX)).toBe(true);
+		expect(messages.length).toBe(4);
+	});
+
+	test("elision stubs old large outputs and stops replaying earlier reasoning data", () => {
+		const big = "x".repeat(5_000);
+		const events: SessionEvent[] = [user("1"), say("", [{ id: "c1", name: "read", args: "{}" }]), tool("c1", big, "oabc"), user("2"), say("b"), user("3"), say("c"), user("4")];
+		const candidates = elisionCandidates(events);
+		expect(candidates.length).toBe(1);
+		events.push({ t: "elide", id: `e${n++}`, at, ids: candidates.map((c) => c.id), tokensBefore: 1 });
+		const toolMessage = derive(events).messages.find((m) => m.role === "tool") as { content: string };
+		expect(toolMessage.content).toContain('handle "oabc"');
+	});
+
+	test("cut points land on a turn boundary and keep recent work", () => {
+		const events: SessionEvent[] = [];
+		for (let i = 0; i < 6; i++) events.push(user(`q${i} ${"w".repeat(4_000)}`), say(`a${i} ${"w".repeat(4_000)}`));
+		const derived = derive(events);
+		const cut = cutPoint(events, derived, 3_000)!;
+		expect(derived.messages[cut].role).toBe("user");
+		expect(cut).toBeGreaterThan(0);
+	});
+
+	test("with only a few turns, nothing is elided, not even large outputs", () => {
+		const events: SessionEvent[] = [user("1"), say("", [{ id: "c9", name: "read", args: "{}" }]), tool("c9", "x".repeat(9_000), "o9"), user("2")];
+		expect(elisionCandidates(events)).toEqual([]);
+	});
+
+	test("a short history keeps the current turn whole and summarizes what came before", () => {
+		const events = [user("one"), say("a"), user("two"), say("b")];
+		const derived = derive(events);
+		expect(cutPoint(events, derived, 50_000)).toBe(2);
+	});
+
+	test("an oversized current turn is cut inside, at a step", () => {
+		const events: SessionEvent[] = [user("old"), say("ok"), user("big task")];
+		for (let i = 0; i < 8; i++) events.push(say("", [{ id: `b${i}`, name: "read", args: "{}" }]), tool(`b${i}`, "y".repeat(8_000)));
+		const derived = derive(events);
+		const cut = cutPoint(events, derived, 3_000)!;
+		expect(cut).toBeGreaterThan(2);
+		expect(derived.messages[cut].role).toBe("assistant");
+	});
+
+	test("budget keeps a reserve and honors compactAt", () => {
+		expect(budget(262_144).threshold).toBe(262_144 - Math.round(262_144 * 0.15));
+		expect(budget(32_768).threshold).toBe(32_768 - 8_192);
+		expect(budget(1_000_000, 0.5).threshold).toBe(500_000);
+	});
+});
+
+describe("shell", () => {
+	const root = scratch("shell");
+	mkdirSync(join(root, "src"));
+	symlinkSync(tmpdir(), join(root, "escape"));
+	const ws = new LocalWorkspace(root);
+	const inside = (p: string) => ws.inside(p);
+
+	test("everyday reading runs without asking", () => {
+		for (const c of [
+			"ls -la", "git status && git diff", "rg foo src | head", "cat src/a.txt 2>/dev/null", "node --version",
+			"rg 'a|b' src", "git log --oneline -5", "git branch", "git branch -a", "git config --get user.name",
+			"find src -name '*.ts'", "sort src/a.txt", "fd ts src", "rg -n '/api/v1' src", "git remote -v", "wc -l < src/a.txt",
+		]) expect([c, isReadOnlyCommand(c, [], inside)]).toEqual([c, true]);
+	});
+
+	test("anything that writes, runs a program or substitutes asks", () => {
+		for (const c of [
+			"rm -rf x", "echo hi > f", "git push", "sed -i s/a/b/ f", "find . -delete", "ls $(pwd)", "npm install",
+			"echo hi & rm -rf /tmp/x", "env rm -rf x", "sed --in-place s/a/b/ f", "sed -ni p f", "sed 'w out' f",
+			"sort -o out f", "uniq in out", "fd -x rm", "fd . -X rm", "rg --pre ./evil x", "yq -i .a=1 f", "PATH=/tmp/evil ls",
+			"git branch x", "git remote add o url", "git config diff.external evil", "git config core.hooksPath h",
+			"git config user.name foo", "find . -fls out", "git tag v1", "cat $HOME/.ssh/id_ed25519", "echo `id`",
+			"git log --output=out", "git -c core.pager=evil log", "ls &", "cat <<EOF", "printenv",
+			"echo (New-Item -ItemType File -Path x)", "env sh -c 'touch x'", "(rm -rf x)", "{ rm -rf x; }", "Get-Content @(x)",
+		]) expect([c, isReadOnlyCommand(c, [], inside)]).toEqual([c, false]);
+	});
+
+	test("reading outside the project asks, through a symlink too", () => {
+		for (const c of ["cat ~/.ssh/id_ed25519", "cat /etc/passwd", "head ../other/file", "cat escape/x", "rg key ~/.secrets", "wc -l < /etc/hosts"])
+			expect([c, isReadOnlyCommand(c, [], inside)]).toEqual([c, false]);
+		expect(ws.inside("src/new_file.ts")).toBe(true);
+		expect(ws.inside("escape/anything")).toBe(false);
+	});
+});
+
+describe("permissions", () => {
+	const ws = new LocalWorkspace(scratch("perm"));
+	const config = { permissions: { mode: "ask", allowCommands: [] } } as unknown as LabConfig;
+	const shell = { name: "shell", kind: "exec" } as unknown as Tool;
+	const fetchT = { name: "fetch", kind: "net" } as unknown as Tool;
+
+	test("allowing an interpreter for the session allows only that exact command", () => {
+		expect(allowKey(shell, { command: "python3 run.py" })).toBe("shell=python3 run.py");
+		expect(allowKey(shell, { command: "git commit -m x" })).toBe("shell:git commit");
+		expect(allowKey(shell, { command: "pytest -q" })).toBe("shell:pytest");
+		expect(allowKey(shell, { command: "make && rm -rf x" })).toBe("shell=make && rm -rf x");
+	});
+
+	test("fetch asks once per host and names local addresses", () => {
+		const first = decide(fetchT, { url: "https://example.org/a" }, ws, config, new Set());
+		expect(first.action).toBe("ask");
+		expect(decide(fetchT, { url: "https://example.org/b" }, ws, config, new Set(["net:example.org"])).action).toBe("run");
+		const local = decide(fetchT, { url: "http://169.254.169.254/latest" }, ws, config, new Set());
+		expect(local.action === "ask" && local.reason).toContain("your network");
+	});
+
+	test("a read-only command outside the project says why it asks", () => {
+		const verdict = decide(shell, { command: "cat /etc/hosts" }, ws, config, new Set());
+		expect(verdict.action === "ask" && verdict.reason).toBe("It reads outside the project folder.");
+	});
+});
+
+describe("edit", () => {
+	test("CRLF files take LF edits and keep their line endings", async () => {
+		const root = scratch("edit");
+		const ws = new LocalWorkspace(root);
+		await ws.write("a.txt", "one\r\ntwo\r\nthree\r\n");
+		const result = await editTool.run({ path: "a.txt", edits: [{ old: "two\nthree", new: "2\n3" }] }, { workspace: ws } as never);
+		expect(result.ok).toBe(true);
+		expect((await ws.read("a.txt")).toString()).toBe("one\r\n2\r\n3\r\n");
+	});
+});
+
+describe("diff and glob", () => {
+	test("a new file diff counts its lines once", () => {
+		const { added, removed } = unifiedDiff("", "hello\n", "f");
+		expect([added, removed]).toEqual([1, 0]);
+	});
+	test("an edit shows one hunk", () => {
+		const { diff } = unifiedDiff("a\nb\nc\n", "a\nB\nc\n", "f");
+		expect(diff).toContain("-b\n+B");
+	});
+	test("globs match paths", () => {
+		expect(globToRegex("**/*.ts").test("src/a/b.ts")).toBe(true);
+		expect(globToRegex("src/*.{js,ts}").test("src/x.js")).toBe(true);
+		expect(globToRegex("*.py").test("src/x.py")).toBe(false);
+	});
+});
+
+describe("streaming blocks", () => {
+	test("a blank line outside a code fence ends a block; the tail stays open", () => {
+		const text = "# Title\n\nPara one.\n\n```js\nconst a = 1;\n\nconst b = 2;\n```\n\nPara two still go";
+		const { settled, open } = splitBlocks(text);
+		expect(settled).toEqual(["# Title", "Para one.", "```js\nconst a = 1;\n\nconst b = 2;\n```"]);
+		expect(open).toBe("Para two still go");
+	});
+});
+
+describe("sites", () => {
+	test("a bound session sees one site; isolated sites stay out of unbound sessions", () => {
+		const home = scratch("sites");
+		const p = { sites: join(home, "sites.json"), credentials: join(home, "credentials") } as never;
+		const sites = new Sites(p, () => undefined);
+		sites.add({ name: "home", url: "https://gate.example.org", kind: "gate" });
+		sites.add({ name: "research", url: "https://broker.example.org", kind: "gate", isolated: true });
+		const model = (provider: string) => ({ source: "site", provider }) as never;
+		expect(sites.allows(model("home"))).toBe(true);
+		expect(sites.allows(model("research"))).toBe(false);
+		expect(sites.allows(model("research"), "research")).toBe(true);
+		expect(sites.allows(model("home"), "research")).toBe(false);
+		// An isolated site's sessions use its models only; other bound sessions may still use the person's own.
+		expect(sites.allows({ source: "local", provider: "ollama" } as never, "research")).toBe(false);
+		expect(sites.allows({ source: "local", provider: "ollama" } as never, "home")).toBe(true);
+	});
+});
+
+describe("checkpoints", () => {
+	test("restoring puts every file back as it was before the earliest change, and removes new files", () => {
+		const root = scratch("undo");
+		const store = new Checkpoints(join(root, ".checkpoints"));
+		const a = join(root, "a.txt");
+		const b = join(root, "b.txt");
+		writeFileSync(a, "one");
+		const first = store.capture([a, b]);
+		writeFileSync(a, "two");
+		writeFileSync(b, "new");
+		const second = store.capture([a]);
+		writeFileSync(a, "three");
+		expect(store.restore([first, second]).sort()).toEqual([a, b].sort());
+		expect(readFileSync(a, "utf8")).toBe("one");
+		expect(existsSync(b)).toBe(false);
+	});
+});
+
+describe("skills, hooks and search", () => {
+	test("skills come from SKILL.md front matter; a project skill replaces a personal one of the same name", () => {
+		const root = scratch("skills");
+		for (const [dir, description] of [["personal/review", "personal"], ["project/review", "project"], ["project/plots", "Make figures"]] as const) {
+			mkdirSync(join(root, dir), { recursive: true });
+			writeFileSync(join(root, dir, "SKILL.md"), `---\nname: ${dir.split("/")[1]}\ndescription: ${description}\n---\n\nSteps.`);
+		}
+		const skills = findSkills([join(root, "personal"), join(root, "project")]);
+		expect(skills.map((s) => `${s.name}:${s.description}`)).toEqual(["plots:Make figures", "review:project"]);
+	});
+
+	test("a before-tool hook that exits 2 blocks the call with its message", async () => {
+		const outcome = await runHooks([{ match: "shell", command: "echo 'no deploys from here' >&2; exit 2" }], { tool: "shell", args: { command: "deploy" } }, tmpdir());
+		expect(outcome.blocked).toBe("no deploys from here");
+		expect((await runHooks([{ match: "edit", command: "exit 2" }], { tool: "shell", args: {} }, tmpdir())).blocked).toBeUndefined();
+	});
+
+	test("web search asks once per provider host", () => {
+		const tool = searchTool({ provider: "brave", keyFile: "/nonexistent" });
+		expect(allowKey(tool, { query: "x" })).toBe("net:api.search.brave.com");
+	});
+});
+
+describe("sandbox", () => {
+	test("sandboxed commands run without asking; unsandboxed ones go through the usual question", () => {
+		const config = { permissions: { mode: "ask", allowCommands: [] } } as unknown as LabConfig;
+		const shell = { name: "shell", kind: "exec" } as unknown as Tool;
+		const ws = { sandboxed: "seatbelt", inside: () => true } as never;
+		expect(decide(shell, { command: "npm test" }, ws, config, new Set()).action).toBe("run");
+		expect(decide(shell, { command: "npm install", unsandboxed: true }, ws, config, new Set()).action).toBe("ask");
+	});
+});
+
+describe("second review", () => {
+	const ws = new LocalWorkspace(scratch("r2"));
+	const inside = (p: string) => ws.inside(p);
+	const config = { permissions: { mode: "ask", allowCommands: [] } } as unknown as LabConfig;
+	const read = { name: "read", kind: "read", ask: (a: { path?: string }) => (ws.inside(String(a.path)) ? undefined : "outside") } as unknown as Tool;
+
+	test("other accounts' homes and paths given as patterns or flag values ask", () => {
+		for (const c of ["cat ~rich/.ssh/id_rsa", "grep -f /etc/passwd README.md", "rg -f /etc/hosts .", "fd --search-path /etc passwd"])
+			expect([c, isReadOnlyCommand(c, [], inside)]).toEqual([c, false]);
+	});
+
+	test("an outside read allowed for the session isn't asked again", () => {
+		const first = decide(read, { path: "/etc/hosts" }, ws, config, new Set());
+		expect(first.action).toBe("ask");
+		const key = first.action === "ask" ? first.key : "";
+		expect(decide(read, { path: "/etc/hosts" }, ws, config, new Set([key])).action).toBe("run");
+	});
+
+	test("a sandboxed command still asks when it names a path outside the project", () => {
+		const shell = { name: "shell", kind: "exec" } as unknown as Tool;
+		const sandboxed = Object.assign(Object.create(ws), { sandboxed: "seatbelt" });
+		expect(decide(shell, { command: "make test" }, sandboxed, config, new Set()).action).toBe("run");
+		expect(decide(shell, { command: "cat ~/.ssh/id_rsa" }, sandboxed, config, new Set()).action).toBe("ask");
+		expect(decide(shell, { command: "cat $HOME/.ssh/id_rsa" }, sandboxed, config, new Set()).action).toBe("ask");
+	});
+});
+
+describe("git", () => {
+	test("snapshots leave the index alone and restore shell-made changes; worktrees get their own branch", async () => {
+		const { execFileSync } = await import("node:child_process");
+		const { snapshot, restoreSnapshot, createWorktree, removeWorktree } = await import("../packages/engine/src/git.ts");
+		const root = scratch("git");
+		const run = (...a: string[]) => execFileSync("git", a, { cwd: root, encoding: "utf8" }).trim();
+		run("init", "-q", "-b", "main");
+		run("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "start");
+		writeFileSync(join(root, "a.txt"), "one");
+		run("add", "a.txt");
+		const before = snapshot(root, "s1", "turn 1");
+		writeFileSync(join(root, "a.txt"), "two");
+		writeFileSync(join(root, "new.txt"), "made by a shell command");
+		expect(restoreSnapshot(root, before).sort()).toEqual(["a.txt", "new.txt"]);
+		expect(readFileSync(join(root, "a.txt"), "utf8")).toBe("one");
+		expect(existsSync(join(root, "new.txt"))).toBe(false);
+		expect(run("diff", "--cached", "--name-only")).toBe("a.txt");
+		const wt = createWorktree(root, "s0abc123", "Fix the parser");
+		expect(wt.branch).toBe("enriched/fix-the-parser-abc123");
+		expect(existsSync(wt.path)).toBe(true);
+		removeWorktree(root, wt.path, wt.branch, true);
+		expect(existsSync(wt.path)).toBe(false);
+	}, 30_000);
+});
+
+describe("git push", () => {
+	test("a push asks even after the person allowed it for the session", () => {
+		const ws = new LocalWorkspace(scratch("push"));
+		const config = { permissions: { mode: "ask", allowCommands: [] } } as unknown as LabConfig;
+		const shell = { name: "shell", kind: "exec" } as unknown as Tool;
+		expect(allowKey(shell, { command: "git push origin main" })).toBe("shell!push");
+		expect(decide(shell, { command: "git push origin main" }, ws, config, new Set(["shell!push"])).action).toBe("ask");
+		const full = { permissions: { mode: "full", allowCommands: [] } } as unknown as LabConfig;
+		expect(decide(shell, { command: "git push origin main" }, ws, full, new Set()).action).toBe("ask");
+	});
+});
+
+describe("own-branch commits", () => {
+	test("in a session's own worktree, add and commit run; push, amend and commits elsewhere ask", () => {
+		const config = { permissions: { mode: "ask", allowCommands: [] } } as unknown as LabConfig;
+		const shell = { name: "shell", kind: "exec" } as unknown as Tool;
+		const repo = scratch("own");
+		const tree = join(repo, ".git", "enriched-worktrees", "w1");
+		mkdirSync(tree, { recursive: true });
+		const own = new LocalWorkspace(tree);
+		const plain = new LocalWorkspace(repo);
+		const run = (ws: LocalWorkspace, command: string) => decide(shell, { command }, ws, config, new Set()).action;
+		expect(run(own, "git add -A && git commit -m 'Fix the parser'")).toBe("run");
+		expect(run(own, "git commit --amend -m x")).toBe("ask");
+		expect(run(own, "git push origin HEAD")).toBe("ask");
+		expect(run(plain, "git commit -m 'Fix the parser'")).toBe("ask");
+	});
+});
+
+describe("repository handoff", () => {
+	test("send carries uncommitted work without secrets; fetch returns new commits as a branch", async () => {
+		const { execFileSync } = await import("node:child_process");
+		const { packForSend, fetchBundle } = await import("../packages/engine/src/git.ts");
+		const git = (cwd: string, ...a: string[]) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...a], { cwd, encoding: "utf8" }).trim();
+		// The person's global ignore rules (often .env already) mustn't decide this test.
+		const saved = { global: process.env.GIT_CONFIG_GLOBAL, xdg: process.env.XDG_CONFIG_HOME };
+		process.env.GIT_CONFIG_GLOBAL = "/dev/null";
+		process.env.XDG_CONFIG_HOME = scratch("xdg");
+		const repo = scratch("send");
+		git(repo, "init", "-q", "-b", "main");
+		writeFileSync(join(repo, "a.txt"), "one\n");
+		git(repo, "add", ".");
+		git(repo, "commit", "-q", "-m", "start");
+		writeFileSync(join(repo, "a.txt"), "two\n");
+		writeFileSync(join(repo, ".env"), "TOKEN=x\n");
+		const bundle = join(scratch("bundle"), "r.bundle");
+		const sent = packForSend(repo, bundle);
+		expect(sent.skipped).toEqual([".env"]);
+		const far = scratch("far");
+		git(far, "init", "-q");
+		git(far, "fetch", "-q", bundle, `${sent.ref}:refs/heads/work`);
+		git(far, "checkout", "-q", "work");
+		expect(readFileSync(join(far, "a.txt"), "utf8")).toBe("two\n");
+		expect(existsSync(join(far, ".env"))).toBe(false);
+		writeFileSync(join(far, "b.txt"), "made far away\n");
+		git(far, "add", ".");
+		git(far, "commit", "-q", "-m", "Add b");
+		const back = join(far, "..", `${sent.id}.bundle`);
+		git(far, "bundle", "create", "-q", back, `${sent.commit}..work`);
+		expect(fetchBundle(repo, back, "refs/heads/work", "enriched/far", sent.commit).map((l) => l.split(" ").slice(1).join(" "))).toEqual(["Add b"]);
+		expect(git(repo, "branch", "--show-current")).toBe("main");
+		expect(readFileSync(join(repo, "a.txt"), "utf8")).toBe("two\n");
+		for (const [key, value] of [["GIT_CONFIG_GLOBAL", saved.global], ["XDG_CONFIG_HOME", saved.xdg]] as const) {
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
+	}, 30_000);
+});
+
+describe("bundles", () => {
+	const base = { permissions: { mode: "ask", allowCommands: [] }, mcpServers: { mine: { url: "https://mine.example/mcp" } }, models: {}, skills: { dirs: [] }, instructions: { global: [] }, hooks: {} } as unknown as LabConfig;
+
+	test("both layouts install, and their skills, instructions, servers and hooks join the person's settings", async () => {
+		const { installBundle, listBundles, applyBundles, readBundle } = await import("../packages/engine/src/bundles.ts");
+		const { paths } = await import("../packages/engine/src/paths.ts");
+		const p = paths(scratch("bundles"));
+		const own = scratch("own-bundle");
+		mkdirSync(join(own, "skills", "plots"), { recursive: true });
+		writeFileSync(join(own, "skills", "plots", "SKILL.md"), "---\nname: plots\ndescription: Make plots\n---\n");
+		writeFileSync(join(own, "AGENTS.md"), "Use metric units.\n");
+		writeFileSync(join(own, "bundle.json"), JSON.stringify({ name: "lab-basics", version: "1.2.0", instructions: "AGENTS.md", mcpServers: { mine: { url: "https://other" }, tools: { command: "${BUNDLE_ROOT}/bin/serve" } } }));
+		const plugin = scratch("plugin");
+		mkdirSync(join(plugin, ".claude-plugin"), { recursive: true });
+		mkdirSync(join(plugin, "hooks"), { recursive: true });
+		writeFileSync(join(plugin, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "formatter", version: "0.3.0" }));
+		writeFileSync(join(plugin, "hooks", "hooks.json"), JSON.stringify({ hooks: { PostToolUse: [{ matcher: "Write|Edit", hooks: [{ type: "command", command: "${CLAUDE_PLUGIN_ROOT}/fmt.sh" }] }] } }));
+		installBundle(p, own);
+		installBundle(p, plugin);
+		expect(listBundles(p).map((b) => `${b.name} ${b.version}`)).toEqual(["formatter 0.3.0", "lab-basics 1.2.0"]);
+		const merged = applyBundles(base, listBundles(p));
+		const basics = join(p.bundles, "lab-basics");
+		expect(merged.skills.dirs).toEqual([join(basics, "skills")]);
+		expect(merged.instructions.global).toEqual([join(basics, "AGENTS.md")]);
+		expect(merged.mcpServers.mine).toEqual({ url: "https://mine.example/mcp" });
+		expect(merged.mcpServers.tools).toEqual({ command: join(basics, "bin", "serve") });
+		expect(merged.hooks.afterTool).toEqual([{ match: "write|edit", command: join(p.bundles, "formatter", "fmt.sh"), timeout: undefined }]);
+		expect(readBundle(join(p.bundles, "formatter")).name).toBe("formatter");
+	});
+
+	test("a site's bundles can't run programs here, apply to isolated sessions only, and leave when ungranted", async () => {
+		const { syncSiteBundles, listBundles, applyBundles } = await import("../packages/engine/src/bundles.ts");
+		const { paths } = await import("../packages/engine/src/paths.ts");
+		const p = paths(scratch("site-bundles"));
+		const manifest = { name: "assays", version: "2", mcpServers: { lims: { url: "https://lims.example/mcp" }, local: { command: "/bin/sh" } }, hooks: { beforeTool: [{ command: "/bin/sh -c 'curl x'" }] } };
+		const grant = { name: "assays", version: "2", files: [{ path: "bundle.json", content: JSON.stringify(manifest) }, { path: "skills/qc/SKILL.md", content: "---\nname: qc\n---\n" }] };
+		expect(() => syncSiteBundles(p, "research", [{ ...grant, files: [{ path: "../escape.txt", content: "x" }] }])).toThrow();
+		syncSiteBundles(p, "research", [grant]);
+		const bundles = listBundles(p);
+		expect(bundles.map((b) => [b.name, b.source])).toEqual([["research.assays", "site:research"]]);
+		const open = applyBundles(base, bundles);
+		expect(Object.keys(open.mcpServers).sort()).toEqual(["lims", "mine"]);
+		expect(open.hooks.beforeTool).toEqual([]);
+		expect(applyBundles(base, bundles, ["research"]).skills.dirs).toEqual([]);
+		expect(applyBundles(base, bundles, ["research"], "research").skills.dirs).toHaveLength(1);
+		syncSiteBundles(p, "research", []);
+		expect(listBundles(p)).toEqual([]);
+	});
+});
+
+describe("memory", () => {
+	test("remember adds a dated line to the project's notes outside the repository, and refuses secrets", async () => {
+		const { rememberTool, readNotes, notesPath } = await import("../packages/engine/src/memory.ts");
+		const home = scratch("memory-home");
+		const saved = process.env.ENRICHED_HOME;
+		process.env.ENRICHED_HOME = home;
+		try {
+			const project = scratch("memory-project");
+			const ctx = { project } as never;
+			await rememberTool.run({ note: "Run tests with pixi run test" }, ctx);
+			expect(readNotes(project)).toContain("- Run tests with pixi run test (");
+			expect(notesPath(project).startsWith(home)).toBe(true);
+			await expect(rememberTool.run({ note: "api_key = sk-abcdefghijklmnop" }, ctx)).rejects.toThrow();
+		} finally {
+			if (saved === undefined) delete process.env.ENRICHED_HOME;
+			else process.env.ENRICHED_HOME = saved;
+		}
+	});
+});
