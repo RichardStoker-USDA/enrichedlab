@@ -289,6 +289,13 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		const refused = response.status === 401 || response.status === 400 ? dpopError(response) : undefined;
 		if (refused && init.dpop === undefined) {
 			const again = !retried && !streamed;
+			// Once the person has an approved device, the lab wants proofs even where they're optional; a key that waits
+			// for approval can't give one yet.
+			const waiting = () => Object.assign(new Error(this.pendingText), { status: 401, pending: true, dpop: refused });
+			if (refused === "device_proof_required" && this.device?.pending) {
+				await response.arrayBuffer();
+				throw waiting();
+			}
 			if (refused === "use_dpop_nonce" && nonce && again) return this.call(method, path, init, true);
 			if ((refused === "device_unregistered" || refused === "device_proof_required") && again && this.deviceFile && path !== "/v1/devices") {
 				// No proof was sent: load (or register) this computer's key. The lab lost the key: register a new one.
@@ -299,6 +306,8 @@ export class GateSite implements SiteAdapter, SandboxApi {
 					if (key.id && !key.revoked) key.discard();
 				}
 				await this.enroll();
+				// enroll() set the key again; a new one may be waiting for approval.
+				if ((this.device as DeviceKey | undefined)?.pending) throw waiting();
 				return this.call(method, path, init, true);
 			}
 			if (refused === "device_mismatch" || refused === "signin_stale") {
@@ -313,12 +322,13 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				throw Object.assign(new Error(`${this.title} revoked this computer's key. Sign in again (el login ${this.config.name}) to register a new one.`), { status: 401 });
 			}
 		}
-		if ((response.status === 409 || response.status === 503) && !streamed && !init.noWait) {
+		if ((response.status === 409 || response.status === 429 || response.status === 503) && !streamed && !init.noWait) {
 			const code = ((await response.clone().json().catch(() => undefined)) as { error?: { code?: string } } | undefined)?.error?.code;
 			const waited = init.waited ?? 0;
-			// The lab is starting a stopped sandbox for this request, or its malware scanner is down while a file leaves the
-			// sandbox: wait as long as it says, then send the request again, for up to 3 minutes in all.
-			const most = code === "sandbox_starting" ? 30 : code === "scanner_unavailable" ? 60 : 0;
+			// The lab is starting a stopped sandbox for this request, its malware scanner is down while a file leaves the
+			// sandbox, or the person already has as many downloads being scanned as the lab allows: wait as long as it
+			// says, then send the request again, for up to 3 minutes in all.
+			const most = code === "sandbox_starting" ? 30 : code === "scanner_unavailable" ? 60 : code === "downloads_in_progress" ? 30 : 0;
 			if (most && waited < 180_000) {
 				const after = Number(response.headers.get("retry-after"));
 				const wait = Math.max((Number.isFinite(after) && response.headers.has("retry-after") ? Math.min(after, most) : 5) * 1000, 1_000);
@@ -346,6 +356,8 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				file_refused: "The malware scanner stopped this file from leaving the sandbox.",
 				scanner_unavailable: `${this.title}'s malware scanner is down, so files can't leave the sandbox right now. Try again in a few minutes.`,
 				file_too_large: `This file is larger than ${this.title} lets you download. Compress or split it in the sandbox and try again.`,
+				downloads_in_progress: `You have as many downloads from ${this.title} being scanned as it allows at once. Try again when one finishes.`,
+				device_pending_exists: `Another new computer is already waiting for approval at ${this.title}. Approve or revoke it from one of your approved devices (el devices ${this.config.name}), then try again here.`,
 			};
 			const message = (detail.error?.code && worded[detail.error.code]) || detail.error?.message || `${this.config.name} answered ${response.status}.`;
 			if (detail.error?.code === "device_pending" && this.device && !this.device.pending) {
@@ -871,7 +883,11 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		const slow = status === "archived" || status === "restoring";
 		if (status === "archived") {
 			this.onNotice?.(`Restoring your ${this.title} sandbox from its archive. Its files come back with it.`);
-			await this.json("POST", `/v1/containers/${encodeURIComponent(id)}/restore`, { json: {}, signal });
+			await this.json("POST", `/v1/containers/${encodeURIComponent(id)}/restore`, { json: {}, signal }).catch((error: Error & { status?: number }) => {
+				// The lab can refuse, for one, when the saved files are larger than the person's disk limit there now.
+				if (error.status === 403) throw new ToolError(`${this.title} won't restore your archived sandbox: ${error.message.replace(/\.$/, "")}. Ask the lab to raise your limit, or to delete the archive.`);
+				throw error;
+			});
 		} else if (status === "stopped") {
 			// Listing one file is the lightest use; the lab starts the sandbox on it.
 			await this.call("GET", `/v1/containers/${encodeURIComponent(id)}/files?limit=1`, { signal, noWait: true }).then(

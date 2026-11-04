@@ -71,7 +71,8 @@ async function answer(request: Request): Promise<Response> {
 		}
 		if (url.pathname === "/v1/echo" && !request.headers.get("dpop")) return refuse("device_proof_required");
 		if (lab.optional && !request.headers.get("dpop")) {
-			// Proofs optional: an unsigned read is served.
+			// Proofs optional: an unsigned read is served until the person has an approved device; then proofs are needed.
+			if ([...lab.devices.values()].some((d) => !d.revoked && d.status !== "pending")) return refuse("device_proof_required");
 			if (url.pathname === "/v1/me") return Response.json({ subject: "u_1", handle: "pat", memberships: [{ lab: "devlab", roles: ["member"] }] });
 			if (url.pathname === "/v1/models") return Response.json({ data: [] });
 		}
@@ -90,6 +91,10 @@ async function answer(request: Request): Promise<Response> {
 			if (body.jwk && thumbprint(body.jwk) !== proof.thumb) return Response.json({ error: { message: "the jwk isn't the key that signed" } }, { status: 400 });
 			const live = [...lab.devices.values()].some((d) => !d.revoked && d.status !== "pending");
 			const pending = lab.approval && live;
+			// One new device waits at a time.
+			if (pending && [...lab.devices.values()].some((d) => d.status === "pending" && d.thumbprint !== proof.thumb)) {
+				return Response.json({ error: { code: "device_pending_exists", message: "another device is waiting" } }, { status: 409 });
+			}
 			const device = { id: `d${next++}`, thumbprint: proof.thumb, revoked: false, status: pending ? "pending" : "active" };
 			lab.devices.set(proof.thumb, device);
 			if (pending) return Response.json({ id: device.id, status: "pending", expires_at: new Date(Date.now() + 15 * 60_000).toISOString() }, { status: 202 });
@@ -240,7 +245,7 @@ describe("device-bound lab tokens", () => {
 		lab.nonce = undefined;
 	});
 
-	test("a second computer waits for approval, works without proofs meanwhile, and signs once another device approves it", async () => {
+	test("a second computer waits for approval (unsigned requests are refused once the person has an approved device), and signs once another device approves it", async () => {
 		GateSite.approvalPollMs = 50;
 		lab.devices.clear();
 		lab.approval = true;
@@ -253,10 +258,11 @@ describe("device-bound lab tokens", () => {
 		let approved = false;
 		second.onNotice = (text) => notices.push(text);
 		second.onApproved = () => (approved = true);
-		await second.connect();
-		expect(second.warning).toContain("Approve this computer for Dev Lab from one of your other devices");
-		expect(second.who).toBe("pat");
+		await expect(second.connect()).rejects.toThrow("Approve this computer for Dev Lab from one of your other devices");
 		const pendingId = JSON.parse(readFileSync(otherFile, "utf8")).id as string;
+		// A third computer can't ask while the second one waits.
+		const third = new GateSite({ name: "devlab", url: PUBLIC, kind: "gate" }, { base, via: "key", headers: async () => ({ authorization: `Bearer ${TOKEN}` }) }, undefined, join(home, "device_third.json"));
+		await expect(third.connect()).rejects.toThrow("Another new computer is already waiting for approval at Dev Lab");
 		expect([...lab.devices.values()].find((d) => d.id === pendingId)?.status).toBe("pending");
 		await first.approveDevice(pendingId);
 		for (let i = 0; i < 100 && !approved; i++) await Bun.sleep(20);

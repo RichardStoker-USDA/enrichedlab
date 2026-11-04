@@ -35,6 +35,7 @@ const lab = Bun.serve({
 			return Response.json({ id, status: c.status });
 		}
 		if (rest === "/restore") {
+			if (c.files === "too-big") return Response.json({ error: { code: "forbidden", message: "the saved files (12 GB) are larger than your disk limit (10 GB)" } }, { status: 403 });
 			if (c.status !== "archived" && c.status !== "restoring") return Response.json({ error: { code: "bad_request" } }, { status: 400 });
 			c.status = "restoring";
 			c.polls = 0;
@@ -87,6 +88,11 @@ describe("sandbox lifecycle", () => {
 		expect(calls).toContain("POST /v1/containers/c-archived/restore");
 		expect(notices.join(" ")).toContain("Restoring your Dev Lab sandbox from its archive");
 	}, 30_000);
+
+	test("a restore the lab refuses says why and what to ask for", async () => {
+		const { s } = await site("c-toobig", { status: "archived", files: "too-big" });
+		await expect(s.run("echo hi", 30)).rejects.toThrow("Dev Lab won't restore your archived sandbox: the saved files (12 GB) are larger than your disk limit (10 GB). Ask the lab to raise your limit, or to delete the archive.");
+	});
 
 	test("a failed restore says so instead of running somewhere else", async () => {
 		const { s } = await site("c-badrestore", { status: "archived", files: "fail" });

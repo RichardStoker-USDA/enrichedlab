@@ -21,7 +21,7 @@ look the same to EnrichedLab.
 | `GET /v1/me` | a stable pseudonymous `subject` (never an email), memberships (lab, research group, roles), policy | built, with ETag |
 | `GET /v1/models` | the models this person may use, with context, output limit and reasoning levels | built, with ETag |
 | `POST /mcp` | MCP tools, filtered per person; MCP 2026-07-28 stateless, so any replica answers any request | built |
-| `/v1/containers` | the person's sandbox: run, background jobs, files in and out; `profile` picks a size. A file leaving the sandbox passes the lab's malware scanners first and comes with `Repr-Digest` (RFC 9530) of the bytes they passed; `422 file_refused` when a scanner stops it, `503 scanner_unavailable` with `Retry-After` while one is down, `413 file_too_large` past the person's limit | built: downloads are kept only when their sha-256 matches `Repr-Digest`; waits out `scanner_unavailable` for up to 3 minutes; `el lab check` sends a file in and out |
+| `/v1/containers` | the person's sandbox: run, background jobs, files in and out; `profile` picks a size. A file leaving the sandbox passes the lab's malware scanners first and comes with `Repr-Digest` (RFC 9530) of the bytes they passed; `422 file_refused` when a scanner stops it, `503 scanner_unavailable` with `Retry-After` while one is down, `429 downloads_in_progress` past the person's concurrent scans, `413 file_too_large` past the person's limit. A restore can be refused (403) when the saved files outgrow the person's disk limit | built: downloads are kept only when their sha-256 matches `Repr-Digest`; waits out `scanner_unavailable` and `downloads_in_progress` for up to 3 minutes; `el lab check` sends a file in and out |
 | `GET /v1/bundles` | skills, instructions, MCP servers and apps granted by role | built, with ETag |
 | `GET /v1/events` | server-sent events with a commit-ordered `id`; resume with `Last-Event-ID`; a cursor older than the history kept gets `event: reset` | built: shown as notices; cursor kept across restarts |
 | `POST /v1/guard` | the lab's classifiers: `{stage, text, session?, tool?}` → `{decision, categories, reasons, policy_version, receipt_id}` | checked by `el lab check`; sessions call it next |
@@ -119,9 +119,10 @@ from copying it. The lab makes a copied token worth little:
   responses: the client puts the latest one in every proof and answers `use_dpop_nonce` by sending once more. Before a
   request it can't send twice (an upload, a WebSocket, a page's request through a port), it fetches a fresh nonce if
   its own is over 4 minutes old. When the person already has a device, a new one registers as pending (202,
-  `device_approval_needed`): it works without proofs where they're optional, says "approve this computer from one of
-  your other devices", and tries a signed read every 5 seconds until it's approved or the request lapses (15 minutes).
-  The other devices get `device.pending`; the window asks the person (Approve, or Not mine to revoke it) and
+  `device_approval_needed`); only one waits at a time (`409 device_pending_exists`). Once a person has an approved
+  device the lab wants proofs even where they're optional, so the pending computer says "approve this computer from
+  one of your other devices" and tries a signed read every 5 seconds until it's approved or the request lapses (15
+  minutes). The other devices get `device.pending`; the window asks the person (Approve, or Not mine to revoke it) and
   `el devices <lab>` lists them, with `el device approve|revoke <lab> <id>`. Nothing approves on its own. Sign-out
   revokes the key (`DELETE /v1/devices/{id}`). MCP is standardizing the same profile (SEP-1932).
 - **Quotas and alerts.** Per-person request and token limits, and an alert when use leaves the person's pattern.

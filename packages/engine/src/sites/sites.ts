@@ -410,6 +410,8 @@ export class Sites {
 				break;
 			} catch (error) {
 				state.error = redact(errorText(error));
+				// Waiting for another device to approve this one: another route waits the same way.
+				if ((error as { pending?: boolean }).pending) break;
 			}
 		}
 		if (!this.adapters.has(name) && container) this.parked.set(name, container);

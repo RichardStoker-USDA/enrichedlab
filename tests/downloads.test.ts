@@ -11,7 +11,7 @@ import { GateSite, reprSha256 } from "../packages/engine/src/sites/gate.ts";
 
 const body = "plot,value\na,1\n";
 const digest = (text: string) => `sha-256=:${createHash("sha256").update(text).digest("base64")}:`;
-let mode: "good" | "bad" | "none" | "refused" | "busy" | "big" = "good";
+let mode: "good" | "bad" | "none" | "refused" | "busy" | "queued" | "big" = "good";
 let busy = 0;
 
 const lab = Bun.serve({
@@ -28,6 +28,7 @@ const lab = Bun.serve({
 			if (mode === "refused") return Response.json({ error: { code: "file_refused", message: "refused" } }, { status: 422 });
 			if (mode === "big") return Response.json({ error: { code: "file_too_large", message: "too large" } }, { status: 413 });
 			if (mode === "busy" && busy++ === 0) return Response.json({ error: { code: "scanner_unavailable", message: "down" } }, { status: 503, headers: { "retry-after": "0" } });
+			if (mode === "queued" && busy++ === 0) return Response.json({ error: { code: "downloads_in_progress", message: "busy" } }, { status: 429, headers: { "retry-after": "0" } });
 			const headers: Record<string, string> = { "content-type": "text/csv" };
 			if (mode !== "none") headers["repr-digest"] = `sha-512=:AAAA:, ${digest(mode === "bad" ? "something else" : body)}`;
 			return new Response(body, { headers });
@@ -84,6 +85,11 @@ describe("files leaving a lab sandbox", () => {
 		mode = "busy";
 		busy = 0;
 		await s.get("/sandbox/out/a.csv", join(dir, "later.csv"));
+		expect(busy).toBe(2);
+		// Past the person's concurrent scans: the download waits its turn.
+		mode = "queued";
+		busy = 0;
+		await s.get("/sandbox/out/a.csv", join(dir, "queued.csv"));
 		expect(busy).toBe(2);
 		mode = "refused";
 		await expect(s.get("/sandbox/out/a.csv", join(dir, "refused.csv"))).rejects.toThrow("The malware scanner stopped this file from leaving the sandbox.");
