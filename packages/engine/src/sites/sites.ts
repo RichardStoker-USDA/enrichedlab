@@ -107,7 +107,8 @@ export class Sites {
 				}
 				const title = this.title(name);
 				const text = noticeText(title, event);
-				if (text) this.onNotice({ site: name, type: event.type, at: event.at, text, session: event.session });
+				const url = typeof event.approve_url === "string" && /^https:\/\//.test(event.approve_url) ? event.approve_url : undefined;
+				if (text) this.onNotice({ site: name, type: event.type, at: event.at, text, session: event.session, ...(url ? { url } : {}) });
 				if (event.type === "signin.revoked") void this.logout(name);
 			},
 		});
@@ -508,8 +509,10 @@ export class Sites {
 }
 
 /** An event in words. Events that only refresh what's granted say nothing. */
-function noticeText(lab: string, e: LabEvent): string | undefined {
+export function noticeText(lab: string, e: LabEvent): string | undefined {
 	const said = typeof e.text === "string" && e.text ? e.text : typeof e.summary === "string" && e.summary ? e.summary : undefined;
+	// A lab agent's run held for the owner: whatever the event's type, the person has to act.
+	if (e.waiting_on === "approval") return `${lab}: the lab's agent is waiting for your approval${said ? ` (${said})` : ""}.`;
 	switch (e.type) {
 		case "job.finished":
 			return `${lab}: a sandbox job ${e.status === "failed" ? "failed" : "finished"}${said ? `: ${said}` : "."}`;

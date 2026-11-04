@@ -27,6 +27,8 @@ export interface SandboxBrowserLane {
 /** The page's size until a window says its pane's size, and the most a pane may ask for. */
 const VIEWPORT = { width: 1280, height: 800 };
 const LARGEST = { width: 1920, height: 1200 };
+/** What Chrome says while a navigation replaces the page under a call: worth sending the call again. */
+const TRANSIENT = /Not attached to an active page|Cannot find context|No frame (?:for|with) given id|Execution context was destroyed|Inspected target navigated/i;
 /** Keys that need a key code to do anything (typing letters goes as text). */
 const KEY_CODES: Record<string, number> = {
 	Backspace: 8, Tab: 9, Enter: 13, Escape: 27, " ": 32, PageUp: 33, PageDown: 34, End: 35, Home: 36,
@@ -124,21 +126,40 @@ export class SandboxPage {
 	async info(): Promise<{ url: string; title: string; loading: boolean; canBack: boolean; canForward: boolean }> {
 		const [{ targetInfo }, history] = await Promise.all([
 			this.cdp.send<{ targetInfo: { url: string; title: string } }>("Target.getTargetInfo", { targetId: this.target }),
-			this.cdp.send<{ currentIndex: number; entries: unknown[] }>("Page.getNavigationHistory", {}, this.session),
+			this.send<{ currentIndex: number; entries: unknown[] }>("Page.getNavigationHistory", {}),
 		]);
 		return { url: targetInfo.url, title: targetInfo.title, loading: this.loading, canBack: history.currentIndex > 0, canForward: history.currentIndex < history.entries.length - 1 };
 	}
 
-	/** Run a script in an isolated world of the page and return its value. */
+	/** Run a script in an isolated world of the page and return its value; again if a navigation replaced the page meanwhile. */
 	private async evaluate<T>(expression: string): Promise<T> {
-		const { executionContextId } = await this.cdp.send<{ executionContextId: number }>("Page.createIsolatedWorld", { frameId: this.frame, worldName: "el-agent" }, this.session);
-		const result = await this.cdp.send<{ result: { value?: T }; exceptionDetails?: { text?: string } }>(
-			"Runtime.evaluate",
-			{ expression, contextId: executionContextId, returnByValue: true },
-			this.session,
-		);
-		if (result.exceptionDetails) throw new Error(result.exceptionDetails.text ?? "The page script failed.");
-		return result.result.value as T;
+		for (let attempt = 0; ; attempt++) {
+			try {
+				const { executionContextId } = await this.cdp.send<{ executionContextId: number }>("Page.createIsolatedWorld", { frameId: this.frame, worldName: "el-agent" }, this.session);
+				const result = await this.cdp.send<{ result: { value?: T }; exceptionDetails?: { text?: string } }>(
+					"Runtime.evaluate",
+					{ expression, contextId: executionContextId, returnByValue: true },
+					this.session,
+				);
+				if (result.exceptionDetails) throw new Error(result.exceptionDetails.text ?? "The page script failed.");
+				return result.result.value as T;
+			} catch (error) {
+				if (attempt >= 5 || this.cdp.closed || !TRANSIENT.test((error as Error).message)) throw error;
+				await sleep(200);
+			}
+		}
+	}
+
+	/** A call to this page, sent again (for about a second) while a navigation swaps the page underneath it. */
+	private async send<T = Record<string, unknown>>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+		for (let attempt = 0; ; attempt++) {
+			try {
+				return await this.cdp.send<T>(method, params, this.session);
+			} catch (error) {
+				if (attempt >= 5 || this.cdp.closed || !TRANSIENT.test((error as Error).message)) throw error;
+				await sleep(200);
+			}
+		}
 	}
 
 	/** Wait a moment, then for the page to finish loading if it started (at most 15 seconds). */
@@ -157,7 +178,7 @@ export class SandboxPage {
 	}
 
 	async open(url: string): Promise<PageAnswer> {
-		const navigated = await this.cdp.send<{ errorText?: string }>("Page.navigate", { url }, this.session);
+		const navigated = await this.send<{ errorText?: string }>("Page.navigate", { url });
 		if (navigated.errorText) return { text: `Couldn't open ${url}: ${navigated.errorText}.` };
 		await this.settle(400);
 		return this.read();
@@ -175,29 +196,28 @@ export class SandboxPage {
 
 	async type(ref: number, text: string, submit: boolean): Promise<PageAnswer> {
 		if (!(await this.evaluate<boolean>(focusScript(ref)))) throw new Error(`No field ${ref} on this page now; read it again.`);
-		await this.cdp.send("Input.insertText", { text }, this.session);
+		await this.send("Input.insertText", { text });
 		if (submit) await this.key({ type: "keyDown", key: "Enter", code: "Enter" }).then(() => this.key({ type: "keyUp", key: "Enter", code: "Enter" }));
 		await this.settle(submit ? 900 : 200);
 		return this.read();
 	}
 
 	async shot(): Promise<PageAnswer> {
-		const [{ data }, info] = await Promise.all([this.cdp.send<{ data: string }>("Page.captureScreenshot", { format: "png" }, this.session), this.info()]);
+		const [{ data }, info] = await Promise.all([this.send<{ data: string }>("Page.captureScreenshot", { format: "png" }), this.info()]);
 		return { text: `${info.title} · ${info.url}`, image: { mime: "image/png", data } };
 	}
 
 	private mouse(event: { type: string; x: number; y: number; button?: string; clickCount?: number; deltaX?: number; deltaY?: number; modifiers?: number }) {
-		return this.cdp.send("Input.dispatchMouseEvent", { button: "none", ...event, x: Math.round(event.x), y: Math.round(event.y) }, this.session);
+		return this.send("Input.dispatchMouseEvent", { button: "none", ...event, x: Math.round(event.x), y: Math.round(event.y) });
 	}
 
 	private key(event: { type: "keyDown" | "keyUp"; key: string; code?: string; modifiers?: number }) {
 		const code = KEY_CODES[event.key] ?? (event.key.length === 1 ? event.key.toUpperCase().charCodeAt(0) : 0);
 		// A key that types something carries its text on keyDown; the rest go as raw key presses.
 		const typed = event.type === "keyDown" && ((event.modifiers ?? 0) & ~8) === 0 ? (event.key === "Enter" ? "\r" : event.key.length === 1 ? event.key : undefined) : undefined;
-		return this.cdp.send(
+		return this.send(
 			"Input.dispatchKeyEvent",
 			{ type: event.type === "keyDown" ? (typed ? "keyDown" : "rawKeyDown") : "keyUp", key: event.key, code: event.code ?? "", windowsVirtualKeyCode: code, modifiers: event.modifiers ?? 0, ...(typed ? { text: typed } : {}) },
-			this.session,
 		);
 	}
 
@@ -208,7 +228,7 @@ export class SandboxPage {
 	async resize(width: number, height: number): Promise<void> {
 		if (!Number.isFinite(width) || !Number.isFinite(height)) return;
 		const size = { width: Math.round(Math.min(Math.max(width, 320), LARGEST.width)), height: Math.round(Math.min(Math.max(height, 240), LARGEST.height)) };
-		await this.cdp.send("Emulation.setDeviceMetricsOverride", { ...size, deviceScaleFactor: 1, mobile: false }, this.session);
+		await this.send("Emulation.setDeviceMetricsOverride", { ...size, deviceScaleFactor: 1, mobile: false });
 	}
 
 	/** The person's own input from a window watching the page. */
@@ -224,7 +244,7 @@ export class SandboxPage {
 				await this.key({ type: event.type, key: event.key, code: event.code, modifiers: event.modifiers });
 				return;
 			case "text":
-				await this.cdp.send("Input.insertText", { text: event.text }, this.session);
+				await this.send("Input.insertText", { text: event.text });
 				return;
 		}
 	}
@@ -233,12 +253,12 @@ export class SandboxPage {
 	async navigate(to: { url?: string; step?: "back" | "forward" | "reload" }): Promise<void> {
 		if (to.url) {
 			if (!/^(https?:\/\/|about:blank$)/.test(to.url)) throw new Error("Only http and https pages open here.");
-			await this.cdp.send("Page.navigate", { url: to.url }, this.session);
-		} else if (to.step === "reload") await this.cdp.send("Page.reload", {}, this.session);
+			await this.send("Page.navigate", { url: to.url });
+		} else if (to.step === "reload") await this.send("Page.reload", {});
 		else if (to.step) {
-			const history = await this.cdp.send<{ currentIndex: number; entries: { id: number }[] }>("Page.getNavigationHistory", {}, this.session);
+			const history = await this.send<{ currentIndex: number; entries: { id: number }[] }>("Page.getNavigationHistory", {});
 			const entry = history.entries[history.currentIndex + (to.step === "back" ? -1 : 1)];
-			if (entry) await this.cdp.send("Page.navigateToHistoryEntry", { entryId: entry.id }, this.session);
+			if (entry) await this.send("Page.navigateToHistoryEntry", { entryId: entry.id });
 		}
 	}
 
@@ -254,7 +274,7 @@ export class SandboxPage {
 	async refresh(): Promise<void> {
 		if (!this.watchers) return;
 		await this.cdp.send("Page.stopScreencast", {}, this.session).catch(() => undefined);
-		await this.cdp.send("Page.startScreencast", { format: "jpeg", quality: 70, maxWidth: LARGEST.width, maxHeight: LARGEST.height, everyNthFrame: 1 }, this.session);
+		await this.send("Page.startScreencast", { format: "jpeg", quality: 70, maxWidth: LARGEST.width, maxHeight: LARGEST.height, everyNthFrame: 1 });
 		this.changed();
 	}
 

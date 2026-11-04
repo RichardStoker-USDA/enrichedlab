@@ -10,6 +10,8 @@
     "session": { "type": "string" },
     "text": { "type": "string" },
     "task_id": { "type": "string" },
+    "waiting_on": { "type": "string", "description": "why a lab agent's run is held: approval (the owner approves it at approve_url)" },
+    "approve_url": { "type": "string", "pattern": "^https://" },
     "status": { "type": "string" },
     "summary": { "type": "string" },
     "sandbox": { "type": "string" },

@@ -53,6 +53,8 @@ class Lab {
 	pending = $state<PermissionRequest[]>([]);
 	canvases = $state<CanvasSummary[]>([]);
 	flash = $state<string | undefined>();
+	/** A page the flash points to, opened with its link. */
+	flashUrl = $state<string | undefined>();
 	/** Set when a compaction lands, so the context ring can sweep once. */
 	compactedAt = $state(0);
 	/** The workbench: open or not, and its panes for the current session. */
@@ -90,10 +92,12 @@ class Lab {
 		return Boolean(site && this.sites.find((s) => s.name === site)?.isolated);
 	}
 
-	say(text: string): void {
+	/** A short message at the bottom of the window; one with a page to open stays longer. */
+	say(text: string, url?: string): void {
 		this.flash = text;
+		this.flashUrl = url;
 		clearTimeout(this.flashTimer);
-		this.flashTimer = setTimeout(() => (this.flash = undefined), 6_000);
+		this.flashTimer = setTimeout(() => ((this.flash = undefined), (this.flashUrl = undefined)), url ? 20_000 : 6_000);
 	}
 
 	async init(): Promise<void> {
@@ -527,7 +531,7 @@ class Lab {
 			const known = this.sites.some((s) => s.name === site.name);
 			this.sites = known ? this.sites.map((s) => (s.name === site.name ? site : s)) : [...this.sites, site];
 		});
-		rpc.on("lab.notice", (notice) => this.say(notice.text));
+		rpc.on("lab.notice", (notice) => this.say(notice.text, notice.url));
 		rpc.on("lab.apps.changed", () => void this.refreshApps());
 		rpc.on("lab.device.pending", (request) => {
 			if (!this.deviceRequests.some((r) => r.site === request.site && r.id === request.id)) this.deviceRequests = [...this.deviceRequests, request];

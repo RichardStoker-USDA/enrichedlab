@@ -93,7 +93,7 @@
 	{#if lab.lost}
 		<p class="status" role="status">Reconnecting to the engine…</p>
 	{:else if lab.flash}
-		<p class="status" role="status">{lab.flash}</p>
+		<p class="status" role="status">{lab.flash}{#if lab.flashUrl}&nbsp;<a href={lab.flashUrl} target="_blank" rel="noopener noreferrer">Open</a>{/if}</p>
 	{/if}
 </div>
 

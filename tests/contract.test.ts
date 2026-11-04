@@ -7,6 +7,7 @@ import { toTools } from "../packages/engine/src/mcp.ts";
 import { decide } from "../packages/engine/src/permissions.ts";
 import { contractProblem, type LabDescriptor, SCHEMAS, validate } from "../packages/engine/src/sites/contract.ts";
 import { GateSite } from "../packages/engine/src/sites/gate.ts";
+import { noticeText } from "../packages/engine/src/sites/sites.ts";
 
 const descriptor: LabDescriptor = {
 	contract: "2026-11",
@@ -157,6 +158,13 @@ describe("lab contract", () => {
 		expect(seen.cursor).toBe("8");
 		expect(events.slice(0, 2)).toEqual(["job.finished", "quota.warning"]);
 		expect(cursors.slice(0, 2)).toEqual(["8", "9"]);
+	});
+
+	test("a lab agent's run held for approval says so, whatever the event's type", () => {
+		const held = { type: "agent.updated", at: "2026-11-04T10:00:00Z", id: "12", task_id: "t1", waiting_on: "approval", approve_url: "https://rein.example.org/s/1", summary: "fit the yield model" };
+		expect(validate(SCHEMAS.event, held)).toEqual([]);
+		expect(noticeText("Dev Lab", held)).toBe("Dev Lab: the lab's agent is waiting for your approval (fit the yield model).");
+		expect(validate(SCHEMAS.event, { ...held, approve_url: "http://rein.example.org" }).length).toBeGreaterThan(0);
 	});
 
 	test("files by reference come only from the lab's own address", async () => {

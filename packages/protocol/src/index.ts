@@ -247,6 +247,8 @@ export interface LabNotice {
 	at: string;
 	text: string;
 	session?: string;
+	/** A page the notice points to (https), such as where to approve a lab agent's run. */
+	url?: string;
 }
 
 export interface PermissionRequest {

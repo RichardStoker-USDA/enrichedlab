@@ -35,7 +35,9 @@ look the same to EnrichedLab.
 Events carry `{type, at, id, session?}` plus fields of their own. Known types: `job.finished`, `agent.finished`,
 `sandbox.idle_stopping`, `sandbox.stopped`, `sandbox.archived` (`delete_after`), `sandbox.restored`,
 `sandbox.deleted`, `app.published`, `app.withdrawn`, `ticket.updated`, `models.changed`, `bundles.changed`,
-`quota.warning`, `signin.revoked`. A lab may add types; clients ignore ones they don't know.
+`quota.warning`, `signin.revoked`. A lab may add types; clients ignore ones they don't know. A lab agent's run held
+for its owner carries `waiting_on: "approval"` and `approve_url` (https), on any type; EnrichedLab says the agent is
+waiting and links to where to approve it.
 
 A sandbox has a lifecycle (`status`: running, starting, stopped, archived, restoring, deleted). An idle one stops
 with its files kept; the next use answers `409 sandbox_starting` with `Retry-After` while it starts, and EnrichedLab

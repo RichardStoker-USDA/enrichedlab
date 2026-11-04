@@ -293,7 +293,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
 		sites = [...sites.filter((s) => s.name !== site.name), site];
 		render();
 	});
-	client.on("lab.notice", (notice) => say(notice.text));
+	client.on("lab.notice", (notice) => say(notice.url ? `${notice.text} ${notice.url}` : notice.text));
 	client.on("site.auth", (auth) => {
 		say(`Opening your browser to sign in to ${auth.name}. If it doesn't open: ${auth.url}`);
 		openUrl(auth.url);
