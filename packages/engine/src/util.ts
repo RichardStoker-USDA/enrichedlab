@@ -3,10 +3,11 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "n
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-export const VERSION = "0.2.0";
+export const VERSION = "0.2.1";
 
 /** What changed in this version, one line each, newest first. Surfaces show the first lines when a session opens. */
 export const NEWS = [
+	"0.2.1: el lab check tests a lab against the lab contract; lab events show as notices; lab files save into your project with their checksum checked.",
 	"0.2: the terminal command is now el (el app, el run, el login); settings moved from ~/.enriched to ~/.el.",
 	"Use your ChatGPT plan: Continue with ChatGPT under Model services, or el service add chatgpt.",
 	"0.1.1: Windows commands write only to the project; a quieter start; fixes found by testing on all three systems.",
