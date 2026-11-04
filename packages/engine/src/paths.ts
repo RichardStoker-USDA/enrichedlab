@@ -49,10 +49,10 @@ export function moveOldHome(from: string, to: string): void {
 			const text = readFileSync(file, "utf8");
 			// Paths as JSON stores them: forward slashes, or Windows backslashes escaped.
 			const escaped = (path: string) => JSON.stringify(path).slice(1, -1);
-			const moved = text
-				.split(`${from}/`).join(`${to}/`)
-				.split(`${escaped(from)}${escaped("\\")}`).join(`${escaped(to)}${escaped("\\")}`)
-				.split("~/.enriched/").join("~/.el/");
+			let moved = text.split("~/.enriched/").join("~/.el/");
+			for (const [old, next] of [[from, to], [escaped(from), escaped(to)]] as const) {
+				for (const sep of ["/", escaped("\\")]) moved = moved.split(`${old}${sep}`).join(`${next}${sep}`);
+			}
 			if (moved !== text) writeFileSync(file, moved);
 		} catch {
 			// A file that can't be read stays as it is.

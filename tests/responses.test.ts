@@ -171,7 +171,8 @@ describe("Sign in with ChatGPT", () => {
 		expect(signedIn.welcome).toBe(true);
 		expect(forms[0]).toMatchObject({ grant_type: "authorization_code", client_id: "oaiapp_test", code: "c1", resource: "https://api.openai.com/v1" });
 		expect(chatgpt.summaries(credentials)).toEqual([{ id: "oaiapp_test", label: "person@example.org", active: true, signedIn: true, plan: true }]);
-		expect(statSync(join(credentials, "chatgpt.json")).mode & 0o777).toBe(0o600);
+		// Owner-only on macOS and Linux; Windows keeps it in the person's profile, which only they can open.
+		if (process.platform !== "win32") expect(statSync(join(credentials, "chatgpt.json")).mode & 0o777).toBe(0o600);
 
 		// The first token expires at once: two callers share one refresh, and the rotated token is kept.
 		const [a, b] = await Promise.all([chatgpt.accessToken(credentials, undefined, fake), chatgpt.accessToken(credentials, undefined, fake)]);
