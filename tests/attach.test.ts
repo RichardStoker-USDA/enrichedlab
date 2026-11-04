@@ -12,11 +12,12 @@ import { AppHost } from "../packages/engine/src/apps/host.ts";
 import { paths } from "../packages/engine/src/paths.ts";
 import type { Workspace } from "../packages/engine/src/tools/workspace.ts";
 import type { AppManifest } from "../packages/engine/src/apps/manifest.ts";
-import { attachSocket } from "../packages/engine/src/sites/attach.ts";
+import { attachSocket, retryingAttach } from "../packages/engine/src/sites/attach.ts";
 import { GateSite } from "../packages/engine/src/sites/gate.ts";
 import type { SandboxApi } from "../packages/engine/src/sites/sandbox_workspace.ts";
 
 type Proc = Subprocess<"pipe", "pipe", "pipe">;
+let busyOnce = 0;
 
 const lab = Bun.serve<{ proc?: Proc }, never>({
 	port: 0,
@@ -34,13 +35,14 @@ const lab = Bun.serve<{ proc?: Proc }, never>({
 	websocket: {
 		message(ws, raw) {
 			const frame = JSON.parse(String(raw)) as { argv?: string[]; workdir?: string; env?: Record<string, string>; stdin?: string; eof?: boolean; signal?: string };
-			if (!ws.data.proc && frame.argv?.[0] === "busy") {
+			if (!ws.data.proc && (frame.argv?.[0] === "busy" || (frame.argv?.[0] === "busy-once" && busyOnce++ === 0))) {
 				ws.send(JSON.stringify({ error: { code: "busy", message: "no free command slots" } }));
 				ws.close();
 				return;
 			}
 			if (!ws.data.proc) {
-				const proc = Bun.spawn(frame.argv!, { cwd: frame.workdir, env: { ...process.env, ...frame.env }, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+				const argv = frame.argv![0] === "busy-once" ? frame.argv!.slice(1) : frame.argv!;
+				const proc = Bun.spawn(argv, { cwd: frame.workdir, env: { ...process.env, ...frame.env }, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
 				ws.data.proc = proc;
 				const pump = async (stream: ReadableStream<Uint8Array>, name: string) => {
 					for await (const chunk of stream) ws.send(JSON.stringify({ [name]: Buffer.from(chunk).toString("base64") }));
@@ -89,6 +91,21 @@ describe("attach", () => {
 		process_.end();
 		expect(await process_.exit).toBe(3);
 		expect([text(out).trim(), text(err).trim()]).toEqual(["got:hello", "note"]);
+	});
+
+	test("a command the lab answers busy before it starts is opened again, with the input sent so far", async () => {
+		const script = "let s='';for await (const c of process.stdin) s+=c; console.log('got:'+s.trim());";
+		let opens = 0;
+		const process_ = await retryingAttach(() => (opens++, attachSocket(attachUrl, { authorization: "Bearer test" }, { argv: ["busy-once", process.execPath, "-e", script] })), undefined, [10]);
+		const out: Uint8Array[] = [];
+		process_.onStdout((c) => out.push(c));
+		process_.write("hello\n");
+		process_.end();
+		expect(await process_.exit).toBe(0);
+		expect([opens, text(out).trim()]).toEqual([2, "got:hello"]);
+		// A lab that stays busy: its answer stands once the waits run out.
+		const full = await retryingAttach(() => attachSocket(attachUrl, { authorization: "Bearer test" }, { argv: ["busy"] }), undefined, [10, 10]);
+		await expect(full.exit).rejects.toThrow("Close an app there, or try again in a minute.");
 	});
 
 	test("a signal stops the process and the exit code is null", async () => {

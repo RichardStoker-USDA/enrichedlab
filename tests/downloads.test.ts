@@ -11,8 +11,9 @@ import { GateSite, reprSha256 } from "../packages/engine/src/sites/gate.ts";
 
 const body = "plot,value\na,1\n";
 const digest = (text: string) => `sha-256=:${createHash("sha256").update(text).digest("base64")}:`;
-let mode: "good" | "bad" | "none" | "refused" | "busy" | "queued" | "big" = "good";
+let mode: "good" | "bad" | "none" | "refused" | "busy" | "queued" | "big" | "cut" | "short" = "good";
 let busy = 0;
+let reads = 0;
 
 const lab = Bun.serve({
 	port: 0,
@@ -29,6 +30,20 @@ const lab = Bun.serve({
 			if (mode === "big") return Response.json({ error: { code: "file_too_large", message: "too large" } }, { status: 413 });
 			if (mode === "busy" && busy++ === 0) return Response.json({ error: { code: "scanner_unavailable", message: "down" } }, { status: 503, headers: { "retry-after": "0" } });
 			if (mode === "queued" && busy++ === 0) return Response.json({ error: { code: "downloads_in_progress", message: "busy" } }, { status: 429, headers: { "retry-after": "0" } });
+			reads++;
+			// The lab ends a stalled or overlong download early: the first read breaks off partway, or (short) every
+			// read does and carries no digest.
+			if ((mode === "cut" && reads === 1) || mode === "short") {
+				const half = new TextEncoder().encode(body.slice(0, 5));
+				const stream = new ReadableStream<Uint8Array>({
+					async pull(c) {
+						c.enqueue(half);
+						await Bun.sleep(20);
+						c.error(undefined); // drops the connection, as a lab ending the download does
+					},
+				});
+				return new Response(stream, { headers: { "content-type": "text/csv", ...(mode === "cut" ? { "repr-digest": digest(body) } : {}) } });
+			}
 			const headers: Record<string, string> = { "content-type": "text/csv" };
 			if (mode !== "none") headers["repr-digest"] = `sha-512=:AAAA:, ${digest(mode === "bad" ? "something else" : body)}`;
 			return new Response(body, { headers });
@@ -95,5 +110,20 @@ describe("files leaving a lab sandbox", () => {
 		await expect(s.get("/sandbox/out/a.csv", join(dir, "refused.csv"))).rejects.toThrow("The malware scanner stopped this file from leaving the sandbox.");
 		mode = "big";
 		await expect(s.get("/sandbox/out/a.csv", join(dir, "big.csv"))).rejects.toThrow("larger than Dev Lab lets you download");
+	});
+
+	test("a download the lab ends partway is tried once more from the start, and never kept short", async () => {
+		const s = await site();
+		mode = "cut";
+		reads = 0;
+		await s.get("/sandbox/out/a.csv", join(dir, "again.csv"));
+		expect(reads).toBe(2);
+		expect(readFileSync(join(dir, "again.csv"), "utf8")).toBe(body);
+		mode = "short";
+		reads = 0;
+		await expect(s.get("/sandbox/out/a.csv", join(dir, "short.csv"))).rejects.toThrow("stopped partway");
+		expect(reads).toBe(2);
+		expect(existsSync(join(dir, "short.csv"))).toBe(false);
+		expect(readdirSync(dir).filter((f) => f.endsWith(".part"))).toEqual([]);
 	});
 });

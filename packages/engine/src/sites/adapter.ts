@@ -2,6 +2,7 @@
 // grants them models, tools and a sandbox; an adapter turns one site's API into those. Gate is the first kind; the
 // a research broker is the next kind. Add a kind by writing an adapter and registering it in SITE_KINDS.
 
+import type { LabSandbox } from "@enrichedlab/protocol";
 import type { BundleGrant } from "../bundles.ts";
 import type { CheckRow, LabAppEntry, LabDescriptor, LabEvent, LabSigner } from "./contract.ts";
 import type { ModelProfile } from "../models/types.ts";
@@ -17,6 +18,9 @@ export interface SiteAdapter {
 	devices?(): Promise<{ id: string; name?: string; status?: string; created?: string; last_seen?: string; current?: boolean; thumbprint?: string }[]>;
 	approveDevice?(id: string): Promise<void>;
 	revokeDevice?(id: string): Promise<void>;
+	/** The person's sandboxes at this lab, and deleting one; "deleting" while the lab still clears its files. */
+	sandboxes?(): Promise<LabSandbox[]>;
+	deleteSandbox?(id: string): Promise<"deleted" | "deleting">;
 	/** Apps the lab offers this person, withdrawn versions included (GET /v1/apps). */
 	labApps?(): Promise<LabAppEntry[]>;
 	/** Signers the lab vouches for, revoked ones included (GET /v1/signers). */

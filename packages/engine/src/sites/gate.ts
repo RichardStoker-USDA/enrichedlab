@@ -17,10 +17,10 @@ import { connectRemote, type McpConnection } from "../mcp.ts";
 import { labFetch, sseData } from "../models/http.ts";
 import { DeviceKey, dpopError } from "./dpop.ts";
 import { type OpenPort, openPort } from "./port_proxy.ts";
-import { type AttachSpec, type Attached, attachSocket } from "./attach.ts";
+import { type AttachSpec, type Attached, attachSocket, retryingAttach } from "./attach.ts";
 import { Cdp } from "./cdp.ts";
 import type { SandboxBrowserLane } from "./sandbox_browser.ts";
-import type { SandboxNetwork } from "@enrichedlab/protocol";
+import type { LabSandbox, SandboxNetwork } from "@enrichedlab/protocol";
 import type { ModelProfile } from "../models/types.ts";
 import { num, str, type Tool, ToolError } from "../tools/types.ts";
 import { errorText, redact, SECRET_NAME, sleep } from "../util.ts";
@@ -54,6 +54,9 @@ interface GateMe {
 }
 
 const title = (entry: LabAppEntry) => `${entry.title || entry.name} ${entry.version}`;
+
+/** Refusals (409, 429, 503) that clear on their own, and the longest Retry-After waited each time, in seconds. */
+const WAITS: Record<string, number> = { sandbox_starting: 30, sandbox_busy: 30, scanner_unavailable: 60, downloads_in_progress: 30, too_many_deletes: 15 };
 
 /** The sha-256 a response's `Repr-Digest` (RFC 9530) gives, in hex; undefined when it carries none. */
 export function reprSha256(response: Response): string | undefined {
@@ -241,6 +244,33 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		await this.call("DELETE", `/v1/devices/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(15_000) }).then((r) => r.arrayBuffer());
 	}
 
+	/** The person's sandboxes here, newest first (GET /v1/containers); `current` is the one this engine works in. */
+	async sandboxes(): Promise<LabSandbox[]> {
+		if (!this.offers("containers")) throw new Error(`${this.title} has no sandboxes.`);
+		type Listed = { id: string; name?: string; status?: string; created_at?: number; last_active_at?: number; memory_limit?: string; profile?: string };
+		const when = (seconds?: number) => (typeof seconds === "number" ? new Date(seconds * 1000).toISOString() : undefined);
+		const found: LabSandbox[] = [];
+		let after: string | undefined;
+		for (let page = 0; page < 10; page++) {
+			const query = new URLSearchParams({ limit: "100" });
+			if (after) query.set("after", after);
+			const list = await this.json<{ data?: Listed[]; has_more?: boolean }>("GET", `/v1/containers?${query}`, { signal: AbortSignal.timeout(15_000) });
+			for (const c of list.data ?? []) found.push({ id: c.id, name: c.name, status: c.status, created: when(c.created_at), last_active: when(c.last_active_at), memory: c.memory_limit, profile: c.profile, current: c.id === this.container });
+			if (!list.has_more || !list.data?.length) break;
+			after = list.data[list.data.length - 1]!.id;
+		}
+		return found;
+	}
+
+	/** Delete one of the person's sandboxes with its files. The lab answers 202 while it still clears them. */
+	async deleteSandbox(id: string): Promise<"deleted" | "deleting"> {
+		const response = await this.call("DELETE", `/v1/containers/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(200_000) });
+		const body = (await response.json().catch(() => ({}))) as { deleted?: boolean };
+		// The engine's own one: the next command starts a new sandbox.
+		if (id === this.container) this.container = undefined;
+		return response.status === 202 || body.deleted === false ? "deleting" : "deleted";
+	}
+
 	async forget(): Promise<void> {
 		const key = this.device ?? (this.deviceFile ? await DeviceKey.open(this.deviceFile, this.config.url) : undefined);
 		if (key?.id && !key.revoked) await this.call("DELETE", `/v1/devices/${encodeURIComponent(key.id)}`, { signal: AbortSignal.timeout(10_000) }).catch(() => undefined);
@@ -325,10 +355,11 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		if ((response.status === 409 || response.status === 429 || response.status === 503) && !streamed && !init.noWait) {
 			const code = ((await response.clone().json().catch(() => undefined)) as { error?: { code?: string } } | undefined)?.error?.code;
 			const waited = init.waited ?? 0;
-			// The lab is starting a stopped sandbox for this request, its malware scanner is down while a file leaves the
-			// sandbox, or the person already has as many downloads being scanned as the lab allows: wait as long as it
-			// says, then send the request again, for up to 3 minutes in all.
-			const most = code === "sandbox_starting" ? 30 : code === "scanner_unavailable" ? 60 : code === "downloads_in_progress" ? 30 : 0;
+			// Answers that clear on their own: the lab is starting a stopped sandbox for this request, it's too busy to
+			// take a new sandbox's lifecycle hold, its malware scanner is down while a file leaves the sandbox, or the
+			// person already has as many downloads being scanned or deletes running as it allows. Wait as long as it says
+			// (at most this many seconds a time), then send the request again, for up to 3 minutes in all.
+			const most = code ? (WAITS[code] ?? 0) : 0;
 			if (most && waited < 180_000) {
 				const after = Number(response.headers.get("retry-after"));
 				const wait = Math.max((Number.isFinite(after) && response.headers.has("retry-after") ? Math.min(after, most) : 5) * 1000, 1_000);
@@ -359,7 +390,12 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				downloads_in_progress: `You have as many downloads from ${this.title} being scanned as it allows at once. Try again when one finishes.`,
 				device_pending_exists: `Another new computer is already waiting for approval at ${this.title}. Approve or revoke it from one of your approved devices (el devices ${this.config.name}), then try again here.`,
 			};
-			const message = (detail.error?.code && worded[detail.error.code]) || detail.error?.message || `${this.config.name} answered ${response.status}.`;
+			// The lab's own message gives the numbers; this adds where to act on it.
+			const cleanup = `el sandboxes ${this.config.name} lists your sandboxes there; el sandbox delete ${this.config.name} <id> removes one.`;
+			const after: Record<string, string> = { too_many_containers: cleanup, storage_full: cleanup };
+			const code = detail.error?.code;
+			const given = code && detail.error?.message && after[code] ? `${detail.error.message.replace(/\.?$/, ".")} ${after[code]}` : detail.error?.message;
+			const message = (code && worded[code]) || given || `${this.config.name} answered ${response.status}.`;
 			if (detail.error?.code === "device_pending" && this.device && !this.device.pending) {
 				// The lab says this key still waits for approval: wait with it.
 				this.device.registered(this.device.id ?? "", new Date(Date.now() + 15 * 60_000).toISOString());
@@ -573,11 +609,21 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	async fetchFile(uri: string, signal: AbortSignal): Promise<Uint8Array> {
 		const base = [this.route.base, new URL(this.config.url).origin].find((b) => uri === b || uri.startsWith(`${b}/`));
 		if (!base) throw new Error(`${uri} isn't an address of ${this.title}.`);
-		const response = await this.call("GET", uri.slice(base.length), { headers: { accept: "*/*" }, signal });
-		const bytes = new Uint8Array(await response.arrayBuffer());
-		const said = reprSha256(response);
-		if (said && said !== createHash("sha256").update(bytes).digest("hex")) throw new Error(`The file from ${this.title} doesn't match the checksum the lab sent with it.`);
-		return bytes;
+		// A transfer that broke off (or doesn't match its checksum) is tried once more from the start.
+		for (let tries = 0; ; tries++) {
+			const response = await this.call("GET", uri.slice(base.length), { headers: { accept: "*/*" }, signal });
+			const bytes = await response.arrayBuffer().then(
+				(b) => new Uint8Array(b),
+				(error: Error) => {
+					if (tries || signal.aborted) throw error;
+					return undefined;
+				},
+			);
+			if (!bytes) continue;
+			const said = reprSha256(response);
+			if (!said || said === createHash("sha256").update(bytes).digest("hex")) return bytes;
+			if (tries) throw new Error(`The file from ${this.title} doesn't match the checksum the lab sent with it.`);
+		}
 	}
 
 	/** Use by lab and group (GET /v1/usage). */
@@ -965,25 +1011,50 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			after = list.data[list.data.length - 1].id;
 		}
 		if (!file) throw new ToolError(`There's no file ${wanted} in the sandbox.`);
-		const response = await this.call("GET", `/v1/containers/${id}/files/${file.id}/content`, { signal });
 		await mkdir(dirname(target), { recursive: true });
+		// The lab ends a download whose reader stalls for a minute or that runs past 30 minutes. One that broke off is
+		// tried once more from the start, unless it reached the 30-minute end, which a second try would reach too.
+		for (let tries = 0; ; tries++) {
+			const started = Date.now();
+			try {
+				return await this.download(`/v1/containers/${id}/files/${file.id}/content`, wanted, target, signal);
+			} catch (error) {
+				if (!(error as { cut?: boolean }).cut || signal?.aborted) throw error;
+				if (Date.now() - started > 25 * 60_000) throw new ToolError(`${wanted} stopped partway: ${this.title} ends a download after 30 minutes. Compress or split it in the sandbox, then try again.`);
+				if (tries >= 1) throw error;
+			}
+		}
+	}
+
+	/** One try at a sandbox file, streamed to disk (result files can be larger than the engine should hold). */
+	private async download(path: string, wanted: string, target: string, signal?: AbortSignal): Promise<{ bytes: number; sha: string }> {
+		const response = await this.call("GET", path, { signal });
 		const temp = `${target}.${randomBytes(4).toString("hex")}.part`;
-		// Stream to disk: result files can be larger than the engine should hold in memory.
+		const cut = (why: string) => Object.assign(new ToolError(`${wanted} ${why}, so it wasn't saved. Try again.`), { cut: true });
 		let bytes = 0;
 		const hash = createHash("sha256");
+		const out = createWriteStream(temp, { mode: 0o600 });
 		try {
-			const out = createWriteStream(temp, { mode: 0o600 });
-			for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
-				bytes += chunk.length;
-				hash.update(chunk);
-				if (!out.write(chunk)) await new Promise((r) => out.once("drain", r));
+			try {
+				for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+					bytes += chunk.length;
+					hash.update(chunk);
+					if (!out.write(chunk)) await new Promise((r) => out.once("drain", r));
+				}
+			} catch (error) {
+				if (signal?.aborted) throw error;
+				throw cut(`stopped partway (${errorText(error)})`);
 			}
 			await new Promise<void>((resolve, reject) => out.end((error?: Error | null) => (error ? reject(error) : resolve())));
+			const length = Number(response.headers.get("content-length") ?? Number.NaN);
+			const encoded = (response.headers.get("content-encoding") ?? "identity") !== "identity";
+			if (!encoded && Number.isFinite(length) && bytes !== length) throw cut(`stopped partway (${bytes} of ${length} bytes)`);
 			// The lab sends the checksum of the bytes its scanners passed (RFC 9530): keep the file only if it matches.
 			const said = reprSha256(response);
-			if (said && said !== hash.copy().digest("hex")) throw new ToolError(`${wanted} arrived different from what ${this.title}'s scanner passed, so it wasn't saved. Try again.`);
+			if (said && said !== hash.copy().digest("hex")) throw cut(`arrived different from what ${this.title}'s scanner passed`);
 			await rename(temp, target);
 		} catch (error) {
+			if (!out.closed) await new Promise((r) => out.destroy().once("close", r));
 			await rm(temp, { force: true });
 			throw error;
 		}
@@ -1171,8 +1242,11 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		if (!this.offers("attach")) throw Object.assign(new Error(`${this.title} doesn't stream sandbox processes.`), { unsupported: true });
 		const id = await this.sandbox(signal);
 		const url = `${this.route.base}/v1/containers/${encodeURIComponent(id)}/attach`;
-		await this.freshNonce();
-		return attachSocket(url.replace(/^http/, "ws"), await this.authHeaders("GET", url), spec, this.route.ca);
+		// Each try signs its own proof.
+		return retryingAttach(async () => {
+			await this.freshNonce();
+			return attachSocket(url.replace(/^http/, "ws"), await this.authHeaders("GET", url), spec, this.route.ca);
+		}, signal);
 	}
 
 	/** The browser in the person's sandbox, when the lab runs one this client speaks to (descriptor `browser`). */

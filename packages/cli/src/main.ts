@@ -52,6 +52,7 @@ const HELP = `EnrichedLab ${VERSION}
   el sites                        sites, who you are on each, and what they grant
   el lab check <lab> [--json]     check a lab against the lab contract (for people who run labs)
   el devices <lab>                your computers at a lab; el device approve|revoke <lab> <id>
+  el sandboxes <lab>              your sandboxes at a lab; el sandbox delete <lab> <id>
   el usage <lab> [--window 7d|30d]
                                   your use of a lab: tokens, GPU and sandbox hours
 
@@ -409,6 +410,24 @@ async function main(): Promise<void> {
 				await client.call(action === "approve" ? "lab.device.approve" : "lab.device.revoke", { name: lab, id });
 				out(action === "approve" ? `Approved ${id}; it can use your ${lab} sign-in now.` : `Revoked ${id}; it can't use your ${lab} sign-in any more.`);
 			} else fail("el devices <lab> | el device approve <lab> <id> | el device revoke <lab> <id>");
+			client.close();
+			return;
+		}
+		case "sandboxes":
+		case "sandbox": {
+			// The person's sandboxes at a lab: a lab limits how many one person keeps, and archived ones count.
+			const [action, lab, id] = command === "sandboxes" ? ["list", rest[0]] : rest;
+			const client = await connect();
+			const at = (iso?: string) => iso?.slice(0, 16).replace("T", " ") ?? "?";
+			if (action === "list" && lab) {
+				const boxes = await client.call("lab.sandboxes", { name: lab });
+				if (!boxes.length) out(`You have no sandboxes at ${lab}.`);
+				for (const b of boxes) out(`${b.id}  ${b.status ?? "running"}${b.current ? "  in use here" : ""}  ${b.name ?? ""}\n  ${b.memory ? `${b.memory}, ` : ""}made ${at(b.created)}, last used ${at(b.last_active)}`);
+				if (boxes.length) out(`\nDelete one you no longer need, with its files: el sandbox delete ${lab} <id>`);
+			} else if (action === "delete" && lab && id) {
+				const { status } = await client.call("lab.sandbox.delete", { name: lab, id });
+				out(status === "deleting" ? `Deleting ${id}; ${lab} finishes clearing its files.` : `Deleted ${id} and its files.`);
+			} else fail("el sandboxes <lab> | el sandbox delete <lab> <id>");
 			client.close();
 			return;
 		}

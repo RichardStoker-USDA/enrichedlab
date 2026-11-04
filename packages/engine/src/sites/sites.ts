@@ -213,6 +213,18 @@ export class Sites {
 		await adapter.revokeDevice(id);
 	}
 
+	async sandboxes(name: string) {
+		const adapter = await this.adapterFor(name);
+		if (!adapter.sandboxes) throw new Error(`${this.title(name)} doesn't list sandboxes.`);
+		return adapter.sandboxes();
+	}
+
+	async deleteSandbox(name: string, id: string) {
+		const adapter = await this.adapterFor(name);
+		if (!adapter.deleteSandbox) throw new Error(`${this.title(name)} doesn't list sandboxes.`);
+		return adapter.deleteSandbox(id);
+	}
+
 	/** A lab by its short name here, or by its own name (its descriptor's), as apps a lab publishes name it. */
 	resolve(name: string): string | undefined {
 		if (this.exists(name)) return name;

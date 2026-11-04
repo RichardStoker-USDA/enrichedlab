@@ -4,6 +4,7 @@
 // inside the lab: an MCP backend speaks its protocol over the process's stdin and stdout (AttachTransport).
 
 import type { JSONRPCMessage, Transport } from "@modelcontextprotocol/client";
+import { sleep } from "../util.ts";
 
 export interface AttachSpec {
 	argv: string[];
@@ -70,8 +71,10 @@ export function attachSocket(url: string, headers: Record<string, string>, spec:
 				finished = true;
 				const message =
 					frame.error.code === "busy"
-						? "The lab's sandbox is already running as many attached processes as it allows. Close an app there and try again."
-						: (frame.error.message ?? frame.error.code ?? "The lab refused the process.");
+						? "The lab's sandbox is busy: it may be running as many attached processes as it allows. Close an app there, or try again in a minute."
+						: frame.error.code === "internal"
+							? "The lab's sandbox didn't start the process in time. Try again."
+							: (frame.error.message ?? frame.error.code ?? "The lab refused the process.");
 				settle.fail(Object.assign(new Error(message), { code: frame.error.code }));
 			}
 		};
@@ -84,6 +87,74 @@ export function attachSocket(url: string, headers: Record<string, string>, spec:
 			if (!finished) settle.fail(new Error("The lab closed the connection before the process ended."));
 		};
 	});
+}
+
+/** First-frame codes for a command the lab never started: its bridge is busy, or the sandbox didn't confirm in time. */
+const NOT_STARTED = new Set(["busy", "internal"]);
+/** Input kept for sending again until the command answers; past this, a refusal stands. */
+const REPLAY_MAX = 1 << 20;
+
+/**
+ * One process from `open` that is opened again when the lab answers busy or internal before the command started.
+ * The command never ran then, so input sent so far goes to the next one. Busy can mean stops still draining on the
+ * lab's bridge, which clears in seconds, or a full bridge, which doesn't: after the waits, the lab's answer stands.
+ */
+export async function retryingAttach(open: () => Promise<Attached>, signal?: AbortSignal, waits: number[] = [1_000, 3_000, 8_000]): Promise<Attached> {
+	const stdout: ((chunk: Uint8Array) => void)[] = [];
+	const stderr: ((chunk: Uint8Array) => void)[] = [];
+	// Undefined once the command has answered (nothing is sent twice after that) or the input outgrew REPLAY_MAX.
+	let sent: ((process: Attached) => void)[] | undefined = [];
+	let kept = 0;
+	let closed = false;
+	let settle!: { done(code: number | null): void; fail(error: Error): void };
+	const exit = new Promise<number | null>((done, fail) => {
+		settle = { done, fail };
+	});
+	exit.catch(() => undefined);
+	let current = await open();
+	const follow = (process: Attached, tries: number) => {
+		const relay = (listeners: typeof stdout) => (chunk: Uint8Array) => {
+			sent = undefined;
+			for (const listener of listeners) listener(chunk);
+		};
+		process.onStdout(relay(stdout));
+		process.onStderr(relay(stderr));
+		process.exit.then(settle.done, async (error: Error & { code?: string }) => {
+			const wait = waits[tries];
+			if (closed || !sent || wait === undefined || !NOT_STARTED.has(error.code ?? "")) return settle.fail(error);
+			try {
+				await sleep(wait, signal);
+				if (closed || !sent) return settle.fail(error);
+				const next = await open();
+				current = next;
+				for (const op of sent) op(next);
+				follow(next, tries + 1);
+			} catch (failure) {
+				settle.fail(failure as Error);
+			}
+		});
+	};
+	follow(current, 0);
+	const input = (op: (process: Attached) => void, size = 0) => {
+		if (sent) {
+			sent.push(op);
+			kept += size;
+			if (kept > REPLAY_MAX) sent = undefined;
+		}
+		op(current);
+	};
+	return {
+		write: (data) => input((p) => p.write(data), typeof data === "string" ? data.length : data.byteLength),
+		end: () => input((p) => p.end()),
+		signal: (name) => input((p) => p.signal(name)),
+		onStdout: (listener) => void stdout.push(listener),
+		onStderr: (listener) => void stderr.push(listener),
+		exit,
+		close: () => {
+			closed = true;
+			current.close();
+		},
+	};
 }
 
 /** MCP over an attached process's stdin and stdout: one JSON-RPC message per line, as MCP's stdio transport sends. */

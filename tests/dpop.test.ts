@@ -277,6 +277,27 @@ describe("device-bound lab tokens", () => {
 		GateSite.approvalPollMs = 5_000;
 	});
 
+	test("with proofs optional, a key the lab doesn't know is replaced by one that waits for approval", async () => {
+		lab.devices.clear();
+		lab.optional = true;
+		const first = site();
+		await first.connect();
+		const lostFile = join(home, "device_lost.json");
+		const second = new GateSite({ name: "devlab", url: PUBLIC, kind: "gate" }, { base, via: "key", headers: async () => ({ authorization: `Bearer ${TOKEN}` }) }, undefined, lostFile);
+		await second.connect();
+		const lostId = JSON.parse(readFileSync(lostFile, "utf8")).id as string;
+		// The lab forgets the second computer's key; the person still has the first one, so a new key waits.
+		for (const [thumb, d] of lab.devices) if (d.id === lostId) lab.devices.delete(thumb);
+		lab.approval = true;
+		await expect(me(second)).rejects.toThrow("Approve this computer for Dev Lab from one of your other devices");
+		const kept = JSON.parse(readFileSync(lostFile, "utf8")) as { id: string; pendingUntil?: string };
+		expect(kept.id).not.toBe(lostId);
+		expect(kept.pendingUntil).toBeDefined();
+		expect([...lab.devices.values()].find((d) => d.id === kept.id)?.status).toBe("pending");
+		await second.close();
+		await first.close();
+	});
+
 	test("sign-out revokes the key at the lab and deletes it here", async () => {
 		rmSync(file, { force: true });
 		const s = site();

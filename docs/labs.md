@@ -21,7 +21,7 @@ look the same to EnrichedLab.
 | `GET /v1/me` | a stable pseudonymous `subject` (never an email), memberships (lab, research group, roles), policy | built, with ETag |
 | `GET /v1/models` | the models this person may use, with context, output limit and reasoning levels | built, with ETag |
 | `POST /mcp` | MCP tools, filtered per person; MCP 2026-07-28 stateless, so any replica answers any request | built |
-| `/v1/containers` | the person's sandbox: run, background jobs, files in and out; `profile` picks a size. A file leaving the sandbox passes the lab's malware scanners first and comes with `Repr-Digest` (RFC 9530) of the bytes they passed; `422 file_refused` when a scanner stops it, `503 scanner_unavailable` with `Retry-After` while one is down, `429 downloads_in_progress` past the person's concurrent scans, `413 file_too_large` past the person's limit. A restore is refused (`403 restore_files_over_limit` or `restore_memory_over_limit`, the message giving sizes) when the sandbox outgrew the person's current limits | built: downloads are kept only when their sha-256 matches `Repr-Digest`; waits out `scanner_unavailable` and `downloads_in_progress` for up to 3 minutes; `el lab check` sends a file in and out |
+| `/v1/containers` | the person's sandbox: run, background jobs, files in and out; `profile` picks a size. `GET` lists the person's sandboxes and `DELETE /v1/containers/{id}` removes one (`202`, status `deleting`, while the lab still clears its files; `429 too_many_deletes` past a few at once). A new one is refused with `429 too_many_containers` when the person holds as many as the lab allows (archived ones count), `413 storage_full` when files and resting sandboxes fill their storage, or `503 sandbox_busy` with `Retry-After` while the lab is too busy to start it. A file leaving the sandbox passes the lab's malware scanners first and comes with `Repr-Digest` (RFC 9530) of the bytes they passed; `422 file_refused` when a scanner stops it, `503 scanner_unavailable` with `Retry-After` while one is down, `429 downloads_in_progress` past the person's concurrent scans, `413 file_too_large` past the person's limit. A restore is refused (`403 restore_files_over_limit` or `restore_memory_over_limit`, the message giving sizes) when the sandbox outgrew the person's current limits | built: downloads are kept only when their sha-256 matches `Repr-Digest`, and one the lab ends partway (a reader idle for a minute, or past 30 minutes) is tried once more from the start; waits out `sandbox_busy`, `scanner_unavailable`, `downloads_in_progress` and `too_many_deletes` for up to 3 minutes; `el sandboxes <lab>` lists them and `el sandbox delete <lab> <id>` removes one, which the refusals name; `el lab check` sends a file in and out |
 | `GET /v1/bundles` | skills, instructions, MCP servers and apps granted by role | built, with ETag |
 | `GET /v1/events` | server-sent events with a commit-ordered `id`; resume with `Last-Event-ID`; a cursor older than the history kept gets `event: reset` | built: shown as notices; cursor kept across restarts |
 | `POST /v1/guard` | the lab's classifiers: `{stage, text, session?, tool?}` → `{decision, categories, reasons, policy_version, receipt_id}` | checked by `el lab check`; sessions call it next |
@@ -29,7 +29,7 @@ look the same to EnrichedLab.
 | `POST /v1/devices` | registers the client's device key (ES256) for sender-bound tokens; `GET` lists them; `DELETE /v1/devices/{id}` revokes one | built: proofs on every request; `el lab check` tries a proof for another token, another address, and one used twice |
 | `/v1/containers/{id}/ports/{port}/…` | HTTP and WebSocket into a port of the sandbox, header auth only, every app page served with `Content-Security-Policy: sandbox` | built: `<lab>_sandbox_open_port` opens the app in the browser pane through a loopback proxy |
 | descriptor `browser: {protocol: "cdp", port, version}` | a headless Chrome in the person's sandbox, reached through the port path; `/v1/me` says what the sandbox can reach (`sandboxes.network`: `none`, `allowlist` with `hosts`, or `open`) | built: the browser tools' sandbox lane (`where: "sandbox"`), one browser context per session, shown live in a pane the person can click and type into |
-| `/v1/containers/{id}/attach` | a process with stdin and output streamed over a WebSocket of JSON frames: the command first, then `{stdin}`, `{eof}`, `{signal}` in and `{stdout}`, `{stderr}`, `{exit_code}` out (124 past `timeout_seconds`, null when stopped) | built: app backends in a lab session run this way (apps.md); `el lab check` runs one |
+| `/v1/containers/{id}/attach` | a process with stdin and output streamed over a WebSocket of JSON frames: the command first, then `{stdin}`, `{eof}`, `{signal}` in and `{stdout}`, `{stderr}`, `{exit_code}` out (124 past `timeout_seconds`, null when stopped). A first frame of `{error: {code: "busy"}}` (the bridge is full or still draining stops) or `{code: "internal"}` (the sandbox didn't confirm in 10 s) means the command never started | built: app backends in a lab session run this way (apps.md); busy and internal are tried again after 1, 3 and 8 seconds with the input sent so far; `el lab check` runs one |
 | `GET /v1/apps`, `GET /v1/signers` | the app versions a person's groups may install (withdrawn ones stay listed with `withdrawn_at`), each package at `/v1/apps/{name}/{version}/package` with ETag = its sha256; and the signers the lab vouches for (`revoked_at` once revoked) | built: the Apps menu and `el apps` list them; installs check size and sha256 against the listing, then the package's signature and every file hash |
 
 Events carry `{type, at, id, session?}` plus fields of their own. Known types: `job.finished`, `agent.finished`,
@@ -113,18 +113,19 @@ from copying it. The lab makes a copied token worth little:
   `htu` (the lab's public address even over the LAN), `iat`, a single-use `jti`, and `ath`, the hash of the exact
   bearer in that request. `policy.device_proof` is `off` (a lab staging the change: proofs it gets are still checked,
   none are asked for), `optional` or `required`. A token copied into another tool fails. Access doesn't issue
-  DPoP-bound tokens, so the lab's endpoint checks the proof. On `device_unregistered` the client registers a new key;
-  on `device_revoked` it stops until the person signs in again, so revoking a lost laptop sticks; on `device_mismatch`
-  or `signin_stale` it asks for a new sign-in. A lab that issues nonces (RFC 9449 section 8) sends `DPoP-Nonce` on its
-  responses: the client puts the latest one in every proof and answers `use_dpop_nonce` by sending once more. Before a
-  request it can't send twice (an upload, a WebSocket, a page's request through a port), it fetches a fresh nonce if
-  its own is over 4 minutes old. When the person already has a device, a new one registers as pending (202,
-  `device_approval_needed`); only one waits at a time (`409 device_pending_exists`). Once a person has an approved
-  device the lab wants proofs even where they're optional, so the pending computer says "approve this computer from
-  one of your other devices" and tries a signed read every 5 seconds until it's approved or the request lapses (15
-  minutes). The other devices get `device.pending`; the window asks the person (Approve, or Not mine to revoke it) and
-  `el devices <lab>` lists them, with `el device approve|revoke <lab> <id>`. Nothing approves on its own. Sign-out
-  revokes the key (`DELETE /v1/devices/{id}`). MCP is standardizing the same profile (SEP-1932).
+  DPoP-bound tokens, so the lab's endpoint checks the proof. On `device_unregistered` (an `optional` lab sends it too
+  once the person has an approved device) the client registers a new key, which waits for approval when the person has
+  another device; on `device_revoked` it stops until the person signs in again, so revoking a lost laptop sticks; on
+  `device_mismatch` or `signin_stale` it asks for a new sign-in. A lab that issues nonces (RFC 9449 section 8) sends
+  `DPoP-Nonce` on its responses: the client puts the latest one in every proof and answers `use_dpop_nonce` by sending
+  once more. Before a request it can't send twice (an upload, a WebSocket, a page's request through a port), it
+  fetches a fresh nonce if its own is over 4 minutes old. When the person already has a device, a new one registers as
+  pending (202, `device_approval_needed`); only one waits at a time (`409 device_pending_exists`). Once a person has
+  an approved device the lab wants proofs even where they're optional, so the pending computer says "approve this
+  computer from one of your other devices" and tries a signed read every 5 seconds until it's approved or the request
+  lapses (15 minutes). The other devices get `device.pending`; the window asks the person (Approve, or Not mine to
+  revoke it) and `el devices <lab>` lists them, with `el device approve|revoke <lab> <id>`. Nothing approves on its
+  own. Sign-out revokes the key (`DELETE /v1/devices/{id}`). MCP is standardizing the same profile (SEP-1932).
 - **Quotas and alerts.** Per-person request and token limits, and an alert when use leaves the person's pattern.
 
 ## Classifiers and the audit record

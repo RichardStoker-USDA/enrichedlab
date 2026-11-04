@@ -324,6 +324,21 @@ export interface LabDevice {
 	thumbprint?: string;
 }
 
+/** One of the person's sandboxes at a lab (GET /v1/containers). */
+export interface LabSandbox {
+	id: string;
+	name?: string;
+	/** running, starting, stopped, archived, restoring, or deleted while the lab clears it */
+	status?: string;
+	created?: string;
+	last_active?: string;
+	/** its memory, such as 4g */
+	memory?: string;
+	profile?: string;
+	/** the one this engine works in */
+	current?: boolean;
+}
+
 /** An app version a lab offers this person (its /v1/apps), as the Apps list shows it. */
 export interface LabApp {
 	/** The lab's short name on this computer. */
@@ -442,6 +457,9 @@ export interface Requests {
 	"lab.devices": { params: { name: string }; result: LabDevice[] };
 	"lab.device.approve": { params: { name: string; id: string }; result: { ok: true } };
 	"lab.device.revoke": { params: { name: string; id: string }; result: { ok: true } };
+	/** The person's sandboxes at a lab, and deleting one (it frees the lab's limit on how many a person keeps). */
+	"lab.sandboxes": { params: { name: string }; result: LabSandbox[] };
+	"lab.sandbox.delete": { params: { name: string; id: string }; result: { status: "deleted" | "deleting" } };
 	/** Use by lab and group over the window (GET /v1/usage). */
 	"lab.usage": { params: { name: string; window?: "7d" | "30d" }; result: unknown };
 	/** Save a file a lab tool returned by reference into the session's project; the checksum is checked when given. */

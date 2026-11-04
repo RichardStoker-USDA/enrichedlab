@@ -8,6 +8,9 @@ import { GateSite } from "../packages/engine/src/sites/gate.ts";
 const box = new Map<string, { status: string; polls: number; files: string }>();
 const calls: string[] = [];
 let made = 0;
+// How the next new sandbox is refused: once while Gate is busy, or because the person holds too many or storage is full.
+let refuse: "" | "busy-once" | "full" | "storage" = "";
+let deletes = 0;
 
 const lab = Bun.serve({
 	port: 0,
@@ -20,15 +23,31 @@ const lab = Bun.serve({
 		if (pathname === "/v1/me") return Response.json({ subject: "u_1", handle: "pat", memberships: [], sandboxes: { enabled: true } });
 		if (pathname === "/v1/models") return Response.json({ data: [] });
 		if (pathname === "/v1/containers" && request.method === "POST") {
+			if (refuse === "busy-once") {
+				refuse = "";
+				return Response.json({ error: { code: "sandbox_busy", message: "Gate is busy starting other sandboxes. Try again shortly." } }, { status: 503, headers: { "retry-after": "0" } });
+			}
+			if (refuse === "full") return Response.json({ error: { code: "too_many_containers", message: "You hold 20 containers, the most one person may keep. Delete one you no longer need first." } }, { status: 429 });
+			if (refuse === "storage") return Response.json({ error: { code: "storage_full", message: "Your files and resting sandboxes fill your storage. Delete some first." } }, { status: 413 });
 			const id = `new${++made}`;
 			box.set(id, { status: "running", polls: 0, files: "" });
 			return Response.json({ id, status: "running" });
+		}
+		if (pathname === "/v1/containers" && request.method === "GET") {
+			const data = [...box].filter(([, c]) => c.status !== "deleted").map(([id, c]) => ({ id, object: "container", name: "EnrichedLab", status: c.status, created_at: 1_793_000_000, last_active_at: 1_793_000_600, memory_limit: "4g" }));
+			return Response.json({ object: "list", data, has_more: false });
 		}
 		const match = /^\/v1\/containers\/([^/]+)(\/.*)?$/.exec(pathname);
 		if (!match) return new Response("", { status: 404 });
 		const [, id, rest] = match;
 		const c = box.get(id!);
 		if (!c || c.status === "deleted") return Response.json({ error: { code: "not_found", message: "no such container" } }, { status: 404 });
+		if (!rest && request.method === "DELETE") {
+			// One delete at a time per person; a sandbox whose files take a while reads deleted while Gate finishes.
+			if (deletes++ === 0) return Response.json({ error: { code: "too_many_deletes", message: "Up to 2 container deletes run at once." } }, { status: 429, headers: { "retry-after": "0" } });
+			c.status = "deleted";
+			return c.files === "slow-delete" ? Response.json({ id, object: "container.deleted", deleted: false, status: "deleting" }, { status: 202 }) : Response.json({ id, object: "container.deleted", deleted: true });
+		}
 		if (!rest) {
 			// Starting and restoring finish after a couple of looks.
 			if ((c.status === "starting" || c.status === "restoring") && ++c.polls >= 2) c.status = c.status === "restoring" && c.files === "fail" ? "archived" : "running";
@@ -107,6 +126,37 @@ describe("sandbox lifecycle", () => {
 		const result = await s.run("echo hi", 30);
 		expect(result.stdout).toMatch(/^ran in new\d+\n$/);
 		expect(notices.join(" ")).toContain("was deleted, with its files");
+	});
+
+	test("a lab too busy to take a new sandbox is waited out; one that's full says how to make room", async () => {
+		const { s } = await site("c-gone", { status: "deleted" });
+		refuse = "busy-once";
+		const posts = () => calls.filter((c) => c === "POST /v1/containers").length;
+		const before = posts();
+		expect((await s.run("echo hi", 30)).stdout).toMatch(/^ran in new\d+\n$/);
+		expect(posts() - before).toBe(2);
+		const full = await site("c-gone-too", { status: "deleted" });
+		refuse = "full";
+		await expect(full.s.run("echo hi", 30)).rejects.toThrow("You hold 20 containers, the most one person may keep. Delete one you no longer need first. el sandboxes devlab lists your sandboxes there; el sandbox delete devlab <id> removes one.");
+		refuse = "storage";
+		await expect(full.s.run("echo hi", 30)).rejects.toThrow("fill your storage. Delete some first. el sandboxes devlab lists");
+		refuse = "";
+	});
+
+	test("the person's sandboxes are listed, and deleting one waits its turn and says when the lab is still clearing it", async () => {
+		const { s } = await site("c-mine", { status: "running" });
+		box.set("c-old", { status: "archived", polls: 0, files: "slow-delete" });
+		await s.run("echo hi", 30);
+		const listed = await s.sandboxes();
+		expect(listed.find((b) => b.id === "c-mine")).toMatchObject({ status: "running", current: true, memory: "4g", created: "2026-10-26T07:33:20.000Z" });
+		expect(listed.find((b) => b.id === "c-old")).toMatchObject({ status: "archived", current: false });
+		deletes = 0;
+		expect(await s.deleteSandbox("c-old")).toBe("deleting");
+		expect(deletes).toBe(2);
+		expect(await s.deleteSandbox("c-mine")).toBe("deleted");
+		expect((await s.sandboxes()).map((b) => b.id)).not.toContain("c-old");
+		// The engine's own one is gone: the next command starts a new sandbox.
+		expect((await s.run("echo hi", 30)).stdout).toMatch(/^ran in new\d+\n$/);
 	});
 
 	test("an expired sandbox (410) is forgotten so the next command starts fresh", async () => {

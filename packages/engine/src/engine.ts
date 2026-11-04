@@ -804,6 +804,10 @@ export class Engine {
 				case "lab.device.revoke":
 					await this.sites.revokeDevice(need("name"), need("id"));
 					return { ok: true };
+				case "lab.sandboxes":
+					return (await this.sites.sandboxes(need("name"))) as never;
+				case "lab.sandbox.delete":
+					return { status: await this.sites.deleteSandbox(need("name"), need("id")) } as never;
 				case "browser.watch": {
 					// "again": a window that already watches asks for a fresh picture (it reloaded its pane).
 					const page = await this.browsers.watch(need("sessionId"), p.on === "again" ? "again" : p.on === true);
