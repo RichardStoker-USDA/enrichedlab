@@ -78,7 +78,7 @@ const lab = Bun.serve<{ stdin: string; started: boolean }, never>({
 		}
 		return new Response("", { status: 404 });
 	},
-	// Stands in for the check's `read line; echo got:$line; echo note >&2; exit 3` in the sandbox shell.
+	// Stands in for the check's `read line; echo got:$line; read more; echo also:$more; echo note >&2; exit 3`.
 	websocket: {
 		message(ws, raw) {
 			const frame = JSON.parse(String(raw)) as { argv?: string[]; stdin?: string; eof?: boolean };
@@ -86,10 +86,15 @@ const lab = Bun.serve<{ stdin: string; started: boolean }, never>({
 				ws.data.started = frame.argv?.[0] === "sh";
 				return;
 			}
-			if (frame.stdin) ws.data.stdin += Buffer.from(frame.stdin, "base64").toString();
+			const b64 = (s: string) => Buffer.from(s).toString("base64");
+			if (frame.stdin) {
+				ws.data.stdin += Buffer.from(frame.stdin, "base64").toString();
+				const lines = ws.data.stdin.split("\n");
+				// Answer each line as it arrives, as a live process does.
+				if (lines.length === 2) ws.send(JSON.stringify({ stdout: b64(`got:${lines[0]}\n`) }));
+				if (lines.length === 3) ws.send(JSON.stringify({ stdout: b64(`also:${lines[1]}\n`) }));
+			}
 			if (frame.eof) {
-				const b64 = (s: string) => Buffer.from(s).toString("base64");
-				ws.send(JSON.stringify({ stdout: b64(`got:${ws.data.stdin.split("\n")[0]}\n`) }));
 				ws.send(JSON.stringify({ stderr: b64("note\n") }));
 				ws.send(JSON.stringify({ exit_code: 3 }));
 				ws.close();
@@ -130,6 +135,7 @@ describe("lab contract", () => {
 		expect(rows.find((r) => r.row === "old cursor")?.detail).toContain("reset");
 		expect(rows.find((r) => r.row === "another lab's scope")?.status).toBe("pass");
 		expect(rows.find((r) => r.row === "attach")?.status).toBe("pass");
+		expect(rows.find((r) => r.row === "attach streams stdin")?.status).toBe("pass");
 		expect(seen.deleted).toBe("c1");
 	});
 

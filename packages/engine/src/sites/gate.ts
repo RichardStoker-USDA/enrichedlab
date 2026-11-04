@@ -618,17 +618,22 @@ export class GateSite implements SiteAdapter, SandboxApi {
 					add("sandbox runs a command", ran.exit_code === 0 && ran.stdout?.trim() === "ok" ? "pass" : "fail", `exit ${ran.exit_code}`);
 					if (has("attach")) {
 						const url = `${this.route.base}/v1/containers/${encodeURIComponent(made.id)}/attach`;
-						const process = await attachSocket(url.replace(/^http/, "ws"), await this.authHeaders("GET", url), { argv: ["sh", "-c", "read line; echo got:$line; echo note >&2; exit 3"], timeout_seconds: 30 }, this.route.ca);
+						const process = await attachSocket(url.replace(/^http/, "ws"), await this.authHeaders("GET", url), { argv: ["sh", "-c", "read line; echo got:$line; read more; echo also:$more; echo note >&2; exit 3"], timeout_seconds: 60 }, this.route.ca);
 						let out = "";
 						let err = "";
 						process.onStdout((c) => (out += new TextDecoder().decode(c)));
 						process.onStderr((c) => (err += new TextDecoder().decode(c)));
+						// MCP backends talk over a live stdin: the first answer has to come back before stdin closes.
 						process.write("hello\n");
+						for (const until = Date.now() + 15_000; !out.includes("got:hello") && Date.now() < until; ) await sleep(200);
+						const live = out.includes("got:hello");
+						process.write("again\n");
 						process.end();
 						const code = await Promise.race([process.exit, sleep(30_000).then(() => "timeout" as const)]);
 						process.close();
-						const fits = code === 3 && out.trim() === "got:hello" && err.trim() === "note";
+						const fits = code === 3 && out.includes("got:hello") && out.includes("also:again") && err.trim() === "note";
 						add("attach", fits ? "pass" : "fail", fits ? "stdin in, stdout and stderr out, exit code" : `exit ${code}, stdout ${JSON.stringify(out.slice(0, 40))}, stderr ${JSON.stringify(err.slice(0, 40))}`);
+						add("attach streams stdin", live ? "pass" : "fail", live ? "an answer came back while stdin was still open" : "nothing came back until stdin closed, so an MCP backend can't talk over it");
 					}
 					if (has("ports")) {
 						// A web server in the sandbox, read through the lab's port path; app pages must come sandboxed (CSP).

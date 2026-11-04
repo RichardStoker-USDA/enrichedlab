@@ -233,6 +233,8 @@ async function startInSandbox(manifest: AppManifest, ctx: BackendContext, lab: S
 			// One port per app version, so two versions never collide.
 			const port = 20_000 + (Number.parseInt(digest.slice(0, 4), 16) % 10_000);
 			const started = await lab.attach({ argv: backend.command, workdir, env: { ...env, PORT: String(port), HOST: "0.0.0.0" } });
+			// A web app reads no input: close stdin at once (a lab may hold the process until stdin closes).
+			started.end();
 			const decoder = new TextDecoder();
 			const lines = (chunk: Uint8Array) => {
 				for (const line of decoder.decode(chunk).split("\n")) if (line.trim()) ctx.log(line);
