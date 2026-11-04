@@ -245,7 +245,9 @@ export function statusLine(t: Theme, status: SessionStatus | undefined, extra: {
 	const left = Math.max(0, Math.round((1 - g.used / g.threshold) * 100));
 	const contextText = `${g.estimated ? "~" : ""}${left}% left · ${fmtTokens(g.used)} of ${fmtTokens(g.threshold)}`;
 	const contextStyled = left < 15 ? t.bad(contextText) : left < 35 ? t.live(contextText) : t.muted(contextText);
-	const model = `${status.model.split("/").pop()}${status.effort ? ` · ${status.effort}` : ""}`;
+	// OpenAI asks apps to say when requests use the person's ChatGPT plan (manage it at chatgpt.com/settings/usage).
+	const plan = status.model.startsWith("chatgpt/") ? " · ChatGPT plan" : "";
+	const model = `${status.model.split("/").pop()}${status.effort ? ` · ${status.effort}` : ""}${plan}`;
 	const rate = status.rate ? t.faint(` · ${status.rate} tok/s`) : "";
 	const leftPart = `${INDENT}${activity}`;
 	const site = extra.site ? `  ${t.faint(extra.site)}` : "";
