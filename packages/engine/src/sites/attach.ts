@@ -68,7 +68,11 @@ export function attachSocket(url: string, headers: Record<string, string>, spec:
 			}
 			if (frame.error) {
 				finished = true;
-				settle.fail(Object.assign(new Error(frame.error.message ?? frame.error.code ?? "The lab refused the process."), { code: frame.error.code }));
+				const message =
+					frame.error.code === "busy"
+						? "The lab's sandbox is already running as many attached processes as it allows. Close an app there and try again."
+						: (frame.error.message ?? frame.error.code ?? "The lab refused the process.");
+				settle.fail(Object.assign(new Error(message), { code: frame.error.code }));
 			}
 		};
 		socket.onerror = () => {
@@ -88,6 +92,8 @@ export class AttachTransport implements Transport {
 	onerror?: (error: Error) => void;
 	onmessage?: (message: JSONRPCMessage) => void;
 	private process?: Attached;
+	/** Why the process ended early (the lab refused it, or the connection broke), for the error the person sees. */
+	failure?: Error;
 	private buffer = "";
 	private decoder = new TextDecoder();
 
@@ -122,6 +128,7 @@ export class AttachTransport implements Transport {
 				this.onclose?.();
 			},
 			(error: Error) => {
+				this.failure = error;
 				this.onerror?.(error);
 				this.onclose?.();
 			},

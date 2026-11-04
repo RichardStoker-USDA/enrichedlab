@@ -31,6 +31,11 @@ const lab = Bun.serve<{ proc?: Proc }, never>({
 	websocket: {
 		message(ws, raw) {
 			const frame = JSON.parse(String(raw)) as { argv?: string[]; workdir?: string; env?: Record<string, string>; stdin?: string; eof?: boolean; signal?: string };
+			if (!ws.data.proc && frame.argv?.[0] === "busy") {
+				ws.send(JSON.stringify({ error: { code: "busy", message: "no free command slots" } }));
+				ws.close();
+				return;
+			}
 			if (!ws.data.proc) {
 				const proc = Bun.spawn(frame.argv!, { cwd: frame.workdir, env: { ...process.env, ...frame.env }, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
 				ws.data.proc = proc;
@@ -158,6 +163,15 @@ describe.skipIf(process.platform === "win32")("app backends in a lab sandbox", (
 		await backend.close();
 		for (let i = 0; i < 50 && (await fetch(backend.url).then(() => true, () => false)); i++) await Bun.sleep(50);
 		expect(await fetch(backend.url).then(() => "up", () => "down")).toBe("down");
+	});
+
+	test("a full lab says so instead of a closed connection", async () => {
+		const app = join(box, "busy_app");
+		mkdirSync(app, { recursive: true });
+		const manifest = { name: "busy_app", version: "1.0.0", backend: { runtime: "command", command: ["busy"] } } as unknown as AppManifest;
+		await expect(startBackend(manifest, { dir: app, dataDir: join(box, "busy_data"), runDir: join(box, "run"), toolsDir: join(box, "tools"), network: false, log: () => undefined, sandbox, sandboxOnly: true })).rejects.toThrow(
+			"as many attached processes as it allows",
+		);
 	});
 
 	test("a lab that can't attach falls back to this computer unless it keeps its data inside", async () => {

@@ -204,9 +204,10 @@ async function startInSandbox(manifest: AppManifest, ctx: BackendContext, lab: S
 	}
 	const needsBun = runner ? `command -v bun >/dev/null || exit 4; ` : "";
 	const unpacked = await lab.run(
-		`set -e; D="$HOME/.el-apps/${name}"; mkdir -p "$D/data" "$D/${digest}"; tar -xzf ${shq(sent.path)} -C "$D/${digest}"; rm -f ${shq(sent.path)}; ${needsBun}printf %s "$D"`,
+		`command -v tar >/dev/null || exit 5; set -e; D="$HOME/.el-apps/${name}"; mkdir -p "$D/data" "$D/${digest}"; tar -xzf ${shq(sent.path)} -C "$D/${digest}"; rm -f ${shq(sent.path)}; ${needsBun}printf %s "$D"`,
 		120,
 	);
+	if (unpacked.exitCode === 5) throw new Error(`${lab.title}'s sandbox image has no tar, which copying an app into it needs. Ask the lab to add it.`);
 	if (unpacked.exitCode === 4) throw new Error(`This app's backend runs on Bun, which ${lab.title}'s sandbox doesn't have. Give the app a command backend to run it there.`);
 	if (unpacked.exitCode !== 0) throw new Error(`Couldn't copy the app into ${lab.title}'s sandbox: ${(unpacked.stderr || unpacked.stdout).trim().slice(0, 300)}`);
 	const home = unpacked.stdout.trim();
@@ -217,7 +218,11 @@ async function startInSandbox(manifest: AppManifest, ctx: BackendContext, lab: S
 		case "bun":
 		case "command": {
 			const argv = backend.runtime === "bun" ? ["bun", basename(runner!), backend.main] : backend.command;
-			return connectTransport(new AttachTransport(() => lab.attach!({ argv, workdir, env }), ctx.log));
+			const transport = new AttachTransport(() => lab.attach!({ argv, workdir, env }), ctx.log);
+			// The lab's own reason (busy, refused) beats the MCP client's "connection closed".
+			return connectTransport(transport).catch((error: Error) => {
+				throw transport.failure ?? error;
+			});
 		}
 		case "serve": {
 			if (!lab.openPort) throw Object.assign(new Error(`${lab.title} doesn't open sandbox ports.`), { unsupported: true });
