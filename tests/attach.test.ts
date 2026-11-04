@@ -105,7 +105,13 @@ describe("attach", () => {
 		expect([opens, text(out).trim()]).toEqual([2, "got:hello"]);
 		// A lab that stays busy: its answer stands once the waits run out.
 		const full = await retryingAttach(() => attachSocket(attachUrl, { authorization: "Bearer test" }, { argv: ["busy"] }), undefined, [10, 10]);
-		await expect(full.exit).rejects.toThrow("Close an app there, or try again in a minute.");
+		// Awaited directly: on Windows, Bun 1.4.3 crashes when expect().rejects waits on a promise a WebSocket close
+		// settles through another promise (oven-sh/bun#44025).
+		const why = await full.exit.then(
+			() => "",
+			(error: Error) => error.message,
+		);
+		expect(why).toContain("Close an app there, or try again in a minute.");
 	});
 
 	test("a signal stops the process and the exit code is null", async () => {
