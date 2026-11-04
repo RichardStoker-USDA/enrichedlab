@@ -35,7 +35,8 @@ const lab = Bun.serve({
 			return Response.json({ id, status: c.status });
 		}
 		if (rest === "/restore") {
-			if (c.files === "too-big") return Response.json({ error: { code: "forbidden", message: "the saved files (12 GB) are larger than your disk limit (10 GB)" } }, { status: 403 });
+			if (c.files === "too-big") return Response.json({ error: { code: "restore_files_over_limit", message: "Its saved files are 12.3 GiB; a sandbox may hold 10 GiB now." } }, { status: 403 });
+			if (c.files === "too-wide") return Response.json({ error: { code: "restore_memory_over_limit", message: "This sandbox has 16g; you may start up to 4g now." } }, { status: 403 });
 			if (c.status !== "archived" && c.status !== "restoring") return Response.json({ error: { code: "bad_request" } }, { status: 400 });
 			c.status = "restoring";
 			c.polls = 0;
@@ -91,7 +92,9 @@ describe("sandbox lifecycle", () => {
 
 	test("a restore the lab refuses says why and what to ask for", async () => {
 		const { s } = await site("c-toobig", { status: "archived", files: "too-big" });
-		await expect(s.run("echo hi", 30)).rejects.toThrow("Dev Lab won't restore your archived sandbox: the saved files (12 GB) are larger than your disk limit (10 GB). Ask the lab to raise your limit, or to delete the archive.");
+		await expect(s.run("echo hi", 30)).rejects.toThrow("Dev Lab won't restore your archived sandbox: Its saved files are 12.3 GiB; a sandbox may hold 10 GiB now. Ask the lab to raise your disk limit, or to delete the archive.");
+		const wide = await site("c-toowide", { status: "archived", files: "too-wide" });
+		await expect(wide.s.run("echo hi", 30)).rejects.toThrow("Dev Lab won't restore your archived sandbox: This sandbox has 16g; you may start up to 4g now. Ask the lab to raise your memory limit.");
 	});
 
 	test("a failed restore says so instead of running somewhere else", async () => {

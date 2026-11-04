@@ -883,10 +883,16 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		const slow = status === "archived" || status === "restoring";
 		if (status === "archived") {
 			this.onNotice?.(`Restoring your ${this.title} sandbox from its archive. Its files come back with it.`);
-			await this.json("POST", `/v1/containers/${encodeURIComponent(id)}/restore`, { json: {}, signal }).catch((error: Error & { status?: number }) => {
-				// The lab can refuse, for one, when the saved files are larger than the person's disk limit there now.
-				if (error.status === 403) throw new ToolError(`${this.title} won't restore your archived sandbox: ${error.message.replace(/\.$/, "")}. Ask the lab to raise your limit, or to delete the archive.`);
-				throw error;
+			await this.json("POST", `/v1/containers/${encodeURIComponent(id)}/restore`, { json: {}, signal }).catch((error: Error & { status?: number; code?: string }) => {
+				// The lab refuses when the sandbox no longer fits the person's limits there; its message gives the sizes.
+				if (error.status !== 403) throw error;
+				const ask =
+					error.code === "restore_memory_over_limit"
+						? "Ask the lab to raise your memory limit."
+						: error.code === "restore_files_over_limit"
+							? "Ask the lab to raise your disk limit, or to delete the archive."
+							: "Ask the lab to raise your limit, or to delete the archive.";
+				throw new ToolError(`${this.title} won't restore your archived sandbox: ${error.message.replace(/\.$/, "")}. ${ask}`);
 			});
 		} else if (status === "stopped") {
 			// Listing one file is the lightest use; the lab starts the sandbox on it.
