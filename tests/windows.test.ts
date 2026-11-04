@@ -30,7 +30,9 @@ describe.if(process.platform === "win32")("Windows containment", () => {
 				expect(c.facility).toBe("restricted-token");
 				return Bun.spawnSync([c.file, ...c.args], { cwd: project });
 			};
-			expect(run(`echo inside> "${join(project, "a.txt")}"`).exitCode).toBe(0);
+			const wrote = run(`echo inside> "${join(project, "a.txt")}"`);
+			const acl = Bun.spawnSync(["icacls", project]).stdout.toString();
+			expect({ code: wrote.exitCode, out: wrote.stdout.toString() + wrote.stderr.toString(), acl }).toMatchObject({ code: 0 });
 			expect(readFileSync(join(project, "a.txt"), "utf8").trim()).toBe("inside");
 			run(`echo outside> "${outside}"`);
 			expect(() => readFileSync(outside)).toThrow();
@@ -38,5 +40,11 @@ describe.if(process.platform === "win32")("Windows containment", () => {
 			rmSync(project, { recursive: true, force: true });
 			rmSync(outside, { force: true });
 		}
+	}, 60_000);
+
+	test("stdin and stdout pass through the helper", () => {
+		const c = contained("cmd.exe", ["/d", "/c", "findstr", "x"], { writable: [tmpdir()], network: "none" });
+		const piped = Bun.spawnSync([c.file, ...c.args], { stdin: Buffer.from("x marks\n") });
+		expect({ code: piped.exitCode, out: piped.stdout.toString().trim(), err: piped.stderr.toString() }).toEqual({ code: 0, out: "x marks", err: "" });
 	}, 60_000);
 });

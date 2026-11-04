@@ -18,7 +18,8 @@ function scratch(name: string): string {
 	return dir;
 }
 afterAll(() => {
-	for (const dir of made) rmSync(dir, { recursive: true, force: true });
+	// Windows can hold a folder a moment after its process ends.
+	for (const dir of made) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 });
 
 function writeApp(dir: string, files: Record<string, string>) {

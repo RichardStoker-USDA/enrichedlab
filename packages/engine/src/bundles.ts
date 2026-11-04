@@ -14,7 +14,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import type { LabConfig, McpServerConfig, ModelOverride } from "./config.ts";
 import type { HookConfig, Hooks } from "./hooks.ts";
 import type { Paths } from "./paths.ts";
@@ -57,7 +57,11 @@ const GRANT_MAX_BYTES = 5 * 1024 * 1024;
 /** Read a bundle folder in either layout. Throws when it is neither. */
 export function readBundle(dir: string): BundleContents {
 	const root = resolve(dir);
-	const fill = (value: string) => value.replaceAll("${BUNDLE_ROOT}", root).replaceAll("${CLAUDE_PLUGIN_ROOT}", root);
+	const fill = (value: string) => {
+		const out = value.replaceAll("${BUNDLE_ROOT}", root).replaceAll("${CLAUDE_PLUGIN_ROOT}", root);
+		// A path under the bundle uses this system's separators.
+		return out !== value && out.startsWith(root) ? normalize(out) : out;
+	};
 	// Fill each string where it sits: a Windows path's backslashes would break the JSON text if filled there.
 	const filled = <T>(value: T): T => JSON.parse(JSON.stringify(value ?? {}), (_key, v) => (typeof v === "string" ? fill(v) : v));
 	const inside = (path: string | undefined) => {
