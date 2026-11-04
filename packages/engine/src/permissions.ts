@@ -60,11 +60,12 @@ export function decide(tool: Tool, args: Record<string, unknown>, workspace: Wor
 	const mode = config.permissions.mode;
 	const extra = tool.ask?.(args, { workspace });
 	const key = allowKey(tool, args);
-	// Pushing publishes work: it asks in every mode, every time.
+	// Pushing publishes work, and an unreviewed lab tool hasn't been checked by anyone: both ask in every mode, every time.
 	if (key === "shell!push") return { action: "ask", reason: PUSH_REASON, key };
+	if (tool.unreviewed) return { action: "ask", reason: "The lab hasn't reviewed this tool yet, so it asks every time.", key: `unreviewed!${tool.name}` };
 	if (mode === "full") return { action: "run" };
-	// An answer about something outside the project is remembered under its own key.
-	if (!key.startsWith("shell!") && allowed.has(extra ? `${key}:outside` : key)) return { action: "run" };
+	// An answer about something outside the project is remembered under its own key; "!" keys never are.
+	if (!key.includes("!") && allowed.has(extra ? `${key}:outside` : key)) return { action: "run" };
 	switch (tool.kind) {
 		case "net": {
 			if (extra) return { action: "ask", reason: extra, key: `${key}:outside` };

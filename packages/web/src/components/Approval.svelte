@@ -17,7 +17,7 @@
 	function key(e: KeyboardEvent) {
 		if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement) return;
 		if (e.key === "y") void lab.answer(request.requestId, "allow");
-		else if (e.key === "a") void lab.answer(request.requestId, "allow_session");
+		else if (e.key === "a" && !request.once) void lab.answer(request.requestId, "allow_session");
 		else if (e.key === "n" || e.key === "Escape") void lab.answer(request.requestId, "deny");
 	}
 </script>
@@ -25,7 +25,7 @@
 <svelte:window onkeydown={key} />
 
 <section class="approval" aria-label={`Allow ${request.tool}?`}>
-	<p class="ask"><strong>Allow {request.tool}?</strong> <span>{request.reason}</span></p>
+	<p class="ask"><strong>Allow {request.tool}?</strong>{#if request.view.unreviewed}<span class="unreviewed">Unreviewed</span>{/if} <span>{request.reason}</span></p>
 	{#if request.view.target}
 		<pre class="target">{request.view.target}</pre>
 	{/if}
@@ -35,7 +35,9 @@
 	{/if}
 	<div class="actions">
 		<button class="secondary" onclick={() => lab.answer(request.requestId, "deny")}>Decline <kbd>N</kbd></button>
-		<button class="secondary" onclick={() => lab.answer(request.requestId, "allow_session")}>Allow for this session <kbd>A</kbd></button>
+		{#if !request.once}
+			<button class="secondary" onclick={() => lab.answer(request.requestId, "allow_session")}>Allow for this session <kbd>A</kbd></button>
+		{/if}
 		<button class="primary" bind:this={allowButton} onclick={() => lab.answer(request.requestId, "allow")}>Allow <kbd>Y</kbd></button>
 	</div>
 </section>
@@ -135,5 +137,15 @@
 			flex: 1;
 			justify-content: center;
 		}
+	}
+	/* Text and a rule in the text colors, not a tinted badge: the word carries the meaning. */
+	.unreviewed {
+		margin-left: 8px;
+		padding: 0 6px;
+		border: 1px solid var(--rule-strong);
+		border-radius: 4px;
+		font-size: 11.5px;
+		font-weight: 600;
+		color: var(--text);
 	}
 </style>

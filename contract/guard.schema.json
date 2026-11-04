@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Screening text: POST /v1/guard {stage, text, session?, tool?}",
+  "type": "object",
+  "required": ["decision", "categories", "reasons", "policy_version", "receipt_id"],
+  "properties": {
+    "decision": { "type": "string", "enum": ["allow", "flag", "block"] },
+    "categories": { "type": "array", "items": { "type": "string" } },
+    "reasons": { "type": "array", "items": { "type": "string" } },
+    "policy_version": { "type": "string" },
+    "receipt_id": { "type": "string" }
+  }
+}

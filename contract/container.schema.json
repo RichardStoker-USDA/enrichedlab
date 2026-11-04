@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "A sandbox made by POST /v1/containers {name, profile?}",
+  "type": "object",
+  "required": ["id"],
+  "properties": { "id": { "type": "string", "minLength": 1 }, "status": { "type": "string" }, "profile": { "type": "string" }, "image_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" } }
+}

@@ -13,14 +13,15 @@ import { Readable } from "node:stream";
 import type { BundleGrant } from "../bundles.ts";
 import { repoRoot } from "../git.ts";
 import { connectRemote, type McpConnection } from "../mcp.ts";
-import { labFetch } from "../models/http.ts";
+import { labFetch, sseData } from "../models/http.ts";
 import type { ModelProfile } from "../models/types.ts";
 import { num, str, type Tool, ToolError } from "../tools/types.ts";
-import { errorText, redact, SECRET_NAME } from "../util.ts";
+import { errorText, redact, SECRET_NAME, sleep } from "../util.ts";
 import type { SiteAdapter } from "./adapter.ts";
 import { fetchRepo, sendRepo } from "./repo_handoff.ts";
 import type { SandboxApi } from "./sandbox_workspace.ts";
 import type { SiteConfig, SiteRoute } from "./sites.ts";
+import { type CheckRow, CONTRACT, contractProblem, DESCRIPTOR_PATH, type Endpoint, type LabDescriptor, type LabEvent, SCHEMAS, validate } from "./contract.ts";
 
 interface GateModel {
 	id: string;
@@ -86,6 +87,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			redirect: "manual",
 			...(streamed ? { duplex: "half" } : {}),
 		} as RequestInit & { ca?: string });
+		if (response.status === 304) return response;
 		if (response.status >= 300 && response.status < 400) throw new Error(`${this.config.name} asked for a sign-in. Run el login ${this.config.name}.`);
 		if (!response.ok) {
 			const challenge = response.headers.get("www-authenticate") ?? "";
@@ -106,12 +108,47 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		return (await (await this.call(method, path, init)).json()) as T;
 	}
 
+	/** A GET that sends the last ETag: a 304 answers from the copy kept here. */
+	private async cached<T>(path: string, signal?: AbortSignal): Promise<T> {
+		const kept = this.etags.get(path);
+		const response = await this.call("GET", path, { headers: kept ? { "if-none-match": kept.etag } : {}, signal });
+		if (response.status === 304 && kept) return kept.body as T;
+		const body = (await response.json()) as T;
+		const etag = response.headers.get("etag");
+		if (etag) this.etags.set(path, { etag, body });
+		return body;
+	}
+	private etags = new Map<string, { etag: string; body: unknown }>();
+
+	descriptor?: LabDescriptor;
+
+	/** The lab's own description, or undefined from a lab that predates it (then endpoints are probed). */
+	private async readDescriptor(): Promise<LabDescriptor | undefined> {
+		try {
+			return await this.cached<LabDescriptor>(DESCRIPTOR_PATH, AbortSignal.timeout(10_000));
+		} catch {
+			return undefined;
+		}
+	}
+
+	/** Whether the lab serves an endpoint: what its description says, or "try it" without one. */
+	private offers(endpoint: Endpoint): boolean {
+		return this.descriptor ? this.descriptor.endpoints[endpoint] === true : true;
+	}
+
 	async connect(): Promise<void> {
-		const me = await this.json<GateMe>("GET", "/v1/me", { signal: AbortSignal.timeout(10_000) });
+		this.descriptor = await this.readDescriptor();
+		if (this.descriptor) {
+			const problem = contractProblem(this.descriptor);
+			if (problem) throw new Error(problem);
+			const fit = validate(SCHEMAS.lab, this.descriptor);
+			if (fit.length) this.warning = `${this.title}'s description doesn't fit the lab contract (${fit[0]}).`;
+		}
+		const me = await this.cached<GateMe>("/v1/me", AbortSignal.timeout(10_000));
 		this.who = me.handle;
 		this.owner = me.owner === true;
 		this.sandboxOn = me.sandboxes?.enabled === true;
-		const list = await this.json<{ data?: GateModel[] }>("GET", "/v1/models", { signal: AbortSignal.timeout(10_000) });
+		const list = await this.cached<{ data?: GateModel[] }>("/v1/models", AbortSignal.timeout(10_000));
 		this.models = (list.data ?? []).filter((m) => !m.gate?.endpoints?.length || m.gate.endpoints.includes("chat")).map((m) => this.profile(m));
 		const tools: Tool[] = [];
 		try {
@@ -125,7 +162,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	}
 
 	get title(): string {
-		return this.config.title ?? this.config.name;
+		return this.config.title ?? this.descriptor?.title ?? this.config.name;
 	}
 
 	sandboxApi(): SandboxApi | undefined {
@@ -134,8 +171,9 @@ export class GateSite implements SiteAdapter, SandboxApi {
 
 	/** Bundles this person's role is granted, from GET /v1/bundles. A Gate that doesn't serve it grants none. */
 	async bundles(): Promise<BundleGrant[]> {
+		if (!this.offers("bundles")) return [];
 		try {
-			const list = await this.json<{ data?: BundleGrant[] }>("GET", "/v1/bundles", { signal: AbortSignal.timeout(10_000) });
+			const list = await this.cached<{ data?: BundleGrant[] }>("/v1/bundles", AbortSignal.timeout(10_000));
 			return list.data ?? [];
 		} catch (error) {
 			if ((error as { status?: number }).status === 404) return [];
@@ -176,6 +214,211 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			headers: () => this.route.headers(),
 			ca: this.route.ca,
 		};
+	}
+
+	// ── Lab contract: events, files by reference, usage, conformance ─────────────────────────────────────────────
+
+	/** Follow GET /v1/events from `cursor`, reconnecting with backoff. A `reset` event means re-read what was granted. */
+	follow(cursor: string | undefined, on: { event(e: LabEvent): void; cursor(id: string): void; reset(): void }): () => void {
+		const controller = new AbortController();
+		if (!this.offers("events")) return () => undefined;
+		let last = cursor;
+		void (async () => {
+			let wait = 2_000;
+			while (!controller.signal.aborted) {
+				try {
+					const response = await this.call("GET", "/v1/events", { headers: { accept: "text/event-stream", ...(last ? { "last-event-id": last } : {}) }, signal: controller.signal });
+					if (!response.body) throw new Error("The lab sent no event stream.");
+					wait = 2_000;
+					for await (const message of sseData(response.body, controller.signal)) {
+						if (message.event === "reset") {
+							on.reset();
+							let next = message.id;
+							try {
+								next = (JSON.parse(message.data) as { cursor?: string }).cursor ?? next;
+							} catch {
+								// The id field carries the cursor.
+							}
+							if (next) on.cursor((last = next));
+							continue;
+						}
+						let event: LabEvent;
+						try {
+							event = JSON.parse(message.data) as LabEvent;
+						} catch {
+							continue;
+						}
+						if (message.id) on.cursor((last = message.id));
+						if (typeof event.type === "string") on.event(event);
+					}
+				} catch (error) {
+					if (controller.signal.aborted) return;
+					// A lab without the stream, or a sign-in that ended: stop; the next connect starts again.
+					const status = (error as { status?: number }).status;
+					if (status === 404 || status === 401 || status === 403) return;
+				}
+				await sleep(wait, controller.signal).catch(() => undefined);
+				wait = Math.min(wait * 2, 60_000);
+			}
+		})();
+		return () => controller.abort();
+	}
+
+	/** A file a lab tool returned by reference. Only the lab's own addresses are fetched, with the lab's sign-in. */
+	async fetchFile(uri: string, signal: AbortSignal): Promise<Uint8Array> {
+		const base = [this.route.base, new URL(this.config.url).origin].find((b) => uri === b || uri.startsWith(`${b}/`));
+		if (!base) throw new Error(`${uri} isn't an address of ${this.title}.`);
+		const response = await this.call("GET", uri.slice(base.length), { headers: { accept: "*/*" }, signal });
+		return new Uint8Array(await response.arrayBuffer());
+	}
+
+	/** Use by lab and group (GET /v1/usage). */
+	async usage(window: "7d" | "30d"): Promise<unknown> {
+		if (!this.offers("usage")) throw new Error(`${this.title} doesn't report usage.`);
+		return this.json("GET", `/v1/usage?window=${window}`, { signal: AbortSignal.timeout(15_000) });
+	}
+
+	/**
+	 * `el lab check`: read the description, then exercise each endpoint it lists against contract/. Read-only apart
+	 * from one sandbox it makes and deletes, and one guard call with harmless text.
+	 */
+	async check(): Promise<CheckRow[]> {
+		const rows: CheckRow[] = [];
+		const add = (row: string, status: CheckRow["status"], detail?: string) => rows.push({ row, status, ...(detail ? { detail } : {}) });
+		const fits = (row: string, schema: keyof typeof SCHEMAS, value: unknown, note?: string) => {
+			const problems = validate(SCHEMAS[schema], value);
+			add(row, problems.length ? "fail" : "pass", problems.length ? problems.slice(0, 3).join("; ") : note);
+		};
+		const attempt = async (row: string, run: () => Promise<unknown>) => {
+			try {
+				await run();
+			} catch (error) {
+				add(row, "fail", redact(errorText(error)));
+			}
+		};
+		const t = () => AbortSignal.timeout(20_000);
+
+		let d: LabDescriptor | undefined;
+		await attempt("descriptor", async () => {
+			const response = await this.call("GET", DESCRIPTOR_PATH, { signal: t() });
+			d = (await response.json()) as LabDescriptor;
+			fits("descriptor", "lab", d, `${d.title}, contract ${d.contract}`);
+			const problem = contractProblem(d);
+			add("contract version", problem ? "fail" : "pass", problem ?? `${d.contract} (this client: ${CONTRACT})`);
+		});
+		const has = (endpoint: Endpoint) => d?.endpoints?.[endpoint] === true;
+		const skip = (row: string) => add(row, "skip", "not listed in the descriptor");
+
+		await attempt("GET /v1/me", async () => fits("GET /v1/me", "me", await this.json("GET", "/v1/me", { signal: t() })));
+		await attempt("ETag on /v1/me", async () => {
+			const first = await this.call("GET", "/v1/me", { signal: t() });
+			const etag = first.headers.get("etag");
+			await first.arrayBuffer();
+			if (!etag) return add("ETag on /v1/me", "fail", "no ETag header");
+			const again = await this.call("GET", "/v1/me", { headers: { "if-none-match": etag }, signal: t() });
+			add("ETag on /v1/me", again.status === 304 ? "pass" : "fail", again.status === 304 ? undefined : `answered ${again.status} to If-None-Match`);
+		});
+		await attempt("GET /v1/models", async () => {
+			const list = await this.json<{ data?: unknown[] }>("GET", "/v1/models", { signal: t() });
+			fits("GET /v1/models", "models", list, `${list.data?.length ?? 0} models`);
+		});
+
+		if (has("mcp") || !d) {
+			await attempt("MCP tools", async () => {
+				const connection = await connectRemote(`${this.config.name}-check`, { url: `${this.route.base}/mcp`, headers: () => this.route.headers(), ca: this.route.ca, origin: "site" });
+				const unreviewed = connection.tools.filter((tool) => tool.unreviewed).length;
+				add("MCP tools", "pass", `${connection.tools.length} tools${unreviewed ? `, ${unreviewed} unreviewed` : ""}`);
+				const data = d?.conformance?.data_tool;
+				if (data) {
+					const tool = connection.tools.find((x) => x.name.endsWith(`_${data.name}`) || x.name === data.name);
+					if (!tool) add("data by reference", "fail", `no tool named ${data.name}`);
+					else {
+						const result = await tool.run(data.arguments ?? {}, { signal: t() } as never);
+						const files = result.view?.files ?? [];
+						const referenced = files.length > 0 && files.every((f) => f.sha256);
+						add("data by reference", referenced && result.content.length < 20_000 ? "pass" : "fail", referenced ? `${files.length} files with checksums` : "the result carried no file references with checksums");
+					}
+				} else add("data by reference", "skip", "the descriptor names no conformance.data_tool");
+				await connection.close();
+			});
+		} else skip("MCP tools");
+
+		if (has("bundles")) await attempt("GET /v1/bundles", async () => fits("GET /v1/bundles", "bundles", await this.json("GET", "/v1/bundles", { signal: t() })));
+		else skip("GET /v1/bundles");
+
+		if (has("events")) {
+			await attempt("GET /v1/events", async () => {
+				const controller = new AbortController();
+				const timer = setTimeout(() => controller.abort(), 25_000);
+				try {
+					const response = await this.call("GET", "/v1/events", { headers: { accept: "text/event-stream", "last-event-id": "0" }, signal: controller.signal });
+					const type = response.headers.get("content-type") ?? "";
+					if (!type.includes("text/event-stream")) return add("GET /v1/events", "fail", `content type ${type || "none"}`);
+					add("GET /v1/events", "pass", "the stream opens");
+					let seen = "";
+					for await (const message of sseData(response.body!, controller.signal)) {
+						if (message.event === "reset") {
+							seen = "reset";
+							break;
+						}
+						const problems = validate(SCHEMAS.event, JSON.parse(message.data));
+						if (problems.length) {
+							seen = `bad event: ${problems[0]}`;
+							break;
+						}
+						if (!message.id) {
+							seen = "an event without an id";
+							break;
+						}
+						seen = "events";
+						break;
+					}
+					if (!seen) add("old cursor", "skip", "no events within 25 s");
+					else add("old cursor", seen === "reset" || seen === "events" ? "pass" : "fail", seen === "reset" ? "a cursor older than the history kept gets reset" : seen === "events" ? "resumes from the cursor" : seen);
+				} catch (error) {
+					if (!controller.signal.aborted) throw error;
+					if (!rows.some((r) => r.row === "old cursor")) add("old cursor", "skip", "no events within 25 s");
+				} finally {
+					clearTimeout(timer);
+					controller.abort();
+				}
+			});
+		} else skip("GET /v1/events");
+
+		if (has("guard")) {
+			await attempt("POST /v1/guard", async () => {
+				const answer = await this.json<{ decision?: string }>("POST", "/v1/guard", { json: { stage: "input", text: "Summarize the yield table by treatment." }, signal: t() });
+				fits("POST /v1/guard", "guard", answer, `decision ${answer.decision}`);
+				if (answer.decision === "block") add("guard on harmless text", "fail", "it blocked a plain request");
+			});
+		} else skip("POST /v1/guard");
+
+		if (has("usage")) {
+			await attempt("GET /v1/usage", async () => fits("GET /v1/usage", "usage", await this.json("GET", "/v1/usage?window=7d", { signal: t() })));
+			const foreign = d?.conformance?.foreign_scope;
+			if (foreign) {
+				await attempt("another lab's scope", async () => {
+					const response = await this.call("GET", `/v1/usage?window=7d&lab=${encodeURIComponent(foreign)}`, { signal: t() }).catch((error: { status?: number }) => error);
+					const status = response instanceof Response ? response.status : response.status;
+					add("another lab's scope", status === 403 || status === 404 ? "pass" : "fail", `answered ${status ?? "?"}`);
+				});
+			} else add("another lab's scope", "skip", "the descriptor names no conformance.foreign_scope");
+		} else skip("GET /v1/usage");
+
+		if (has("containers")) {
+			await attempt("sandbox", async () => {
+				const profile = d?.sandbox_profiles?.[0]?.name;
+				const made = await this.json<{ id: string }>("POST", "/v1/containers", { json: { name: "el-lab-check", ...(profile ? { profile } : {}) }, signal: AbortSignal.timeout(300_000) });
+				fits("sandbox made", "container", made, profile ? `profile ${profile}` : undefined);
+				try {
+					const ran = await this.json<{ exit_code?: number; stdout?: string }>("POST", `/v1/containers/${made.id}/exec`, { json: { command: "echo ok", timeout_seconds: 30 }, signal: AbortSignal.timeout(120_000) });
+					add("sandbox runs a command", ran.exit_code === 0 && ran.stdout?.trim() === "ok" ? "pass" : "fail", `exit ${ran.exit_code}`);
+				} finally {
+					await this.call("DELETE", `/v1/containers/${made.id}`, { signal: t() }).catch(() => undefined);
+				}
+			});
+		} else skip("sandbox");
+		return rows;
 	}
 
 	// ── Sandbox ────────────────────────────────────────────────────────────────────────────────────────────────────

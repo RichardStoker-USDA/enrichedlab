@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Models this person may use: GET /v1/models",
+  "type": "object",
+  "required": ["data"],
+  "properties": {
+    "data": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "max_model_len": { "type": "integer", "minimum": 1 },
+          "gate": {
+            "type": "object",
+            "properties": {
+              "aliases": { "type": "array", "items": { "type": "string" } },
+              "capabilities": { "type": "array", "items": { "type": "string" } },
+              "context": { "type": "integer", "minimum": 1 },
+              "default_effort": { "type": "string" },
+              "effort_field": { "type": "string", "enum": ["reasoning_effort", "chat_template_kwargs"] },
+              "efforts": { "type": "array", "items": { "type": "string" } },
+              "endpoints": { "type": "array", "items": { "type": "string" } },
+              "max_output": { "type": "integer", "minimum": 1 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

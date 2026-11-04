@@ -13,12 +13,13 @@ export function labFetch(url: string, options: FetchOptions = {}): Promise<Respo
 	return fetch(url, withTls);
 }
 
-/** Yield each `data:` payload of an event stream. Ends at `[DONE]` or the end of the body. */
-export async function* sseData(body: ReadableStream<Uint8Array>, signal: AbortSignal): AsyncGenerator<{ event?: string; data: string }> {
+/** Yield each `data:` payload of an event stream, with its event name and id. Ends at `[DONE]` or the end of the body. */
+export async function* sseData(body: ReadableStream<Uint8Array>, signal: AbortSignal): AsyncGenerator<{ event?: string; data: string; id?: string }> {
 	const reader = body.getReader();
 	const decoder = new TextDecoder();
 	let buffer = "";
 	let event: string | undefined;
+	let id: string | undefined;
 	let data: string[] = [];
 	const abort = () => reader.cancel().catch(() => undefined);
 	signal.addEventListener("abort", abort, { once: true });
@@ -36,7 +37,7 @@ export async function* sseData(body: ReadableStream<Uint8Array>, signal: AbortSi
 					if (data.length) {
 						const payload = data.join("\n");
 						if (payload === "[DONE]") return;
-						yield { event, data: payload };
+						yield { event, data: payload, id };
 					}
 					event = undefined;
 					data = [];
@@ -44,10 +45,13 @@ export async function* sseData(body: ReadableStream<Uint8Array>, signal: AbortSi
 					data.push(line.slice(line.charAt(5) === " " ? 6 : 5));
 				} else if (line.startsWith("event:")) {
 					event = line.slice(6).trim();
+				} else if (line.startsWith("id:")) {
+					// The id stays the stream's last id until another replaces it (the resume cursor).
+					id = line.slice(line.charAt(3) === " " ? 4 : 3);
 				}
 			}
 		}
-		if (data.length && data.join("\n") !== "[DONE]") yield { event, data: data.join("\n") };
+		if (data.length && data.join("\n") !== "[DONE]") yield { event, data: data.join("\n"), id };
 	} finally {
 		signal.removeEventListener("abort", abort);
 		reader.releaseLock();

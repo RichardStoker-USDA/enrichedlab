@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Bundles granted to this person: GET /v1/bundles",
+  "type": "object",
+  "required": ["data"],
+  "properties": {
+    "data": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "version", "files"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+          "version": { "type": "string", "minLength": 1 },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["path", "content"],
+              "properties": { "path": { "type": "string", "not": { "pattern": "(^/|\\.\\.)" } }, "content": { "type": "string" }, "base64": { "type": "boolean" } }
+            }
+          }
+        }
+      }
+    }
+  }
+}

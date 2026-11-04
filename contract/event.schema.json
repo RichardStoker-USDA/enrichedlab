@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "One event on GET /v1/events (the SSE data field; the SSE id is the resume cursor)",
+  "type": "object",
+  "required": ["type", "at", "id"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": ["job.finished", "agent.finished", "sandbox.idle_stopping", "sandbox.stopped", "sandbox.archived", "app.published", "ticket.updated", "models.changed", "bundles.changed", "quota.warning", "signin.revoked"]
+    },
+    "at": { "type": "string", "format": "date-time" },
+    "id": { "type": "string", "minLength": 1 },
+    "session": { "type": "string" },
+    "text": { "type": "string" },
+    "task_id": { "type": "string" },
+    "status": { "type": "string" },
+    "summary": { "type": "string" },
+    "sandbox": { "type": "string" },
+    "kind": { "type": "string" },
+    "used": { "type": "number" },
+    "limit": { "type": "number" }
+  }
+}

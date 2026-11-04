@@ -24,9 +24,22 @@ export interface Usage {
 export type StopReason = "end" | "tool_use" | "length" | "error" | "cancelled";
 
 /** How a tool's call is shown: the verb and its target, as one step line. */
+/** A file a tool returned by reference: where it lives, what it is, and its checksum. */
+export interface FileRef {
+	uri: string;
+	name: string;
+	mime?: string;
+	bytes?: number;
+	sha256?: string;
+}
+
 export interface StepView {
 	verb: string;
 	target: string;
+	/** A lab tool its lab hasn't reviewed yet; shown beside the step and in the question. */
+	unreviewed?: boolean;
+	/** Files a lab tool returned by reference (its data stays at the lab until the person saves a copy). */
+	files?: FileRef[];
 	/** Short result for the right edge of the step line, e.g. "120 lines" or "exit 0". */
 	result?: string;
 	/** Longer output shown when the step is opened. */
@@ -217,6 +230,21 @@ export interface SiteSummary {
 	error?: string;
 	/** Connected, but something the person should know (for example: the browser sign-in was refused and the LAN key is in use). */
 	warning?: string;
+	/** From the lab's own description: where to get help and read its docs, and whether it keeps data inside. */
+	support?: string;
+	docs?: string;
+	keepsDataInside?: boolean;
+	/** Sandbox sizes the lab offers. */
+	profiles?: { name: string; cpu: number; memory: string; gpu?: string }[];
+}
+
+/** Something a lab told this person: a job finished, a sandbox is about to stop, a quota is near. */
+export interface LabNotice {
+	site: string;
+	type: string;
+	at: string;
+	text: string;
+	session?: string;
 }
 
 export interface PermissionRequest {
@@ -227,6 +255,8 @@ export interface PermissionRequest {
 	view: StepView;
 	/** Why it asks, in plain words. */
 	reason: string;
+	/** The answer can't be remembered for the session (pushes, unreviewed lab tools): offer allow and deny only. */
+	once?: boolean;
 }
 
 export type PermissionDecision = "allow" | "allow_session" | "deny";
@@ -361,6 +391,12 @@ export interface Requests {
 	"site.add": { params: { name: string; url: string; title?: string; isolated?: boolean }; result: SiteSummary };
 	"site.login": { params: { name: string }; result: SiteSummary };
 	"site.logout": { params: { name: string }; result: { ok: true } };
+	/** Exercise a lab against the lab contract (contract/ in the repository); read-only apart from one throwaway sandbox. */
+	"lab.check": { params: { name: string }; result: { rows: { row: string; status: "pass" | "fail" | "skip"; detail?: string }[] } };
+	/** Use by lab and group over the window (GET /v1/usage). */
+	"lab.usage": { params: { name: string; window?: "7d" | "30d" }; result: unknown };
+	/** Save a file a lab tool returned by reference into the session's project; the checksum is checked when given. */
+	"site.save": { params: { sessionId: string; uri: string; name: string; sha256?: string }; result: { path: string; bytes: number } };
 	"site.refresh": { params: { name?: string }; result: SiteSummary[] };
 	"canvas.list": { params: { sessionId?: string }; result: CanvasSummary[] };
 	"ui.get": { params: Record<string, never>; result: UiPrefs };
@@ -465,6 +501,8 @@ export interface Notifications {
 	"permission.request": PermissionRequest;
 	"permission.settled": { requestId: string; decision: PermissionDecision | "cancelled" };
 	"site.auth": { name: string; url: string; instructions: string };
+	/** A lab's event, in words, for the window and terminal to show. */
+	"lab.notice": LabNotice;
 	/** Open this sign-in page in the system browser (it comes back to the engine on 127.0.0.1). */
 	"provider.auth": { service: string; url: string };
 	"term.output": { termId: string; data: string };

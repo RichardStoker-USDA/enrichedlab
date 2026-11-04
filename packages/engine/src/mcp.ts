@@ -3,7 +3,7 @@
 
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
-import type { AppToolResult, Part } from "@enrichedlab/protocol";
+import type { AppToolResult, FileRef, Part, StepView } from "@enrichedlab/protocol";
 import type { McpView } from "./apps/host.ts";
 import type { McpServerConfig } from "./config.ts";
 import { labFetch } from "./models/http.ts";
@@ -31,7 +31,42 @@ export function toolName(server: string, tool: string): string {
 	return clip(`${safeName(server)}_${safeName(tool)}`, 64).replace(/…$/, "");
 }
 
-type McpContent = { type: string; text?: string; data?: string; mimeType?: string; resource?: { uri?: string; text?: string } };
+type McpContent = {
+	type: string;
+	text?: string;
+	data?: string;
+	mimeType?: string;
+	uri?: string;
+	name?: string;
+	size?: number;
+	_meta?: Record<string, unknown>;
+	resource?: { uri?: string; text?: string };
+};
+
+/** A file returned by reference (MCP resource_link), with the checksum labs put in `_meta`. */
+function fileRef(part: McpContent): FileRef | undefined {
+	if (!part.uri) return undefined;
+	const sha = part._meta?.["org.enrichedlab/sha256"] ?? part._meta?.sha256;
+	const name = part.name || decodeURIComponent(part.uri.split(/[?#]/)[0]!.split("/").filter(Boolean).at(-1) ?? "file");
+	return { uri: part.uri, name, mime: part.mimeType, bytes: typeof part.size === "number" ? part.size : undefined, sha256: typeof sha === "string" && /^[0-9a-f]{64}$/i.test(sha) ? sha.toLowerCase() : undefined };
+}
+
+/** What a lab says about how a result was made, so a person can run it again (docs/labs.md). */
+function receiptText(meta: unknown): string | undefined {
+	const receipt = (meta as Record<string, unknown> | undefined)?.["org.enrichedlab/receipt"] as Record<string, unknown> | undefined;
+	if (!receipt || typeof receipt !== "object") return undefined;
+	const line = (label: string, value: unknown) => (value === undefined ? [] : [`${label}: ${typeof value === "string" ? value : JSON.stringify(value)}`]);
+	return [
+		"How this was made",
+		...line("receipt", receipt.id),
+		...line("inputs", receipt.inputs),
+		...line("code version", receipt.code_version),
+		...line("parameters", receipt.parameters),
+		...line("seed", receipt.seed),
+		...line("image", receipt.image_digest),
+		...line("outputs", receipt.outputs),
+	].join("\n");
+}
 
 type Listed = Awaited<ReturnType<Client["listTools"]>>["tools"][number];
 
@@ -61,7 +96,8 @@ function viewReader(client: Client) {
 	};
 }
 
-function toTools(server: string, client: Client, listed: Listed[], origin: "site" | "local"): Tool[] {
+/** MCP tools as the agent sees them (exported for tests). */
+export function toTools(server: string, client: Client, listed: Listed[], origin: "site" | "local"): Tool[] {
 	const readView = viewReader(client);
 	// A view may call its own server's tools that are visible to apps, and only those.
 	const callFromView = async (name: string, args: Record<string, unknown>): Promise<AppToolResult> => {
@@ -75,23 +111,34 @@ function toTools(server: string, client: Client, listed: Listed[], origin: "site
 		const readOnly = t.annotations?.readOnlyHint === true;
 		const kind: ToolKind = readOnly ? "site-read" : "site-write";
 		const name = toolName(server, t.name);
+		// Labs mark model-extended tools that no person has checked yet (docs/labs.md).
+		const unreviewed = (t._meta as Record<string, unknown> | undefined)?.["org.enrichedlab/tier"] === "unvalidated";
 		return {
 			name,
 			kind,
+			unreviewed,
 			description: `${t.description ?? t.title ?? t.name}${origin === "site" ? ` (from ${server})` : ""}`,
 			parameters: (t.inputSchema as Record<string, unknown>) ?? { type: "object", properties: {} },
-			view: (args) => ({ verb: name, target: clip(Object.values(args).filter((v) => typeof v === "string").join(" ") || t.title || "", 200) }),
+			view: (args) => ({ verb: name, target: clip(Object.values(args).filter((v) => typeof v === "string").join(" ") || t.title || "", 200), ...(unreviewed ? { unreviewed } : {}) }),
 			async run(args, ctx) {
 				const result = await client.callTool({ name: t.name, arguments: args }, { signal: ctx.signal, timeout: 300_000 });
 				const parts = (result.content ?? []) as McpContent[];
 				const texts: string[] = [];
 				const images: Part[] = [];
+				const files: FileRef[] = [];
 				for (const part of parts) {
 					if (part.type === "text" && part.text) texts.push(part.text);
 					else if (part.type === "image" && part.data) images.push({ type: "image", mime: part.mimeType ?? "image/png", data: part.data });
 					else if (part.type === "resource" && part.resource?.text) texts.push(part.resource.text);
-					else if (part.type === "resource_link" || part.type === "resource") texts.push(`[resource ${part.resource?.uri ?? ""}]`);
+					else if (part.type === "resource_link") {
+						const ref = fileRef(part);
+						if (!ref) continue;
+						files.push(ref);
+						// The model gets the reference, never the rows: the person saves a copy when they want one.
+						texts.push(`[file ${ref.name} at ${ref.uri}${ref.mime ? `, ${ref.mime}` : ""}${ref.bytes !== undefined ? `, ${ref.bytes} bytes` : ""}${ref.sha256 ? `, sha256 ${ref.sha256}` : ""}]`);
+					} else if (part.type === "resource") texts.push(`[resource ${part.resource?.uri ?? ""}]`);
 				}
+				const receipt = receiptText(result._meta);
 				if (!texts.length && result.structuredContent) texts.push(JSON.stringify(result.structuredContent, null, 2));
 				const isError = result.isError === true;
 				// MCP Apps: the tool has a view; show it with this call's input and result.
@@ -113,7 +160,10 @@ function toTools(server: string, client: Client, listed: Listed[], origin: "site
 						texts.push(`(Its view couldn't be shown: ${errorText(error)})`);
 					}
 				}
-				return { ok: !isError, content: texts.join("\n\n") || (isError ? "The tool failed." : "(no output)"), images: images.length ? images : undefined, view: { result: isError ? "failed" : "done" } };
+				const view: Partial<StepView> = { result: isError ? "failed" : files.length ? `${files.length} ${files.length === 1 ? "file" : "files"}` : "done" };
+				if (files.length) view.files = files;
+				if (receipt) view.detail = receipt;
+				return { ok: !isError, content: [...texts, ...(receipt ? [receipt] : [])].join("\n\n") || (isError ? "The tool failed." : "(no output)"), images: images.length ? images : undefined, view };
 			},
 		} satisfies Tool;
 	});

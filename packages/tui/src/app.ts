@@ -293,6 +293,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
 		sites = [...sites.filter((s) => s.name !== site.name), site];
 		render();
 	});
+	client.on("lab.notice", (notice) => say(notice.text));
 	client.on("site.auth", (auth) => {
 		say(`Opening your browser to sign in to ${auth.name}. If it doesn't open: ${auth.url}`);
 		openUrl(auth.url);
@@ -464,7 +465,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
 	tui.addInputListener((data) => {
 		if (approvals.length && editor.getText() === "") {
 			if (data === "y" || data === "Y") return void answer("allow"), { consume: true };
-			if (data === "a" || data === "A") return void answer("allow_session"), { consume: true };
+			if ((data === "a" || data === "A") && !approvals[0]?.once) return void answer("allow_session"), { consume: true };
 			if (data === "n" || data === "N") return void answer("deny"), { consume: true };
 		}
 		if (matchesKey(data, "ctrl+o")) {

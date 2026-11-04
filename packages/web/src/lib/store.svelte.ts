@@ -464,6 +464,7 @@ class Lab {
 			const known = this.sites.some((s) => s.name === site.name);
 			this.sites = known ? this.sites.map((s) => (s.name === site.name ? site : s)) : [...this.sites, site];
 		});
+		rpc.on("lab.notice", (notice) => this.say(notice.text));
 		rpc.on("provider.auth", (auth) => {
 			window.open(auth.url, "_blank", "noopener");
 		});

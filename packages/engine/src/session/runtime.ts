@@ -716,6 +716,7 @@ export class SessionRuntime {
 				tool: tool.name,
 				view: safeView(tool, args),
 				reason: this.parent ? `A subagent asks: ${verdict.reason}` : verdict.reason,
+				...(verdict.key.includes("!") ? { once: true } : {}),
 			};
 			this.pending.set(request.requestId, request);
 			this.setActivity("waiting", tool.name);
@@ -723,7 +724,7 @@ export class SessionRuntime {
 			this.pending.delete(request.requestId);
 			if (answer === "cancelled") return { ok: false, content: "Cancelled while waiting for the person.", decision: "refused", tool, args };
 			if (answer === "deny") return { ok: false, content: "The person declined this call. Ask what they would like instead, or take another approach.", decision: "denied", tool, args };
-			if (answer === "allow_session") this.allowed.add(verdict.key);
+			if (answer === "allow_session" && !verdict.key.includes("!")) this.allowed.add(verdict.key);
 			decision = answer === "allow_session" ? "allowed_session" : "allowed";
 			this.setActivity("tool", tool.name);
 		}

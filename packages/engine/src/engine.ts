@@ -2,9 +2,10 @@
 // Surfaces (terminal, desktop, browser, editor bridge) attach over the server in server.ts, or a headless run calls
 // it in-process.
 
-import { existsSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import type {
 	Method,
 	Notification,
@@ -122,7 +123,7 @@ export class Engine {
 			this.reloadConfig();
 			for (const source of this.sites.modelSources()) this.registry.addSource(source);
 			this.emit("site.updated", summary);
-		});
+		}, (notice) => this.emit("lab.notice", notice));
 		this.terminals = new Terminals((name, params) => this.emit(name, params as never));
 		this.canvas = new CanvasStore(this.paths.canvases, () => this.origin(), (summary) => {
 			this.emit("canvas.updated", summary, summary.sessionId);
@@ -725,6 +726,27 @@ export class Engine {
 				case "site.login": {
 					const name = need("name");
 					return this.sites.login(name, (url, instructions) => this.emit("site.auth", { name, url, instructions }));
+				}
+				case "lab.check":
+					return { rows: await this.sites.check(need("name")) };
+				case "lab.usage":
+					return this.sites.usage(need("name"), p.window === "7d" ? "7d" : "30d");
+				case "site.save": {
+					const runtime = this.session(need("sessionId"));
+					if (runtime.workspace.kind !== "local") throw new RpcError(-32602, "Files from a lab are saved into sessions on this computer.");
+					const uri = need("uri");
+					const owner = this.sites.ownerOf(uri);
+					if (!owner?.fetchFile) throw new RpcError(-32602, "That file isn't at a lab you're signed in to.");
+					const bytes = await owner.fetchFile(uri, AbortSignal.timeout(300_000));
+					const expected = typeof p.sha256 === "string" ? p.sha256.toLowerCase() : undefined;
+					if (expected && createHash("sha256").update(bytes).digest("hex") !== expected) throw new RpcError(-32000, "The file that arrived doesn't match its checksum, so it wasn't saved.");
+					// A plain file name in the project; an existing file is never replaced.
+					const base = basename(need("name")).replace(/[^\w.\- ]+/g, "_").replace(/^\.+/, "") || "lab_file";
+					const extension = extname(base);
+					let target = join(runtime.cwd, base);
+					for (let n = 2; existsSync(target); n++) target = join(runtime.cwd, `${base.slice(0, base.length - extension.length)} (${n})${extension}`);
+					writeFileSync(target, bytes, { flag: "wx" });
+					return { path: relative(runtime.cwd, target), bytes: bytes.length };
 				}
 				case "site.logout":
 					this.sites.logout(need("name"));

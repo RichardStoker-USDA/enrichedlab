@@ -1,4 +1,6 @@
 <script lang="ts">
+	import type { FileRef } from "@enrichedlab/protocol";
+	import { rpc } from "../lib/rpc.ts";
 	import type { SessionEvent } from "@enrichedlab/protocol";
 	import { lab } from "../lib/store.svelte.ts";
 
@@ -31,12 +33,29 @@
 
 	const shown = $derived(event?.view?.canvas ? lab.canvases.find((c) => c.id === event!.view!.canvas) : undefined);
 	const openLabel = $derived(shown ? (({ table: "Open table", plot: "Open plot", page: "Open app", image: "Open figure" }) as Record<string, string>)[shown.kind] ?? "Open view" : "Open view");
+
+	// Saving a lab file: the engine fetches it with the lab's sign-in, checks its checksum and writes it into the project.
+	let saving = $state(new Set<string>());
+	let saved = $state(new Map<string, string>());
+	const size = (bytes: number) => (bytes < 1024 ? `${bytes} B` : bytes < 1_048_576 ? `${(bytes / 1024).toFixed(0)} KB` : `${(bytes / 1_048_576).toFixed(1)} MB`);
+	async function save(file: FileRef) {
+		saving = new Set([...saving, file.uri]);
+		try {
+			const result = await rpc.call("site.save", { sessionId: lab.current!, uri: file.uri, name: file.name, sha256: file.sha256 });
+			saved = new Map([...saved, [file.uri, `Saved as ${result.path}`]]);
+		} catch (error) {
+			lab.say((error as Error).message);
+		} finally {
+			saving = new Set([...saving].filter((u) => u !== file.uri));
+		}
+	}
 </script>
 
 <div class="step" class:enter={!event || Date.parse(event.at) > lab.openedAt} class:live class:failed={kind === "failed"} class:waiting={kind === "waiting"} data-state={kind}>
 	<button class="line" onclick={() => hasDetail && (open = !open)} aria-expanded={hasDetail ? open : undefined} disabled={!hasDetail}>
 		<span class="verb">{view.verb}</span>
 		<span class="target" title={view.target}>{view.target}</span>
+		{#if view.unreviewed}<span class="unreviewed" title="The lab hasn't reviewed this tool yet">unreviewed</span>{/if}
 		<span class="result">{result}</span>
 		<span class="mark" aria-label={words[kind]}>{marks[kind]}</span>
 	</button>
@@ -48,6 +67,18 @@
 	{/if}
 	{#if outputTail}
 		<pre class="output">{outputTail}</pre>
+	{/if}
+	{#if event?.view?.files?.length}
+		<!-- Files a lab tool returned by reference: the data stays at the lab until the person saves a copy. -->
+		<ul class="files">
+			{#each event.view.files as file (file.uri)}
+				<li>
+					<span class="file-name" title={file.uri}>{file.name}</span>
+					<span class="file-meta">{[file.mime, file.bytes !== undefined ? size(file.bytes) : "", file.sha256 ? `sha256 ${file.sha256.slice(0, 10)}…` : ""].filter(Boolean).join(" · ")}</span>
+					<button class="canvas-link" disabled={saving.has(file.uri)} onclick={() => save(file)}>{saved.get(file.uri) ?? "Save to project"}</button>
+				</li>
+			{/each}
+		</ul>
 	{/if}
 	{#if open && event}
 		<div class="detail">
@@ -200,5 +231,40 @@
 		.result {
 			display: none;
 		}
+	}
+	.unreviewed {
+		flex: none;
+		font-size: 11px;
+		color: var(--text-muted);
+		border: 1px solid var(--rule-strong);
+		border-radius: 4px;
+		padding: 0 5px;
+		line-height: 16px;
+	}
+	.files {
+		list-style: none;
+		margin: 4px 0 6px;
+		padding: 0;
+		font-size: 12.5px;
+	}
+	.files li {
+		display: flex;
+		align-items: baseline;
+		gap: 10px;
+		padding: 3px 0;
+	}
+	.file-name {
+		font-family: var(--font-mono);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		min-width: 0;
+	}
+	.file-meta {
+		flex: 1;
+		color: var(--text-faint);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 </style>

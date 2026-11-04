@@ -9,19 +9,33 @@ that only takes what passed there.
 
 ## What a lab serves
 
-| Endpoint | Purpose | State |
+The shapes are JSON Schemas in [contract/](../contract/); this table says what each endpoint is for. A lab names the
+endpoints it serves in its descriptor, and `el lab check <lab>` exercises each one against the schemas (pass, fail or
+skip per row, non-zero exit on a failure), so a lab can gate its own releases on it. Two labs serving the same contract
+look the same to EnrichedLab.
+
+| Endpoint | Purpose | Client |
 | --- | --- | --- |
+| `GET /.well-known/enrichedlab-lab` | the descriptor: contract version (`2026-11`), title, endpoints served, sign-in kind, policy, help and docs links, sandbox profiles | reads it on connect; refuses another contract major |
 | Sign-in | OAuth 2.1 through Cloudflare Access managed OAuth: discovery (RFC 9728, RFC 8414), client registration (RFC 7591), PKCE, a token bound to the lab (RFC 8707) | built |
-| `GET /v1/me` | the person, their groups and roles, quotas, and the lab's policy (keeps data inside or not) | built |
-| `GET /v1/models` | the models this person may use, with context, output limit and reasoning levels | built |
+| `GET /v1/me` | a stable pseudonymous `subject` (never an email), memberships (lab, research group, roles), policy | built, with ETag |
+| `GET /v1/models` | the models this person may use, with context, output limit and reasoning levels | built, with ETag |
 | `POST /mcp` | MCP tools, filtered per person; MCP 2026-07-28 stateless, so any replica answers any request | built |
-| `/v1/containers` | the person's sandbox: run, background jobs, files in and out | built |
-| `GET /v1/bundles` | skills, instructions, MCP servers and apps granted by role | client built, lab endpoint to add |
-| `GET /v1/events` | server-sent events for the person: job finished, sandbox expiring, app published | to add |
-| `/v1/containers/{id}/attach`, `/ports/{port}` | a long-lived stdio stream and a port tunnel into the sandbox, for app backends and Shiny | to add |
+| `/v1/containers` | the person's sandbox: run, background jobs, files in and out; `profile` picks a size | built |
+| `GET /v1/bundles` | skills, instructions, MCP servers and apps granted by role | built, with ETag |
+| `GET /v1/events` | server-sent events with a commit-ordered `id`; resume with `Last-Event-ID`; a cursor older than the history kept gets `event: reset` | built: shown as notices; cursor kept across restarts |
+| `POST /v1/guard` | the lab's classifiers: `{stage, text, session?, tool?}` → `{decision, categories, reasons, policy_version, receipt_id}` | checked by `el lab check`; sessions call it next |
+| `GET /v1/usage` | tokens, GPU and sandbox seconds by lab and group, for a 7- or 30-day window | `el usage <lab>` |
+| `POST /v1/devices` | registers the client's device key (ES256) for sender-bound tokens; `DELETE /v1/devices/{id}` revokes one | to add |
+| `/v1/containers/{id}/attach`, `/ports/{port}` | stdio over a WebSocket, and an HTTP and WebSocket proxy into the sandbox, for app backends and Shiny | to add |
 | `/v1/apps`, `/v1/signers` | the apps a group may install, and whose signatures to trust | to add |
-| `POST /v1/guard` | the lab's input and output classifiers, for sessions bound to it | to add |
-| `POST /v1/devices` | registers the client's device key for sender-bound tokens | to add |
+
+Tools and results carry two markers. `_meta["org.enrichedlab/tier"]: "unvalidated"` marks a tool no person has
+reviewed yet: EnrichedLab shows it as unreviewed and asks before every call, in every permission mode. Data tools return
+files as references (MCP `resource_link` with `_meta["org.enrichedlab/sha256"]`), never rows through the model, plus
+`_meta["org.enrichedlab/receipt"]` on the result (inputs, code version, parameters, seed, image digest, outputs), so a
+scientist can see how a result was made and run it again. The person saves a copy into their project with the checksum
+checked.
 
 ## Who gets what
 

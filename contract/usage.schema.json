@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Use by lab and group: GET /v1/usage?window=7d|30d",
+  "type": "object",
+  "required": ["window", "rows"],
+  "properties": {
+    "window": { "type": "string", "enum": ["7d", "30d"] },
+    "rows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["lab", "tokens", "gpu_seconds", "sandbox_seconds"],
+        "properties": {
+          "lab": { "type": "string" },
+          "research_group": { "type": "string" },
+          "tokens": { "type": "object", "required": ["input", "output"], "properties": { "input": { "type": "integer", "minimum": 0 }, "output": { "type": "integer", "minimum": 0 } } },
+          "gpu_seconds": { "type": "number", "minimum": 0 },
+          "sandbox_seconds": { "type": "number", "minimum": 0 }
+        }
+      }
+    }
+  }
+}

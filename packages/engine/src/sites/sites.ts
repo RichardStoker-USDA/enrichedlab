@@ -4,7 +4,7 @@
 
 import { existsSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import type { SiteSummary } from "@enrichedlab/protocol";
+import type { LabNotice, SiteSummary } from "@enrichedlab/protocol";
 import type { ModelProfile } from "../models/types.ts";
 import type { Paths } from "../paths.ts";
 import type { Tool } from "../tools/types.ts";
@@ -12,6 +12,7 @@ import { errorText, expandHome, readJson, readSecret, redact, writeJson } from "
 import { syncSiteBundles } from "../bundles.ts";
 import type { ModelSource } from "../models/registry.ts";
 import { SITE_KINDS, type SiteAdapter } from "./adapter.ts";
+import type { CheckRow, LabEvent } from "./contract.ts";
 import type { SandboxApi } from "./sandbox_workspace.ts";
 import { login, refresh, type SavedClient, type SiteCredentials } from "./oauth.ts";
 
@@ -67,10 +68,65 @@ export class Sites {
 	/** Sandboxes whose site couldn't be reached on the last connect; the next connect picks them up. */
 	private parked = new Map<string, string>();
 
+	/** Event streams being followed, one per connected lab. */
+	private following = new Map<string, () => void>();
+
 	constructor(
 		private p: Paths,
 		private onChange: (summary: SiteSummary) => void,
+		private onNotice: (notice: LabNotice) => void = () => undefined,
 	) {}
+
+	/** Where each lab's event cursor is kept, so a restart resumes instead of replaying or missing events. */
+	private get cursorFile(): string {
+		return join(this.p.home, "lab_cursors.json");
+	}
+
+	private follow(name: string, adapter: SiteAdapter): void {
+		this.following.get(name)?.();
+		this.following.delete(name);
+		if (!adapter.follow) return;
+		const cursors = readJson<Record<string, string>>(this.cursorFile, {});
+		const stop = adapter.follow(cursors[name], {
+			cursor: (id) => writeJson(this.cursorFile, { ...readJson<Record<string, string>>(this.cursorFile, {}), [name]: id }),
+			reset: () => void this.connect(name).catch(() => undefined),
+			event: (event) => {
+				// What was granted changed: read it again. A revoked sign-in shows as one.
+				if (event.type === "models.changed" || event.type === "bundles.changed") void this.connect(name).catch(() => undefined);
+				const title = this.title(name);
+				const text = noticeText(title, event);
+				if (text) this.onNotice({ site: name, type: event.type, at: event.at, text, session: event.session });
+				if (event.type === "signin.revoked") this.logout(name);
+			},
+		});
+		this.following.set(name, stop);
+	}
+
+	/** The lab adapter serving `uri`, for saving a file a lab tool returned by reference. */
+	ownerOf(uri: string): SiteAdapter | undefined {
+		for (const [name, adapter] of this.adapters) {
+			const state = this.states.get(name);
+			const bases = [state?.route?.base, origin(state?.config.url ?? "")].filter(Boolean) as string[];
+			if (bases.some((b) => uri === b || uri.startsWith(`${b}/`))) return adapter;
+		}
+		return undefined;
+	}
+
+	/** `el lab check`: connect if needed, then run the lab's conformance rows. */
+	async check(name: string): Promise<CheckRow[]> {
+		if (!this.adapters.has(name)) await this.connect(name);
+		const adapter = this.adapters.get(name);
+		if (!adapter) throw new Error(this.states.get(name)?.error ?? `Couldn't connect to ${name}.`);
+		if (!adapter.check) throw new Error(`${this.title(name)} can't be checked by this version.`);
+		return adapter.check();
+	}
+
+	async usage(name: string, window: "7d" | "30d"): Promise<unknown> {
+		if (!this.adapters.has(name)) await this.connect(name);
+		const adapter = this.adapters.get(name);
+		if (!adapter?.usage) throw new Error(`${this.title(name)} doesn't report usage.`);
+		return adapter.usage(window);
+	}
 
 	configs(): SiteConfig[] {
 		return readJson<{ sites?: SiteConfig[] }>(this.p.sites, {}).sites ?? [];
@@ -175,6 +231,8 @@ export class Sites {
 	}
 
 	logout(name: string): void {
+		this.following.get(name)?.();
+		this.following.delete(name);
 		rmSync(this.credPath(name), { force: true });
 		this.adapters.get(name)?.close();
 		this.adapters.delete(name);
@@ -203,6 +261,7 @@ export class Sites {
 			try {
 				await adapter.connect();
 				this.adapters.set(name, adapter);
+				this.follow(name, adapter);
 				if (adapter.bundles) {
 					try {
 						syncSiteBundles(this.p, name, await adapter.bundles());
@@ -243,6 +302,20 @@ export class Sites {
 			sandbox: state.sandbox,
 			error: state.error,
 			warning: state.warning,
+			...this.described(state.config.name),
+		};
+	}
+
+	/** What the lab's own description adds to its summary. */
+	private described(name: string): Partial<SiteSummary> {
+		const d = this.adapters.get(name)?.descriptor;
+		if (!d) return {};
+		return {
+			...(this.configs().find((c) => c.name === name)?.title ? {} : { title: d.title }),
+			support: d.support?.url,
+			docs: d.docs?.url,
+			keepsDataInside: d.policy?.keep_data_inside,
+			profiles: d.sandbox_profiles?.map(({ name: profile, cpu, memory, gpu }) => ({ name: profile, cpu, memory, ...(gpu ? { gpu } : {}) })),
 		};
 	}
 
@@ -292,7 +365,36 @@ export class Sites {
 	}
 
 	async close(): Promise<void> {
+		for (const stop of this.following.values()) stop();
+		this.following.clear();
 		await Promise.all([...this.adapters.values()].map((a) => a.close()));
+	}
+}
+
+/** An event in words. Events that only refresh what's granted say nothing. */
+function noticeText(lab: string, e: LabEvent): string | undefined {
+	const said = typeof e.text === "string" && e.text ? e.text : typeof e.summary === "string" && e.summary ? e.summary : undefined;
+	switch (e.type) {
+		case "job.finished":
+			return `${lab}: a sandbox job ${e.status === "failed" ? "failed" : "finished"}${said ? `: ${said}` : "."}`;
+		case "agent.finished":
+			return `${lab}: the lab's agent ${e.status === "failed" ? "couldn't finish" : "finished"}${said ? `: ${said}` : "."}`;
+		case "sandbox.idle_stopping":
+			return `${lab}: your sandbox stops in 10 minutes if it stays idle. Files stay.`;
+		case "sandbox.stopped":
+			return `${lab}: your sandbox stopped. Its files are kept; it starts again when you use it.`;
+		case "sandbox.archived":
+			return `${lab}: an old sandbox was archived${typeof e.delete_after === "string" ? `; the archive is kept until ${e.delete_after.slice(0, 10)}` : ""}.`;
+		case "quota.warning":
+			return `${lab}: you've used ${typeof e.used === "number" && typeof e.limit === "number" ? `${Math.round((e.used / e.limit) * 100)}%` : "most"} of your ${typeof e.kind === "string" ? e.kind : "allowance"}.`;
+		case "app.published":
+			return `${lab}: a new app is available${said ? `: ${said}` : ""}. Find it under Apps.`;
+		case "ticket.updated":
+			return `${lab}: your help request was updated${said ? `: ${said}` : "."}`;
+		case "signin.revoked":
+			return `${lab} ended your sign-in. Sign in again to keep using it.`;
+		default:
+			return said ? `${lab}: ${said}` : undefined;
 	}
 }
 

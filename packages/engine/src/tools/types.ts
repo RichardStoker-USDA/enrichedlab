@@ -57,6 +57,8 @@ export interface Tool<A = Record<string, unknown>> {
 	description: string;
 	parameters: Record<string, unknown>;
 	kind: ToolKind;
+	/** A lab marked this tool unreviewed (model-extended, not checked by a person): it asks every time, in every mode. */
+	unreviewed?: boolean;
 	/** The step line, before it runs (also what a permission question shows). */
 	view(args: A): StepView;
 	/** Extra reason to ask even when the kind would run, e.g. a path outside the project. */

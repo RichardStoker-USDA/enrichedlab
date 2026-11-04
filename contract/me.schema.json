@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "The signed-in person: GET /v1/me",
+  "type": "object",
+  "required": ["subject", "memberships"],
+  "properties": {
+    "subject": { "type": "string", "minLength": 8, "not": { "pattern": "@" } },
+    "handle": { "type": "string" },
+    "idp": { "type": "string" },
+    "assurance": { "type": "string" },
+    "owner": { "type": "boolean" },
+    "memberships": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["lab", "roles"],
+        "properties": { "lab": { "type": "string" }, "research_group": { "type": "string" }, "roles": { "type": "array", "items": { "type": "string" } } }
+      }
+    },
+    "policy": { "type": "object", "properties": { "keep_data_inside": { "type": "boolean" } } },
+    "files": { "type": "object", "properties": { "enabled": { "type": "boolean" } } },
+    "sandboxes": { "type": "object", "properties": { "enabled": { "type": "boolean" }, "idle_minutes": { "type": "integer" } } },
+    "quotas": { "type": "array" }
+  }
+}

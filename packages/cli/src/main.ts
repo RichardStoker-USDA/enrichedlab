@@ -34,29 +34,32 @@ import { openBrowser, openSurface } from "./open.ts";
 
 const HELP = `EnrichedLab ${VERSION}
 
-  el                        open the terminal surface in this folder
+  el                              open the terminal surface in this folder
       --site <name>               work with one site only: its tools and models, and no other site's
       --worktree                  work on a new branch in its own git worktree, away from your checkout
-  el app                    open the desktop or browser surface
-  el run "prompt"           run one task without a surface and print the answer
+  el app                          open the desktop or browser surface
+  el run "prompt"                 run one task without a surface and print the answer
       --model <ref>  --effort <level>  --site <name>  --worktree  --json
       --allow                     run commands and edits without asking
       --push                      let it push to a remote (refused otherwise, even with --allow)
-  el worktrees [--prune]    worktrees sessions made in this repository; --prune removes merged ones
+  el worktrees [--prune]          worktrees sessions made in this repository; --prune removes merged ones
 
-  el login <site>           sign in to a site in your browser
+  el login <site>                 sign in to a site in your browser
   el logout <site>
   el site add <name> <https://address> [--title "<Lab name>"] [--lan <https://address> --key <file> --ca <file>] [--isolated]
                                   --isolated: research data; its sessions work in its sandbox with its models only
   el site rename <name> <new-name> [--title "Display name"]
-  el sites                  sites, who you are on each, and what they grant
+  el sites                        sites, who you are on each, and what they grant
+  el lab check <lab> [--json]     check a lab against the lab contract (for people who run labs)
+  el usage <lab> [--window 7d|30d]
+                                  your use of a lab: tokens, GPU and sandbox hours
 
-  el bundles                installed add-ons (skills, instructions, MCP servers, hooks)
+  el bundles                      installed add-ons (skills, instructions, MCP servers, hooks)
   el bundle add <folder | https git address>
                                   install one; a Claude Code plugin folder works too
   el bundle remove <name>
 
-  el apps                   your apps: installed, from bundles, and opened in projects
+  el apps                         your apps: installed, from bundles, and opened in projects
   el app new <name> [--template data|blank|shiny|shiny-python]
                                   start an app in ./apps/<name>; the agent can build it with you
   el app pack <folder> [--out <folder>]
@@ -65,13 +68,13 @@ const HELP = `EnrichedLab ${VERSION}
                                   check and install one; --trust accepts a signer you haven't used before
   el app remove <name>
 
-  el models [--refresh]     models you can use now
-  el model <ref> [effort]   set the default model
-  el sessions               recent sessions in this folder (--all for every folder)
-  el service add chatgpt    use your ChatGPT plan (sign in in the browser; --new adds another account)
-  el service add <service>  use your own key: openai, anthropic, gemini, openrouter, custom --address <url>
-  el doctor                 check the setup
-  el update [--check]       install the newest release (signed; no administrator)
+  el models [--refresh]           models you can use now
+  el model <ref> [effort]         set the default model
+  el sessions                     recent sessions in this folder (--all for every folder)
+  el service add chatgpt          use your ChatGPT plan (sign in in the browser; --new adds another account)
+  el service add <service>        use your own key: openai, anthropic, gemini, openrouter, custom --address <url>
+  el doctor                       check the setup
+  el update [--check]             install the newest release (signed; no administrator)
   el engine status|stop|restart
   el serve [--foreground] [--port N]
 
@@ -133,7 +136,7 @@ interface Flags {
 }
 
 /** Flags that take the next word as their value; every other flag is a switch. */
-const VALUE_FLAGS = new Set(["address", "name", "model", "effort", "port", "lan", "key", "ca", "cwd", "session", "site", "title", "template", "out"]);
+const VALUE_FLAGS = new Set(["address", "name", "model", "effort", "port", "lan", "key", "ca", "cwd", "session", "site", "title", "template", "out", "window"]);
 
 function parse(argv: string[]): { args: string[]; flags: Flags } {
 	const args: string[] = [];
@@ -350,6 +353,36 @@ async function main(): Promise<void> {
 				client.close();
 			}
 			out(`Added ${name}. ${lan ? "It will use the LAN key until you run el login " + name + "." : `Run el login ${name} to sign in.`}`);
+			return;
+		}
+		case "lab": {
+			// el lab check <lab> [--json]: the lab against the lab contract, one row per endpoint.
+			if (rest[0] !== "check" || !rest[1]) fail("el lab check <lab> [--json]");
+			const client = await connect();
+			const { rows } = await client.call("lab.check", { name: rest[1]! });
+			client.close();
+			if (flags.json) out(JSON.stringify(rows, null, 2));
+			else {
+				const width = Math.max(...rows.map((r) => r.row.length));
+				for (const r of rows) out(`${r.status === "pass" ? "pass" : r.status === "fail" ? "FAIL" : "skip"}  ${r.row.padEnd(width)}  ${r.detail ?? ""}`.trimEnd());
+				const failed = rows.filter((r) => r.status === "fail").length;
+				out(`\n${rows.filter((r) => r.status === "pass").length} pass, ${failed} fail, ${rows.filter((r) => r.status === "skip").length} skip`);
+			}
+			process.exit(rows.some((r) => r.status === "fail") ? 1 : 0);
+		}
+		case "usage": {
+			const name = rest[0] ?? fail("el usage <lab> [--window 7d|30d]");
+			const client = await connect();
+			const answer = (await client.call("lab.usage", { name, window: flags.window === "7d" ? "7d" : "30d" })) as {
+				window?: string;
+				rows?: { lab: string; research_group?: string; tokens: { input: number; output: number }; gpu_seconds: number; sandbox_seconds: number }[];
+			};
+			client.close();
+			if (flags.json) return out(JSON.stringify(answer, null, 2));
+			const hours = (s: number) => (s / 3600).toFixed(1);
+			out(`Last ${answer.window ?? "30d"}:`);
+			for (const r of answer.rows ?? []) out(`  ${r.lab}${r.research_group ? ` / ${r.research_group}` : ""}: ${r.tokens.input.toLocaleString()} in, ${r.tokens.output.toLocaleString()} out tokens; ${hours(r.gpu_seconds)} GPU h; ${hours(r.sandbox_seconds)} sandbox h`);
+			if (!answer.rows?.length) out("  nothing yet");
 			return;
 		}
 		case "sites": {

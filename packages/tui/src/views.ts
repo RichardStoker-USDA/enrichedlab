@@ -218,7 +218,7 @@ function preview(args: string): string {
 
 export function permissionView(t: Theme, request: PermissionRequest, waiting = 0): Component {
 	return new Lines((width) => {
-		const lines = ["", `${INDENT}${t.live("▲")} ${t.bold(`Allow ${request.tool}?`)}  ${t.muted(request.reason)}`];
+		const lines = ["", `${INDENT}${t.live("▲")} ${t.bold(`Allow ${request.tool}?`)}${request.view.unreviewed ? ` ${t.bold("[unreviewed]")}` : ""}  ${t.muted(request.reason)}`];
 		const target = request.view.target || "";
 		for (const line of target.split("\n").slice(0, 6)) lines.push(`${INDENT}  ${t.code(truncateToWidth(line, width - 6))}`);
 		const detail = (request.view.diff ?? request.view.detail ?? "").replace(/\s+$/, "").split("\n").filter((l) => l && !l.startsWith("---") && !l.startsWith("+++"));
@@ -227,7 +227,8 @@ export function permissionView(t: Theme, request: PermissionRequest, waiting = 0
 			lines.push(`${INDENT}    ${style(truncateToWidth(line, width - 8))}`);
 		}
 		if (detail.length > 14) lines.push(`${INDENT}    ${t.faint(`… ${detail.length - 14} more lines`)}`);
-		lines.push(`${INDENT}  ${t.bold("y")} ${t.muted("allow once")}   ${t.bold("a")} ${t.muted("allow for this session")}   ${t.bold("n")} ${t.muted("decline")}${waiting ? t.faint(`   ${waiting} more waiting`) : ""}`);
+		const session = request.once ? "" : `   ${t.bold("a")} ${t.muted("allow for this session")}`;
+		lines.push(`${INDENT}  ${t.bold("y")} ${t.muted("allow once")}${session}   ${t.bold("n")} ${t.muted("decline")}${waiting ? t.faint(`   ${waiting} more waiting`) : ""}`);
 		return lines;
 	});
 }

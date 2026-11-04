@@ -3,6 +3,7 @@
 // a research broker is the next kind. Add a kind by writing an adapter and registering it in SITE_KINDS.
 
 import type { BundleGrant } from "../bundles.ts";
+import type { CheckRow, LabDescriptor, LabEvent } from "./contract.ts";
 import type { ModelProfile } from "../models/types.ts";
 import type { Tool } from "../tools/types.ts";
 import { GateSite } from "./gate.ts";
@@ -30,6 +31,16 @@ export interface SiteAdapter {
 	detach(): Promise<string | undefined>;
 	/** Engine shutdown or sign-out: release remote state. */
 	close(): Promise<void>;
+	/** What the lab says about itself at /.well-known/enrichedlab-lab, when it serves that. */
+	readonly descriptor?: LabDescriptor;
+	/** Follow the lab's event stream until stopped; `reset` means re-read what was granted. */
+	follow?(cursor: string | undefined, on: { event(e: LabEvent): void; cursor(id: string): void; reset(): void }): () => void;
+	/** A file the lab returned by reference, if `uri` is one of the lab's own addresses. */
+	fetchFile?(uri: string, signal: AbortSignal): Promise<Uint8Array>;
+	/** Use by lab and group over a window. */
+	usage?(window: "7d" | "30d"): Promise<unknown>;
+	/** Exercise every endpoint the lab lists, for `el lab check`. */
+	check?(): Promise<CheckRow[]>;
 }
 
 export type SiteAdapterFactory = (config: SiteConfig, route: SiteRoute, carried?: string) => SiteAdapter;
