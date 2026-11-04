@@ -100,7 +100,7 @@ export function decide(tool: Tool, args: Record<string, unknown>, workspace: Wor
 
 /** True when the session works in a worktree EnrichedLab made for it. */
 function ownWorktree(workspace: Workspace): boolean {
-	return /[/\\]\.git[/\\]enriched-worktrees[/\\]/.test(workspace.root);
+	return /[/\\]\.git[/\\]enrichedlab-worktrees[/\\]/.test(workspace.root);
 }
 
 /** `git add` and `git commit` (alone or joined with &&) inside a worktree EnrichedLab made for this session. */

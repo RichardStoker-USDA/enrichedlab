@@ -13,8 +13,8 @@ import releaseKey from "../../../config/release_key.json";
 import type { UpdateStatus } from "@enrichedlab/protocol";
 import { readJson, VERSION, writeFileAtomic } from "./util.ts";
 
-/** Where releases live. `ENRICHED_RELEASES` points a test or a lab mirror elsewhere. */
-export const RELEASES = process.env.ENRICHED_RELEASES ?? "https://github.com/RichardStoker-USDA/enrichedlab-harness/releases/latest/download";
+/** Where releases live. `EL_RELEASES` points a test or a lab mirror elsewhere. */
+export const RELEASES = process.env.EL_RELEASES ?? "https://github.com/RichardStoker-USDA/enrichedlab-harness/releases/latest/download";
 
 export interface Manifest {
 	version: string;
@@ -31,8 +31,8 @@ export type InstallKind = UpdateStatus["kind"];
 /** How this copy was installed, from where the running program sits. */
 export function installKind(exec = process.execPath, env = process.env): InstallKind {
 	if (/[/\\]bun(\.exe)?$/.test(exec)) return "source";
-	if (/\.app\/Contents\/Resources\/bin\/enriched$/.test(exec)) return "mac-app";
-	if (/[/\\]resources[/\\]bin[/\\]enriched\.exe$/i.test(exec)) return "windows-app";
+	if (/\.app\/Contents\/Resources\/bin\/el$/.test(exec)) return "mac-app";
+	if (/[/\\]resources[/\\]bin[/\\]el\.exe$/i.test(exec)) return "windows-app";
 	if (env.APPIMAGE) return "appimage";
 	return "binary";
 }
@@ -48,7 +48,7 @@ export function releaseFile(kind: InstallKind, platform = process.platform, arch
 		case "appimage":
 			return `EnrichedLab-linux-${arch}.AppImage`;
 		case "binary":
-			return `enriched-${os}-${arch}${os === "windows" ? ".exe" : ""}`;
+			return `el-${os}-${arch}${os === "windows" ? ".exe" : ""}`;
 		case "source":
 			return undefined;
 	}
@@ -120,7 +120,7 @@ export async function applyUpdate(log: (line: string) => void = () => undefined)
 	const entry = manifest.files[file];
 	if (!newer(manifest.version, VERSION)) throw new Error(`EnrichedLab ${VERSION} is the newest release.`);
 	if (!entry) throw new Error(`Release ${manifest.version} has no ${file}.`);
-	const dir = join(tmpdir(), `enriched-update-${manifest.version}`);
+	const dir = join(tmpdir(), `enrichedlab-update-${manifest.version}`);
 	mkdirSync(dir, { recursive: true });
 	const download = join(dir, file);
 	log(`Downloading ${file} (${(entry.bytes / 1_048_576).toFixed(0)} MB)`);

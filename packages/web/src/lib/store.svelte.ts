@@ -197,7 +197,7 @@ class Lab {
 	// ── Workbench ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 	private restoreLayout(id: string): void {
-		const saved = store.get(`enriched.layout.${id}`);
+		const saved = store.get(`enrichedlab.layout.${id}`);
 		let layout: Node = emptyLayout();
 		try {
 			if (saved) layout = revive(JSON.parse(saved));
@@ -209,13 +209,13 @@ class Lab {
 		if (!saved) for (const view of [...this.canvases].reverse().slice(-8)) layout = openTab(layout, this.tabFor(view));
 		this.layout = layout;
 		const wide = window.matchMedia("(min-width: 1180px)").matches;
-		this.workbench = wide && (store.get(`enriched.bench.${id}`) ?? (groups(layout).some((g) => g.tabs.length) ? "1" : "0")) === "1";
+		this.workbench = wide && (store.get(`enrichedlab.bench.${id}`) ?? (groups(layout).some((g) => g.tabs.length) ? "1" : "0")) === "1";
 	}
 
 	private saveLayout(): void {
 		if (!this.current) return;
-		store.set(`enriched.layout.${this.current}`, JSON.stringify(this.layout));
-		store.set(`enriched.bench.${this.current}`, this.workbench ? "1" : "0");
+		store.set(`enrichedlab.layout.${this.current}`, JSON.stringify(this.layout));
+		store.set(`enrichedlab.bench.${this.current}`, this.workbench ? "1" : "0");
 	}
 
 	setLayout(layout: Node): void {

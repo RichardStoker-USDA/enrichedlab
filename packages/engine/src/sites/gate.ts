@@ -86,7 +86,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			redirect: "manual",
 			...(streamed ? { duplex: "half" } : {}),
 		} as RequestInit & { ca?: string });
-		if (response.status >= 300 && response.status < 400) throw new Error(`${this.config.name} asked for a sign-in. Run enriched login ${this.config.name}.`);
+		if (response.status >= 300 && response.status < 400) throw new Error(`${this.config.name} asked for a sign-in. Run el login ${this.config.name}.`);
 		if (!response.ok) {
 			const challenge = response.headers.get("www-authenticate") ?? "";
 			if (response.status === 401 && this.route.via === "oauth" && /invalid_token/.test(challenge)) {
@@ -96,7 +96,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			}
 			const detail = ((await response.json().catch(() => undefined)) ?? {}) as { error?: { message?: string } };
 			const message = detail.error?.message ?? `${this.config.name} answered ${response.status}.`;
-			const error = new Error(response.status === 401 ? `${message.replace(/\.$/, "")}. Run enriched login ${this.config.name}.` : message);
+			const error = new Error(response.status === 401 ? `${message.replace(/\.$/, "")}. Run el login ${this.config.name}.` : message);
 			throw Object.assign(error, { status: response.status });
 		}
 		return response;
@@ -223,7 +223,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		const info = await stat(path).catch(() => undefined);
 		if (!info?.isFile()) throw new ToolError(`${path} isn't a file.`);
 		const id = await this.sandbox(signal);
-		const boundary = `enriched-${randomBytes(12).toString("hex")}`;
+		const boundary = `enrichedlab-${randomBytes(12).toString("hex")}`;
 		const name = basename(path).replace(/["\r\n]/g, "_");
 		const head = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${name}"\r\nContent-Type: application/octet-stream\r\n\r\n`);
 		const tail = Buffer.from(`\r\n--${boundary}--\r\n`);
@@ -409,7 +409,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				const dir = typeof args.folder === "string" && args.folder ? args.folder : [...this.sent.keys()].at(-1);
 				const sent = dir ? this.sent.get(dir) : undefined;
 				if (!dir || !sent) throw new ToolError(`No repository was sent to ${site} from this engine${dir ? ` as ${dir}` : ""}.`);
-				const branch = `enriched/${site}-${basename(dir).split("-").at(-1)}`;
+				const branch = `enrichedlab/${site}-${basename(dir).split("-").at(-1)}`;
 				const commits = await fetchRepo(this, dir, sent, branch, ctx.signal);
 				if (!commits.length) return { ok: true, content: `No new commits in ${dir} since it was sent.`, view: { result: "nothing new" } };
 				return {

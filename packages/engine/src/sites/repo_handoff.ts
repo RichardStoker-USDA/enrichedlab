@@ -21,7 +21,7 @@ export interface Sent {
 
 /** Send `repo` into the sandbox folder `dir` on branch work. */
 export async function sendRepo(api: SandboxApi, repo: string, dir: string, signal?: AbortSignal): Promise<Sent & { head: string }> {
-	const scratch = await mkdtemp(join(tmpdir(), "enriched-send-"));
+	const scratch = await mkdtemp(join(tmpdir(), "enrichedlab-send-"));
 	try {
 		const bundle = join(scratch, `${basename(repo)}.bundle`);
 		const pack = packForSend(repo, bundle);
@@ -65,7 +65,7 @@ export async function fetchRepo(api: SandboxApi, dir: string, sent: Pick<Sent, "
 	const result = await api.run(pack, 300, signal);
 	if (result.exitCode !== 0) throw new Error(`The ${api.title} sandbox couldn't pack the work: ${result.stderr || result.stdout}`);
 	if (result.stdout.includes("nothing-new")) return [];
-	const scratch = await mkdtemp(join(tmpdir(), "enriched-fetch-"));
+	const scratch = await mkdtemp(join(tmpdir(), "enrichedlab-fetch-"));
 	try {
 		const local = join(scratch, "work.bundle");
 		await api.get(out, local, signal);

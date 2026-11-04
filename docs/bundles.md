@@ -6,16 +6,16 @@ How EnrichedLab handles git on a person's computer and in a lab sandbox, and how
 ## Git on the person's computer
 
 - **Undo covers everything.** In a git repository every turn starts with a snapshot of the working tree (tracked and
-  untracked files, `.gitignore` honored) as a commit on `refs/enriched/checkpoints/<session>`, written through a
+  untracked files, `.gitignore` honored) as a commit on `refs/enrichedlab/checkpoints/<session>`, written through a
   temporary index. `/undo` restores it, so changes made by shell commands come back too. The person's index, branch
   and history never change. Outside git, undo uses per-file copies.
-- **A worktree per writing agent.** `enriched --worktree` (and every subagent started in mode `full` inside a
-  repository) works in `<repo>/.git/enriched-worktrees/<id>` on its own branch `enriched/<title>-<id>`. Parallel
-  agents never write over each other or the person's checkout. `enriched worktrees` lists them; `--prune` removes the
+- **A worktree per writing agent.** `el --worktree` (and every subagent started in mode `full` inside a
+  repository) works in `<repo>/.git/enrichedlab-worktrees/<id>` on its own branch `enrichedlab/<title>-<id>`. Parallel
+  agents never write over each other or the person's checkout. `el worktrees` lists them; `--prune` removes the
   ones merged into the current branch.
 - **What asks.** In its own worktree the agent edits files and runs `git add` / `git commit` without asking; the
   person reviews the branch when merging. Elsewhere commits ask like any command. `git push` asks in every mode, every
-  time, and "allow for this session" doesn't cover it; `enriched run` refuses pushes unless `--push` is given.
+  time, and "allow for this session" doesn't cover it; `el run` refuses pushes unless `--push` is given.
   `--amend` and `--no-verify` always ask.
 - **Commit messages** follow the prompt's rule: one imperative subject under 80 characters, no AI attribution.
 
@@ -26,8 +26,8 @@ How EnrichedLab handles git on a person's computer and in a lab sandbox, and how
   unpacks it on branch `work` under `/sandbox/work/<repo>-<id>`. Sending asks once.
 - The agent works there with `<site>_sandbox_run` and commits.
 - `<site>_sandbox_repo_fetch` commits anything left uncommitted (as the person, from their git identity), packs the
-  new commits, and fetches them as local branch `enriched/<site>-<id>`. The working folder and other branches don't
-  change; the person reviews with `git diff HEAD...enriched/<site>-<id>` and merges.
+  new commits, and fetches them as local branch `enrichedlab/<site>-<id>`. The working folder and other branches don't
+  change; the person reviews with `git diff HEAD...enrichedlab/<site>-<id>` and merges.
 
 Checked against a lab sandbox running git 2.43: uncommitted work went over, a sandbox commit came back as a
 branch, and `main` was untouched.
@@ -49,12 +49,12 @@ bundle.json                   { "name": "lab-basics", "version": "1.2.0", "descr
 Reading the plugin layout means the existing ecosystem of skills and MCP add-ons installs without conversion; its
 hook matchers are mapped to EnrichedLab tool names (`Bash` to `shell`, `Write` to `write`, `Edit` to `edit`).
 
-- **From the person.** `enriched bundle add <folder | https git address>`, `enriched bundles`,
-  `enriched bundle remove <name>`. Copies go to `~/.enriched/bundles/<name>/` with a sha256 over their files in
-  `~/.enriched/bundles.json`. A running engine reloads at once.
+- **From the person.** `el bundle add <folder | https git address>`, `el bundles`,
+  `el bundle remove <name>`. Copies go to `~/.el/bundles/<name>/` with a sha256 over their files in
+  `~/.el/bundles.json`. A running engine reloads at once.
 - **From a lab.** After sign-in the engine asks the site adapter for grants (Gate: `GET /v1/bundles`, answering
   `{ "data": [{ "name", "version", "files": [{ "path", "content", "base64"? }] }] }` chosen by the person's role,
-  group or project; 404 means none). They land in `~/.enriched/bundles/<site>.<name>/` and leave when the site stops
+  group or project; 404 means none). They land in `~/.el/bundles/<site>.<name>/` and leave when the site stops
   granting them. A site's bundle never runs programs on the person's computer: its hooks and command-started MCP
   servers are dropped. An isolated site's bundles apply only to sessions bound to that site.
 - **Precedence.** The person's own `config.json` wins on any MCP server or model name a bundle also defines. Bundles

@@ -472,7 +472,7 @@ export class SessionRuntime {
 			if (signal.aborted) return;
 			const model = this.model() ?? this.fallbackModel();
 			if (!model) {
-				this.notice("error", "No model is available. Start a local model server, add a provider to ~/.enriched/config.json, or sign in to a site with enriched login.");
+				this.notice("error", "No model is available. Start a local model server, add a provider to ~/.el/config.json, or sign in to a site with el login.");
 				return;
 			}
 			if (model.ref !== this.modelRef) this.setModel(model.ref, undefined);

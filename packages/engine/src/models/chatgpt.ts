@@ -3,7 +3,7 @@
 // registers itself for that account and names this computer with a stable host id; later sign-ins reuse the issued
 // client id. Requests go to the Responses API with the account's token, refreshed before it expires.
 //
-// Tokens live in ~/.enriched/credentials/chatgpt.json (owner-only, written whole), one record per account
+// Tokens live in ~/.el/credentials/chatgpt.json (owner-only, written whole), one record per account
 // registration. They never reach a surface: surfaces see the account's label and whether plan use is on.
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";

@@ -12,7 +12,7 @@ any MCP server returns opens here too.
 
 - The agent: `app_create` scaffolds `apps/<name>/` in the project from a template (data, blank, shiny); it edits the
   files with its normal tools and calls `app_open`.
-- The person: `enriched app new <name> [--template data|blank|shiny|shiny-python]`, then open it from the
+- The person: `el app new <name> [--template data|blank|shiny|shiny-python]`, then open it from the
   workbench's Apps menu or ⌘K.
 
 ## R, Python and other tools
@@ -39,7 +39,7 @@ inside that environment, contained; `$PORT` in a served app's command is its por
 
 | Backend | What runs | Contained by |
 | --- | --- | --- |
-| `bun` | a module exporting `tools`, on the Bun runtime inside `enriched` (`BUN_BE_BUN=1`); nothing to install | OS sandbox: writes only to the app's data folder, no network unless `permissions.network` |
+| `bun` | a module exporting `tools`, on the Bun runtime inside `el` (`BUN_BE_BUN=1`); nothing to install | OS sandbox: writes only to the app's data folder, no network unless `permissions.network` |
 | `command` | any MCP server on stdio the person has (`uv run server.py`, `Rscript srv.R`) | the same |
 | `container` | an MCP server on stdio in an image, built from the folder when `build` is set (Docker, Podman or nerdctl) | the container: `--network none` unless allowed, app folder read-only |
 | `serve` | a web app on `$PORT` (R or Python Shiny, Streamlit, a dev server); the page is its address | OS sandbox with loopback only |
@@ -73,8 +73,8 @@ and always `lab_store_get/set` and `lab_session`. `lab.share(text)` tells the mo
 
 ## Sharing
 
-`enriched app pack <folder>` writes `<name>-<version>.labapp`: the files, each file's SHA-256, and an Ed25519
-signature with the person's key (made on first pack, `~/.enriched/keys`). `enriched app add <file>` checks every hash
+`el app pack <folder>` writes `<name>-<version>.labapp`: the files, each file's SHA-256, and an Ed25519
+signature with the person's key (made on first pack, `~/.el/keys`). `el app add <file>` checks every hash
 and the signature and refuses a signer the person hasn't trusted unless given `--trust`. Bundles can carry apps in
 `apps/<name>/`, so a lab grants apps to people by role the way it grants skills.
 

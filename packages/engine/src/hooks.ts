@@ -1,9 +1,9 @@
 // Hooks: the person's own commands around tool calls, configured in config.json:
 //
 //   "hooks": { "beforeTool": [{ "match": "shell|write|edit", "command": "~/bin/check.sh" }],
-//              "afterTool":  [{ "match": "edit", "command": "npx prettier --write \"$ENRICHED_PATH\"" }] }
+//              "afterTool":  [{ "match": "edit", "command": "npx prettier --write \"$EL_PATH\"" }] }
 //
-// A hook gets the call as JSON on stdin and ENRICHED_TOOL / ENRICHED_PATH in its environment, and runs in the project folder.
+// A hook gets the call as JSON on stdin and EL_TOOL / EL_PATH in its environment, and runs in the project folder.
 // Before a call, exit code 2 blocks it and stderr tells the model why. After a call, stdout is added to the result.
 // The same contract as Claude Code hooks, so existing scripts carry over.
 
@@ -44,7 +44,7 @@ function run(hook: HookConfig, call: { tool: string; args: Record<string, unknow
 		const child = spawn(expandHome(hook.command), {
 			cwd,
 			shell: true,
-			env: { ...process.env, ENRICHED_TOOL: call.tool, ENRICHED_PATH: String(call.args.path ?? call.args.to ?? "") },
+			env: { ...process.env, EL_TOOL: call.tool, EL_PATH: String(call.args.path ?? call.args.to ?? "") },
 			stdio: ["pipe", "pipe", "pipe"],
 			windowsHide: true,
 			timeout: (hook.timeout ?? 30) * 1_000,

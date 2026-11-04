@@ -61,7 +61,7 @@ function localShell(cwd: string, cols: number, rows: number, output: (data: stri
 	const shell = process.env.SHELL || "/bin/bash";
 	const proc = Bun.spawn([shell, "-l"], {
 		cwd,
-		env: { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor", ENRICHED_TERMINAL: "1" },
+		env: { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor", EL_TERMINAL: "1" },
 		terminal: { cols, rows, data: (_terminal, data) => output(decoder.decode(data, { stream: true })) },
 	});
 	void proc.exited.then((code) => exit(code));

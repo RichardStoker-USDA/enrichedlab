@@ -14,7 +14,7 @@ export interface ProviderConfig {
 	baseUrl: string;
 	keyFile?: string;
 	keyEnv?: string;
-	/** The key is in the OS credential store (or ~/.enriched/credentials), put there by `provider.add`. */
+	/** The key is in the OS credential store (or ~/.el/credentials), put there by `provider.add`. */
 	keychain?: boolean;
 	/** Signed in through the service's own sign-in instead of a key (ChatGPT plan use). */
 	auth?: "chatgpt";
@@ -82,8 +82,8 @@ export const DEFAULT_CONFIG: LabConfig = {
 	// Agent commands run contained where the OS allows it (macOS Seatbelt, Linux bubblewrap); "off" turns it off.
 	permissions: { mode: "ask", allowCommands: [], sandbox: "workspace" },
 	discovery: { local: true },
-	instructions: { global: ["~/.enriched/AGENTS.md"] },
-	skills: { dirs: ["~/.enriched/skills", ".agents/skills", ".enriched/skills"] },
+	instructions: { global: ["~/.el/AGENTS.md"] },
+	skills: { dirs: ["~/.el/skills", ".agents/skills", ".el/skills"] },
 	hooks: {},
 };
 

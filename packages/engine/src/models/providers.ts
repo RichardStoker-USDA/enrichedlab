@@ -1,6 +1,6 @@
 // Model services a person signs in to with their own key. The key goes to the operating system's credential store
 // (macOS Keychain, Windows Credential Manager, the Linux Secret Service), or to a private file under
-// ~/.enriched/credentials where none is available. config.json records only where the key lives.
+// ~/.el/credentials where none is available. config.json records only where the key lives.
 
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

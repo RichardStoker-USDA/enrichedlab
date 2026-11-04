@@ -90,7 +90,7 @@ export class SandboxWorkspace implements Workspace {
 		if (!info || info.type !== "file") throw new Error(`${this.display(full)} isn't a file.`);
 		// Large files come through the site's download, which streams.
 		if (info.size > 4 * READ_PIECE) {
-			const scratch = await mkdtemp(join(tmpdir(), "enriched-read-"));
+			const scratch = await mkdtemp(join(tmpdir(), "enrichedlab-read-"));
 			try {
 				const local = join(scratch, "file");
 				await this.api.get(full, local);
@@ -113,7 +113,7 @@ export class SandboxWorkspace implements Workspace {
 		const bytes = typeof data === "string" ? Buffer.from(data, "utf8") : data;
 		const dir = shq(posix.dirname(full));
 		if (bytes.length > 4 * PIECE) {
-			const scratch = await mkdtemp(join(tmpdir(), "enriched-write-"));
+			const scratch = await mkdtemp(join(tmpdir(), "enrichedlab-write-"));
 			try {
 				const local = join(scratch, `${randomBytes(4).toString("hex")}-${posix.basename(full)}`);
 				await writeFile(local, bytes);

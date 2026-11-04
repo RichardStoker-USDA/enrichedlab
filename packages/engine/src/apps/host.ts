@@ -3,7 +3,7 @@
 //
 // Where apps come from:
 //   project   a folder with an app.json in a project, opened by the agent (app_open) or the person
-//   library   ~/.enriched/apps/<name>, installed from a package (enriched app add)
+//   library   ~/.el/apps/<name>, installed from a package (el app add)
 //   bundle    <bundle>/apps/<name>, from an installed or site-granted bundle
 //   mcp       a view an MCP server's tool returned (an MCP Apps ui:// resource)
 //
@@ -293,7 +293,7 @@ export class AppHost {
 			const session = params.sessionId ? this.deps.session(params.sessionId) : undefined;
 			const base = session?.project ?? process.cwd();
 			const dir = isAbsolute(params.path) ? params.path : resolve(base, params.path);
-			if (session && relative(session.project, dir).startsWith("..")) throw new Error("Open apps from inside the session's project, or install them with enriched app add.");
+			if (session && relative(session.project, dir).startsWith("..")) throw new Error("Open apps from inside the session's project, or install them with el app add.");
 			app = this.register(dir, "project");
 		} else if (params.id) app = this.find(params.id);
 		else throw new Error("Which app? Give an id or a folder.");

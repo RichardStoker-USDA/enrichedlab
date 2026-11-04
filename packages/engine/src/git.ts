@@ -22,15 +22,15 @@ export function repoRoot(cwd: string): string | undefined {
 	}
 }
 
-/** A branch name from a session title: lowercase words joined by dashes, under the enriched/ prefix. */
+/** A branch name from a session title: lowercase words joined by dashes, under the enrichedlab/ prefix. */
 export function branchFor(sessionId: string, title: string): string {
 	const words = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
-	return `enriched/${words || "session"}-${sessionId.slice(-6)}`;
+	return `enrichedlab/${words || "session"}-${sessionId.slice(-6)}`;
 }
 
 /** Create a worktree on a new branch from the current HEAD. Returns its folder and branch. */
 export function createWorktree(root: string, sessionId: string, title: string): { path: string; branch: string } {
-	const dir = join(root, ".git", "enriched-worktrees");
+	const dir = join(root, ".git", "enrichedlab-worktrees");
 	mkdirSync(dir, { recursive: true });
 	const path = join(dir, sessionId);
 	const branch = branchFor(sessionId, title);
@@ -40,23 +40,24 @@ export function createWorktree(root: string, sessionId: string, title: string): 
 
 /** Remove a worktree the engine made; refuses folders it didn't make. The branch stays unless `dropBranch`. */
 export function removeWorktree(root: string, path: string, branch?: string, dropBranch = false): void {
-	if (!path.includes(join(".git", "enriched-worktrees"))) throw new Error(`${path} isn't a worktree EnrichedLab made.`);
+	// Releases before 0.2 made them under .git/enriched-worktrees.
+	if (![join(".git", "enrichedlab-worktrees"), join(".git", "enriched-worktrees")].some((d) => path.includes(d))) throw new Error(`${path} isn't a worktree EnrichedLab made.`);
 	git(root, ["worktree", "remove", "--force", path]);
 	if (dropBranch && branch) git(root, ["branch", "-D", branch]);
 }
 
 /**
  * Snapshot the working tree (tracked and untracked, honoring .gitignore) as a commit on
- * refs/enriched/checkpoints/<session>, through a temporary index so the person's staging area is untouched.
+ * refs/enrichedlab/checkpoints/<session>, through a temporary index so the person's staging area is untouched.
  * Returns the commit id.
  */
 export function snapshot(cwd: string, sessionId: string, message: string): string {
-	const scratch = mkdtempSync(join(tmpdir(), "enriched-index-"));
+	const scratch = mkdtempSync(join(tmpdir(), "enrichedlab-index-"));
 	try {
 		const env = { GIT_INDEX_FILE: join(scratch, "index") };
 		git(cwd, ["add", "-A", "."], env);
 		const tree = git(cwd, ["write-tree"], env);
-		const ref = `refs/enriched/checkpoints/${sessionId}`;
+		const ref = `refs/enrichedlab/checkpoints/${sessionId}`;
 		let parent: string | undefined;
 		try {
 			parent = git(cwd, ["rev-parse", "--verify", "--quiet", ref]);
@@ -81,7 +82,7 @@ export function restoreSnapshot(cwd: string, commit: string): string[] {
 	const now = snapshot(cwd, "restore-scratch", "before restore");
 	const changed = git(cwd, ["diff", "--name-only", commit, now]).split("\n").filter(Boolean);
 	if (changed.length) {
-		const scratch = mkdtempSync(join(tmpdir(), "enriched-index-"));
+		const scratch = mkdtempSync(join(tmpdir(), "enrichedlab-index-"));
 		try {
 			const env = { GIT_INDEX_FILE: join(scratch, "index") };
 			git(cwd, ["read-tree", commit], env);
@@ -94,7 +95,7 @@ export function restoreSnapshot(cwd: string, commit: string): string[] {
 			rmSync(scratch, { recursive: true, force: true });
 		}
 	}
-	git(cwd, ["update-ref", "-d", "refs/enriched/checkpoints/restore-scratch"]);
+	git(cwd, ["update-ref", "-d", "refs/enrichedlab/checkpoints/restore-scratch"]);
 	return changed;
 }
 
@@ -112,13 +113,13 @@ export function identity(cwd: string): { name: string; email: string } {
 
 /**
  * The repository as it is now, ready to send elsewhere: HEAD plus one commit holding uncommitted and untracked
- * (not ignored) files, with secret-looking files left out. Kept on refs/enriched/send/<id>; the person's index and
+ * (not ignored) files, with secret-looking files left out. Kept on refs/enrichedlab/send/<id>; the person's index and
  * branch are untouched. Writes a bundle of that ref to `bundle`.
  */
 export function packForSend(repo: string, bundle: string): { id: string; ref: string; commit: string; skipped: string[] } {
 	const id = randomBytes(4).toString("hex");
-	const ref = `refs/enriched/send/${id}`;
-	const scratch = mkdtempSync(join(tmpdir(), "enriched-index-"));
+	const ref = `refs/enrichedlab/send/${id}`;
+	const scratch = mkdtempSync(join(tmpdir(), "enrichedlab-index-"));
 	try {
 		const env = { GIT_INDEX_FILE: join(scratch, "index") };
 		let head: string | undefined;
@@ -158,6 +159,6 @@ export function changedSince(cwd: string, commit: string): string[] {
 	try {
 		return git(cwd, ["diff", "--name-only", commit, now]).split("\n").filter(Boolean);
 	} finally {
-		git(cwd, ["update-ref", "-d", "refs/enriched/checkpoints/compare-scratch"]);
+		git(cwd, ["update-ref", "-d", "refs/enrichedlab/checkpoints/compare-scratch"]);
 	}
 }

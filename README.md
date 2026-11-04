@@ -24,7 +24,7 @@ Terminal only, on macOS or Linux:
 curl -fsSL https://github.com/RichardStoker-USDA/enrichedlab-harness/releases/latest/download/install.sh | sh
 ```
 
-Updates are signed and install themselves the same way: the app offers them, `enriched update` applies them.
+Updates are signed and install themselves the same way: the app offers them, `el update` applies them.
 
 ## First run
 
@@ -52,15 +52,15 @@ Updates are signed and install themselves the same way: the app offers them, `en
 ## Terminal
 
 ```sh
-enriched                       # a session in this folder; the window opens when the agent shows something
-enriched app                   # open the window
-enriched run "task"            # one task, no interface; --allow lets it edit and run commands
-enriched login <lab>           # sign in to a lab you've added
-enriched service add gemini    # use your own key for a model service
-enriched doctor                # check the setup
+el                       # a session in this folder; the window opens when the agent shows something
+el app                   # open the window
+el run "task"            # one task, no interface; --allow lets it edit and run commands
+el login <lab>           # sign in to a lab you've added
+el service add gemini    # use your own key for a model service
+el doctor                # check the setup
 ```
 
-`enriched help` lists the rest.
+`el help` lists the rest.
 
 ## For labs and developers
 

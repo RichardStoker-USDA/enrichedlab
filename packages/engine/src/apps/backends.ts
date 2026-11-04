@@ -180,7 +180,7 @@ export async function startBackend(manifest: AppManifest, ctx: BackendContext): 
 			if (!runtime) throw new Error("This app's backend runs in a container, and no container runtime (Docker, Podman, nerdctl) was found.");
 			let image = backend.image;
 			if (backend.build !== undefined) {
-				const tag = `enriched-app-${manifest.name}:${manifest.version.replace(/[^a-zA-Z0-9_.-]/g, "-")}`;
+				const tag = `enrichedlab-app-${manifest.name}:${manifest.version.replace(/[^a-zA-Z0-9_.-]/g, "-")}`;
 				// Async, so a long build never stalls the engine; its output goes to the app's log.
 				const proc = spawn(runtime, ["build", "-q", "-t", tag, join(ctx.dir, backend.build)], { stdio: ["ignore", "pipe", "pipe"] });
 				let tail = "";
@@ -189,7 +189,7 @@ export async function startBackend(manifest: AppManifest, ctx: BackendContext): 
 				if (code !== 0) throw new Error(`Building the app's image failed: ${tail.trim().slice(-600)}`);
 				image = tag;
 			}
-			const name = `enriched-app-${manifest.name}-${Date.now().toString(36)}`;
+			const name = `enrichedlab-app-${manifest.name}-${Date.now().toString(36)}`;
 			const args = [
 				"run", "-i", "--rm", "--name", name,
 				"--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--read-only", "--tmpfs", "/tmp",

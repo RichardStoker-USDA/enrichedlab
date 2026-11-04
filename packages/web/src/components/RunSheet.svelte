@@ -75,8 +75,8 @@
 	/** The answer being written: finished blocks render once, only the tail re-renders as tokens arrive. */
 	const streaming = $derived(splitBlocks(lab.partial.text));
 	const undoable = $derived(lab.status?.undoable ?? []);
-	const project = $derived(lab.summary ? folderName(lab.summary.cwd.replace(/[\\/]\.git[\\/]enriched-worktrees[\\/].*$/, "")) : "");
-	const branch = $derived(/enriched-worktrees/.test(lab.summary?.cwd ?? "") ? "own branch" : "");
+	const project = $derived(lab.summary ? folderName(lab.summary.cwd.replace(/[\\/]\.git[\\/]enrichedlab-worktrees[\\/].*$/, "")) : "");
+	const branch = $derived(/enrichedlab-worktrees/.test(lab.summary?.cwd ?? "") ? "own branch" : "");
 	let thinkingOpen = $state<Record<string, boolean>>({});
 </script>
 

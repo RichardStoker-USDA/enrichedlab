@@ -8,17 +8,23 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, session, shell, WebContentsView } from "electron";
 
-const home = process.env.ENRICHED_HOME ?? join(homedir(), ".enriched");
-const engineFile = join(home, "run", "engine.json");
-const binary = process.platform === "win32" ? "enriched.exe" : "enriched";
+/** The person's EnrichedLab folder. Until the engine moves an older ~/.enriched, that is where it runs. */
+const home = () => {
+	if (process.env.EL_HOME) return process.env.EL_HOME;
+	const current = join(homedir(), ".el");
+	const old = join(homedir(), ".enriched");
+	return !existsSync(current) && existsSync(join(old, "run", "engine.json")) ? old : current;
+};
+const engineFile = () => join(home(), "run", "engine.json");
+const binary = process.platform === "win32" ? "el.exe" : "el";
 
-/** The enriched binary: bundled with the app, else the one the installer put on PATH. */
+/** The el binary: bundled with the app, else the one the installer put on PATH. */
 function labBinary() {
 	const bundled = join(process.resourcesPath ?? "", "bin", binary);
 	if (existsSync(bundled)) return bundled;
 	const candidates = [
 		join(homedir(), ".local", "bin", binary),
-		join(home, "bin", binary),
+		join(home(), "bin", binary),
 		join(process.env.LOCALAPPDATA ?? "", "Programs", "EnrichedLab", "bin", binary),
 	];
 	return candidates.find((p) => existsSync(p)) ?? binary;
@@ -26,7 +32,7 @@ function labBinary() {
 
 function readEngine() {
 	try {
-		const file = JSON.parse(readFileSync(engineFile, "utf8"));
+		const file = JSON.parse(readFileSync(engineFile(), "utf8"));
 		process.kill(file.pid, 0);
 		return file;
 	} catch {
@@ -43,7 +49,7 @@ async function pairUrl(next) {
 			file = readEngine();
 		}
 	}
-	if (!file) throw new Error(`The engine didn't start. Run "enriched doctor" in a terminal.`);
+	if (!file) throw new Error(`The engine didn't start. Run "el doctor" in a terminal.`);
 	for (let attempt = 0; attempt < 30; attempt++) {
 		try {
 			const response = await fetch(`http://127.0.0.1:${file.port}/api/pair?next=${encodeURIComponent(next)}`, {
@@ -178,18 +184,18 @@ async function open(argv) {
 		return { action: "deny" };
 	});
 	// A screenshot run shows the window without taking focus, so it never catches what the person is typing.
-	window.once("ready-to-show", () => (process.env.ENRICHED_SHOT ? window.showInactive() : window.show()));
+	window.once("ready-to-show", () => (process.env.EL_SHOT ? window.showInactive() : window.show()));
 	// The engine stops after 30 idle minutes and gets a new port and key when it starts again: when the page can't
 	// reach it, pair afresh instead of leaving the window on "Reconnecting".
 	window.webContents.on("console-message", (details) => {
 		if (String(details.message ?? "").includes("lab:engine-lost")) void open([]).catch(() => undefined);
 	});
 	await window.loadURL(url);
-	if (process.env.ENRICHED_SHOT) {
-		await new Promise((r) => setTimeout(r, Number(process.env.ENRICHED_SHOT_DELAY) || 2500));
+	if (process.env.EL_SHOT) {
+		await new Promise((r) => setTimeout(r, Number(process.env.EL_SHOT_DELAY) || 2500));
 		const image = await window.webContents.capturePage();
 		const { writeFileSync } = await import("node:fs");
-		writeFileSync(process.env.ENRICHED_SHOT, image.toPNG());
+		writeFileSync(process.env.EL_SHOT, image.toPNG());
 		app.quit();
 	}
 }

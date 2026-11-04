@@ -99,7 +99,7 @@ export type SessionEvent =
 			t: "checkpoint";
 			callId: string;
 			files: { path: string; existed: boolean; blob?: string }[];
-			/** In a git repository: the working tree before the turn, as a commit on refs/enriched/checkpoints. */
+			/** In a git repository: the working tree before the turn, as a commit on refs/enrichedlab/checkpoints. */
 			git?: string;
 	  })
 	/** File changes since the last message were put back. The model is told on its next request. */

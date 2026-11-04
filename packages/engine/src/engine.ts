@@ -276,7 +276,7 @@ export class Engine {
 			const carried = runtime.placement?.carried;
 			let detail = "Files and commands act on this computer again.";
 			if (carried && from !== "local") {
-				const branch = `enriched/${from}-${carried.id}`;
+				const branch = `enrichedlab/${from}-${carried.id}`;
 				const commits = await fetchRepo(this.sandboxFor(from), runtime.workspace.root, carried, branch);
 				detail = commits.length ? `The sandbox's work is on branch ${branch} (${commits.length} commit${commits.length === 1 ? "" : "s"}); merge it to keep going with it.` : "The sandbox had no new commits.";
 			}

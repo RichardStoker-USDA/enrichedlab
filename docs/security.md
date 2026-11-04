@@ -30,7 +30,7 @@ Each release publishes `manifest.json` (version, notes, and every file's size an
 over it. The public key is built into the binary, so a file that doesn't match what the release key signed is never
 installed, wherever it was downloaded from. The private key stays on the release machine.
 
-`enriched update` and the app's update button replace whatever this copy was installed as, without administrator
+`el update` and the app's update button replace whatever this copy was installed as, without administrator
 rights: the macOS package into `~/Applications`, the Windows setup into `%LOCALAPPDATA%\Programs`, the AppImage in
 place, or the plain binary. The engine checks once a day. A release marked as a security fix installs as the app
 quits, without waiting for anyone to click.
@@ -56,7 +56,7 @@ How EnrichedLab maps to the NIST AI Risk Management Framework (AI RMF 1.0) and i
   person meant. Controls: pushes always ask, commits outside the session's worktree ask, an app's permissions are
   shown and granted before its page loads, and messages from apps are marked as the app's, not the person's.
 - **Map.** Each session records where it works, which model answered, every tool call with its arguments and
-  result, permission decisions, and what apps told the model (`~/.enriched/sessions/<id>/log.jsonl`).
+  result, permission decisions, and what apps told the model (`~/.el/sessions/<id>/log.jsonl`).
 - **Measure.** `bun scripts/bench.ts` runs fixed tasks end to end and records pass rate, steps and time per model
   and version. The audit measures known vulnerabilities in what ships.
 - **Manage.** Containment (above), undo for file edits and shell changes in a git repository, worktrees that keep

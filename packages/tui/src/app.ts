@@ -165,7 +165,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
 			const sites = await client.call("site.list", {}).catch(() => []);
 			const placed = [...snap.events].reverse().find((e) => e.t === "place") as Extract<SessionEvent, { t: "place" }> | undefined;
 			const place = !placed || placed.place === "local" ? `${process.platform === "darwin" ? "this Mac" : "this computer"}, contained` : `the ${sites.find((s) => s.name === placed.place)?.title ?? placed.place} sandbox`;
-			const labs = sites.map((s) => `${s.title}${s.signedIn ? ` ${t.muted(`(${s.who ?? "signed in"})`)}` : ` ${t.muted("(sign in: enriched login " + s.name + ")")}`}`);
+			const labs = sites.map((s) => `${s.title}${s.signedIn ? ` ${t.muted(`(${s.who ?? "signed in"})`)}` : ` ${t.muted("(sign in: el login " + s.name + ")")}`}`);
 			transcript.addChild(welcomeView(t, { version: VERSION, place, labs, news: NEWS }));
 		}
 		for (const event of snap.events) {
@@ -302,7 +302,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
 	});
 	// The agent showed something (a plot, a table, an app) or needs the browser: open the window beside the terminal.
 	// "/window off" keeps everything in the terminal.
-	let windowAuto = process.env.ENRICHED_WINDOW !== "off";
+	let windowAuto = process.env.EL_WINDOW !== "off";
 	client.on("surface.wanted", async (want) => {
 		if (want.sessionId !== sessionId || !windowAuto || !options.openWindow) return;
 		const { url } = await client.call("engine.pair", { next: `/#/s/${sessionId}` });
@@ -311,7 +311,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
 	});
 	client.onClose = () => {
 		tui.stop();
-		process.stderr.write("The engine connection closed. Run enriched again to reconnect.\n");
+		process.stderr.write("The engine connection closed. Run el again to reconnect.\n");
 		process.exit(1);
 	};
 
@@ -399,7 +399,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
 			}
 			case "sites": {
 				sites = await client.call("site.refresh", {});
-				if (!sites.length) return say("No sites. Add one: enriched site add <name> <https://address>");
+				if (!sites.length) return say("No sites. Add one: el site add <name> <https://address>");
 				for (const s of sites) say(`${s.name}: ${s.signedIn ? `signed in as ${s.who} (${s.via}); ${s.models} models, ${s.tools} tools${s.sandbox ? ", sandbox" : ""}${s.warning ? `. ${s.warning}` : ""}` : s.error ?? "not signed in"}`);
 				return;
 			}
@@ -419,7 +419,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
 			case "theme": {
 				appearance = arg === "light" ? "light" : arg === "dark" ? "dark" : appearance === "dark" ? "light" : "dark";
 				t = makeTheme(appearance);
-				return say(`Using ${appearance} colors. Restart enriched to redraw earlier lines.`);
+				return say(`Using ${appearance} colors. Restart el to redraw earlier lines.`);
 			}
 			case "help":
 				return say(
@@ -505,5 +505,5 @@ export async function runTui(options: TuiOptions): Promise<void> {
 		if (latest) await openSession(latest.id);
 		else await newSession();
 	} else await newSession();
-	if (!status?.model) say("No model is available yet. Start Ollama or LM Studio, add a provider to ~/.enriched/config.json, or /login a site.", "warn");
+	if (!status?.model) say("No model is available yet. Start Ollama or LM Studio, add a provider to ~/.el/config.json, or /login a site.", "warn");
 }

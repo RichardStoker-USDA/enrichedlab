@@ -1,7 +1,7 @@
 {
   "name": "enrichedlab-desktop",
   "productName": "EnrichedLab",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "description": "The EnrichedLab desktop window",
   "license": "CC0-1.0",
@@ -28,8 +28,8 @@
         "from": "../../dist/stage/${os}-${arch}",
         "to": "bin",
         "filter": [
-          "enriched",
-          "enriched.exe"
+          "el",
+          "el.exe"
         ]
       }
     ],
@@ -45,7 +45,7 @@
       "hardenedRuntime": true,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
-      "x64ArchFiles": "Contents/Resources/bin/enriched",
+      "x64ArchFiles": "Contents/Resources/bin/el",
       "notarize": false
     },
     "win": {

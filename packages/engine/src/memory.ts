@@ -5,7 +5,7 @@
 //   skill_create  a finished multi-step workflow saved as a skill (SKILL.md) the person and agent can reuse. It asks,
 //                 since it writes outside the project.
 //
-// Notes live in ~/.enriched/memory/<project>-<hash>.md, never in the repository; the person can read and edit them.
+// Notes live in ~/.el/memory/<project>-<hash>.md, never in the repository; the person can read and edit them.
 
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -52,7 +52,7 @@ export const skillCreateTool: Tool = {
 	name: "skill_create",
 	kind: "write",
 	description:
-		"Save a finished workflow the person will repeat as a skill in ~/.enriched/skills/<name>/SKILL.md: when to use it and the steps, commands and checks that worked. Offer this after a multi-step task; it asks the person.",
+		"Save a finished workflow the person will repeat as a skill in ~/.el/skills/<name>/SKILL.md: when to use it and the steps, commands and checks that worked. Offer this after a multi-step task; it asks the person.",
 	parameters: {
 		type: "object",
 		properties: {
@@ -64,7 +64,7 @@ export const skillCreateTool: Tool = {
 		additionalProperties: false,
 	},
 	view: (a) => ({ verb: "save skill", target: String(a.name ?? "") }),
-	ask: (a) => `It saves the skill "${String(a.name ?? "")}" to ~/.enriched/skills for every project.`,
+	ask: (a) => `It saves the skill "${String(a.name ?? "")}" to ~/.el/skills for every project.`,
 	async run(args) {
 		const name = str(args, "name");
 		if (!/^[a-z0-9][a-z0-9-]{1,63}$/.test(name)) throw new ToolError("Name skills with lowercase letters, digits and dashes.");

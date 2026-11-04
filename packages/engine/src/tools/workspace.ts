@@ -120,13 +120,13 @@ function sandboxer(): Facility | undefined {
 }
 
 /** Folders a contained command may never read: credentials, and the engine's keys, sessions, notes and its run
- * folder (which holds the engine's own key). Installed apps and the app runtime under ~/.enriched stay readable. */
+ * folder (which holds the engine's own key). Installed apps and the app runtime under ~/.el stay readable. */
 const PRIVATE_DIRS = [
 	".ssh", ".secrets", ".aws", ".gnupg", ".config/gcloud", ".kube", ".docker", ".netrc",
 	".npmrc", ".pypirc", ".git-credentials", ".cargo/credentials.toml", ".config/gh", ".claude", ".codex", ".cache/huggingface",
 	".zsh_history", ".bash_history", "Library/Keychains", "Library/Cookies",
 	"Library/Application Support/Google/Chrome", "Library/Application Support/Firefox", "Library/Application Support/com.apple.TCC",
-	".enriched/credentials", ".enriched/keys", ".enriched/sessions", ".enriched/run", ".enriched/memory", ".enriched/canvases", ".enriched/app-data",
+	".el/credentials", ".el/keys", ".el/sessions", ".el/run", ".el/memory", ".el/canvases", ".el/app-data",
 ];
 
 /** What a contained program may reach: nothing, this computer's own loopback (a local web app), or the network. */

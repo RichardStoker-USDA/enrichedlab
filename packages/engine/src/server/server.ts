@@ -1,7 +1,7 @@
 // The engine's door: HTTP and a WebSocket on 127.0.0.1 only.
 //
 //   /rpc            WebSocket, JSON-RPC 2.0 (Lab protocol). Bearer token, or the session cookie from a pairing.
-//   /pair/<code>    a one-time code from `enriched app` becomes an HttpOnly, SameSite=Strict cookie, then a redirect
+//   /pair/<code>    a one-time code from `el app` becomes an HttpOnly, SameSite=Strict cookie, then a redirect
 //   /               the web surface (the desktop shell loads the same page)
 //   /canvas/<id>    a canvas, served with a sandbox policy so its scripts get an opaque origin
 //
@@ -195,7 +195,7 @@ export class LabServer {
 			const entry = this.pairCodes.get(path.slice(6));
 			this.pairCodes.delete(path.slice(6));
 			if (!entry || entry.expires < Date.now()) {
-				res.writeHead(410, { ...security, "content-type": "text/html; charset=utf-8" }).end(page("This link has expired", "Run <code>enriched app</code> again to open EnrichedLab."));
+				res.writeHead(410, { ...security, "content-type": "text/html; charset=utf-8" }).end(page("This link has expired", "Run <code>el app</code> again to open EnrichedLab."));
 				return;
 			}
 			// Clear any cookie an older version set, store the key for this origin, then go to the app.
@@ -388,7 +388,7 @@ export class LabServer {
 				client = this.surfaceFor(sessionId, capability);
 			}
 		}
-		if (!client) throw new Error(`No EnrichedLab window has this session open; open it there (enriched app) to use the ${capability}.`);
+		if (!client) throw new Error(`No EnrichedLab window has this session open; open it there (el app) to use the ${capability}.`);
 		const target = client;
 		const callId = randomBytes(9).toString("base64url");
 		return new Promise<SurfaceAnswer>((resolve, reject) => {

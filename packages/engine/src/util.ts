@@ -3,10 +3,12 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "n
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-export const VERSION = "0.1.1";
+export const VERSION = "0.2.0";
 
 /** What changed in this version, one line each, newest first. Surfaces show the first lines when a session opens. */
 export const NEWS = [
+	"0.2: the terminal command is now el (el app, el run, el login); settings moved from ~/.enriched to ~/.el.",
+	"Use your ChatGPT plan: Continue with ChatGPT under Model services, or el service add chatgpt.",
 	"0.1.1: Windows commands write only to the project; a quieter start; fixes found by testing on all three systems.",
 	"Ask for an app and the agent builds one that runs beside the session, R and Python Shiny included.",
 	"The agent can use the built-in browser, where your sign-ins persist, and fill PDF forms.",

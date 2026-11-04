@@ -5,7 +5,7 @@
 
 	let { onMenu }: { onMenu: () => void } = $props();
 
-	const recent = $derived([...new Set(lab.sessions.map((s) => s.cwd.replace(/[\\/]\.git[\\/]enriched-worktrees[\\/].*$/, "")))].slice(0, 6));
+	const recent = $derived([...new Set(lab.sessions.map((s) => s.cwd.replace(/[\\/]\.git[\\/]enrichedlab-worktrees[\\/].*$/, "")))].slice(0, 6));
 	let folder = $state("");
 	let place = $state("local");
 	let worktree = $state(false);

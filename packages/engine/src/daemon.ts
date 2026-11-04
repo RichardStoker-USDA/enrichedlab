@@ -91,7 +91,7 @@ export async function serve(options: { port?: number; foreground?: boolean } = {
 	}
 	const token = randomBytes(32).toString("base64url");
 	let server: LabServer | undefined;
-	const engine = new Engine({ paths: p, origin: () => server?.origin ?? "http://127.0.0.1", checkUpdates: process.env.ENRICHED_UPDATES !== "off" });
+	const engine = new Engine({ paths: p, origin: () => server?.origin ?? "http://127.0.0.1", checkUpdates: process.env.EL_UPDATES !== "off" });
 	let idleTimer: ReturnType<typeof setTimeout> | undefined;
 	const armIdle = (clients: number) => {
 		if (idleTimer) clearTimeout(idleTimer);
@@ -161,8 +161,8 @@ export async function ensureEngine(p: Paths = labPaths()): Promise<EngineFile> {
 	if (found && found.version === VERSION) return found;
 	if (found?.busy) {
 		// An engine from another version is in the middle of a turn: use it rather than cut the turn off. The next
-		// start after it goes idle (or `enriched engine restart`) brings up this version.
-		process.stderr.write(`enriched: engine ${found.version} is finishing a turn; using it for now.\n`);
+		// start after it goes idle (or `el engine restart`) brings up this version.
+		process.stderr.write(`el: engine ${found.version} is finishing a turn; using it for now.\n`);
 		return found;
 	}
 	if (found) {

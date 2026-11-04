@@ -1,5 +1,5 @@
 // Bundles: add-ons that give a person skills, instructions, MCP servers, hooks and model settings in one install.
-// A person adds them (`enriched bundle add <folder | https git address>`), or a site grants them after sign-in by
+// A person adds them (`el bundle add <folder | https git address>`), or a site grants them after sign-in by
 // the person's role. Two layouts are read:
 //
 //   bundle.json                  { "name", "version", "description", "skills": "skills", "instructions": "AGENTS.md",

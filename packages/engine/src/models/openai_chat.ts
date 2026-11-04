@@ -105,7 +105,7 @@ export const openaiChat: ModelAdapter = {
 			redirect: "manual",
 		});
 		if (response.status >= 300 && response.status < 400) {
-			throw await httpError(new Response("The service asked for a sign-in. Run enriched login.", { status: 401 }), model.provider);
+			throw await httpError(new Response("The service asked for a sign-in. Run el login.", { status: 401 }), model.provider);
 		}
 		if (!response.ok || !response.body) throw await httpError(response, model.provider);
 

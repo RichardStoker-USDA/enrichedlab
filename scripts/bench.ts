@@ -40,7 +40,7 @@ const results: Record<string, unknown>[] = [];
 
 for (const file of picked) {
 	const scenario = JSON.parse(readFileSync(join(dir, file), "utf8")) as Scenario;
-	const project = mkdtempSync(join(tmpdir(), "enriched-bench-"));
+	const project = mkdtempSync(join(tmpdir(), "enrichedlab-bench-"));
 	for (const [path, text] of Object.entries(scenario.files)) {
 		mkdirSync(dirname(join(project, path)), { recursive: true });
 		writeFileSync(join(project, path), text);

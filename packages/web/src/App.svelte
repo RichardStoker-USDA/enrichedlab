@@ -17,7 +17,7 @@
 	let benchWidth = $state(46);
 	onMount(() => {
 		try {
-			benchWidth = Number(localStorage.getItem("enriched.benchWidth")) || 46;
+			benchWidth = Number(localStorage.getItem("enrichedlab.benchWidth")) || 46;
 		} catch {
 			// Storage blocked: the default width.
 		}
@@ -34,7 +34,7 @@
 		const up = () => {
 			handle.removeEventListener("pointermove", move);
 			try {
-				localStorage.setItem("enriched.benchWidth", String(Math.round(benchWidth)));
+				localStorage.setItem("enrichedlab.benchWidth", String(Math.round(benchWidth)));
 			} catch {
 				// Not remembered.
 			}

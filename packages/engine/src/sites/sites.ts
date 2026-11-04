@@ -167,7 +167,7 @@ export class Sites {
 	/** Browser sign-in. `onAuth` gets the address to open. */
 	async login(name: string, onAuth: (url: string, instructions: string) => void, signal?: AbortSignal): Promise<SiteSummary> {
 		const config = this.configs().find((s) => s.name === name);
-		if (!config) throw new Error(`No site named ${name}. Add it with enriched site add ${name} <address>.`);
+		if (!config) throw new Error(`No site named ${name}. Add it with el site add ${name} <address>.`);
 		const stored = this.creds(name);
 		const result = await login(config.url, { onAuth: ({ url, instructions }) => onAuth(url, instructions ?? ""), signal }, stored.client);
 		this.saveCreds(name, { oauth: result.credentials, client: result.client });
@@ -196,7 +196,7 @@ export class Sites {
 		// A rejected browser sign-in falls back to the LAN key when one is configured, and says so.
 		const routes = [first, first?.via === "oauth" && config.lan ? this.route(config, true) : undefined].filter(Boolean) as SiteRoute[];
 		const factory = Object.hasOwn(SITE_KINDS, config.kind) ? SITE_KINDS[config.kind] : undefined;
-		if (!factory) state.error = `This version of enriched doesn't know sites of kind "${config.kind}".`;
+		if (!factory) state.error = `This version of EnrichedLab doesn't know sites of kind "${config.kind}".`;
 		for (const route of routes) {
 			if (!factory) break;
 			const adapter = factory(config, route, container);

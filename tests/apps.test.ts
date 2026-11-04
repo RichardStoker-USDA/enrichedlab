@@ -92,10 +92,11 @@ describe("app host", () => {
 		await apps.stop();
 	}, 60_000);
 
-	test("contained programs can't read ~/.enriched, except paths passed as readable", () => {
+	test("contained programs can't read ~/.el, except paths passed as readable", () => {
 		if (process.platform !== "darwin") return;
-		const probe = join(homedir(), ".enriched", "run", "contained_probe_codetestfile.txt");
-		mkdirSync(dirname(probe), { recursive: true });
+		const probe = join(homedir(), ".el", "run", "contained_probe_codetestfile.txt");
+		// The real folder: the sandbox rule names it. Anything this test makes there, it removes.
+		const made = mkdirSync(dirname(probe), { recursive: true });
 		writeFileSync(probe, "ok");
 		try {
 			const run = (readable: string[]) => {
@@ -105,7 +106,7 @@ describe("app host", () => {
 			expect(run([])).toBe("");
 			expect(run([probe])).toBe("ok");
 		} finally {
-			rmSync(probe, { force: true });
+			rmSync(made ?? probe, { recursive: true, force: true });
 		}
 	});
 

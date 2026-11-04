@@ -7,7 +7,8 @@ implementations; adding a capability means adding an implementation, not editing
 
 | To add | Write | Register in |
 |---|---|---|
-| A model API (Responses API, Gemini, a new local server) | a `ModelAdapter` (`packages/engine/src/models/types.ts`) | `adapterFor` in `models/registry.ts` |
+| A model API (Gemini's own API, a new local server) | a `ModelAdapter` (`packages/engine/src/models/types.ts`) | `adapterFor` in `models/registry.ts` |
+| A service people sign in to instead of pasting a key (like ChatGPT plans) | a sign-in module beside `models/chatgpt.ts` | `provider.signin` in `engine.ts` |
 | A kind of lab (a research broker, a university gateway) | a `SiteAdapter` (`packages/engine/src/sites/adapter.ts`) | `SITE_KINDS` in the same file |
 | A place tools act | a `Workspace` (`packages/engine/src/tools/workspace.ts`) | `Engine.createSession` |
 | A built-in tool | a `Tool` (`packages/engine/src/tools/types.ts`) with its `kind`, and `touches` if it changes files | `BUILT_IN_TOOLS` in `engine.ts` |
@@ -16,11 +17,20 @@ implementations; adding a capability means adding an implementation, not editing
 | A model service people add with a key | a preset in `packages/engine/src/models/providers.ts` | `PROVIDER_PRESETS` there |
 | A surface (editor bridge, native client) | a client of the Lab protocol (`packages/protocol`) | nothing: it connects to the engine |
 | A web search provider | a branch in `tools/search.ts` | `SearchConfig.provider` |
-| An add-on for people (skills, instructions, MCP servers, hooks, apps) | a bundle folder (`docs/bundles.md`) | `enriched bundle add`, or a site's `bundles()` grant |
+| An add-on for people (skills, instructions, MCP servers, hooks, apps) | a bundle folder (`docs/bundles.md`) | `el bundle add`, or a site's `bundles()` grant |
 | A site that hands out add-ons by role | `bundles()` on its `SiteAdapter` | nothing: `Sites.connect` installs what it returns |
 
-Tools the person adds without code: MCP servers (`mcpServers` in `~/.enriched/config.json`), skills (`~/.enriched/skills/<name>/SKILL.md`
+Tools the person adds without code: MCP servers (`mcpServers` in `~/.el/config.json`), skills (`~/.el/skills/<name>/SKILL.md`
 or `.agents/skills` in a project) and hooks (`hooks.beforeTool` / `hooks.afterTool`).
+
+## Names
+
+| Where | Name |
+|---|---|
+| What people see: the app, installers, window titles, docs | EnrichedLab |
+| The terminal command, its folder and settings variables | `el`, `~/.el` (`%USERPROFILE%\.el`), `EL_*` |
+| What the app leaves elsewhere: git branches and refs, container names, temp folders, browser storage keys | `enrichedlab` (`enrichedlab/<title>-<id>`, `refs/enrichedlab/…`) |
+| This repository | `enrichedlab-harness` (EnrichedLab is the whole platform; this is the app people install) |
 
 ## Rules that keep it changeable
 
@@ -62,7 +72,7 @@ NOTARY_PROFILE=<notarytool profile> bun scripts/release.ts --publish
 It builds the six binaries, the universal macOS app and its home-folder package (signed and notarized), the
 per-user Windows setup, the Linux AppImages, an SBOM, and `manifest.json` signed with the release key
 (`~/.secrets/enriched/release_signing.jwk`; its public half is `config/release_key.json`). `--publish` creates the
-GitHub release that `enriched update` and `install.sh` read. `--security` marks a release as a security fix. The
+GitHub release that `el update` and `install.sh` read. `--security` marks a release as a security fix. The
 version is `VERSION` in `packages/engine/src/util.ts` and the `version` in each `package.json`; the release notes are
 `NEWS` beside it.
 
@@ -73,7 +83,7 @@ Versions are pinned exactly in each `package.json`. To move one:
 1. Read its release notes since the pinned version.
 2. `bun update <name>@<version>` in the package that uses it, then `bun run check` and `bun test tests`.
 3. For `@anthropic-ai/sdk`, recheck the beta names in `models/anthropic.ts` against the API reference; for
-   `@earendil-works/pi-tui`, run `enriched` in a real terminal; for Electron, open the desktop app and a canvas window;
+   `@earendil-works/pi-tui`, run `el` in a real terminal; for Electron, open the desktop app and a canvas window;
    for pixi, update the pinned version and hashes in `apps/environments.ts`.
 4. Commit the version change alone, so it can be reverted alone.
 

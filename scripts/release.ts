@@ -6,7 +6,7 @@
 // macOS: EnrichedLab-mac.pkg, a universal app that installs into ~/Applications with no administrator, signed with
 //   the Developer ID identities in this Mac's keychain and notarized when NOTARY_PROFILE names a notarytool profile.
 // Windows: EnrichedLab-Setup-x64.exe, a per-user installer (%LOCALAPPDATA%\Programs, no administrator).
-// Linux: EnrichedLab-linux-<arch>.AppImage. Every platform: enriched-<os>-<arch> and install.sh for the terminal.
+// Linux: EnrichedLab-linux-<arch>.AppImage. Every platform: el-<os>-<arch> and install.sh for the terminal.
 //
 // The manifest is signed with the release key (RELEASE_KEY, default ~/.secrets/enriched/release_signing.jwk), read
 // only at the moment of signing. Its public half is config/release_key.json, built into every binary.
@@ -35,17 +35,17 @@ mkdirSync(release, { recursive: true });
 
 console.log("Binaries");
 await $`bun ${join(root, "scripts", "build.ts")} --all`.cwd(root);
-for (const name of readdirSync(join(root, "dist", "bin"))) if (name.startsWith("enriched-")) copyFileSync(join(root, "dist", "bin", name), join(release, name));
+for (const name of readdirSync(join(root, "dist", "bin"))) if (name.startsWith("el-")) copyFileSync(join(root, "dist", "bin", name), join(release, name));
 copyFileSync(join(root, "scripts", "install.sh"), join(release, "install.sh"));
 copyFileSync(join(root, "dist", "sbom.cdx.json"), join(release, "sbom.cdx.json"));
 
 const builder = (args: string[]) => $`npx electron-builder ${args}`.cwd(desktop).env({ ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: "true" });
 
 console.log("macOS app (universal)");
-// One universal `enriched` in both halves of the app, so Intel and Apple silicon Macs each run their own slice.
-const fat = join(root, "dist", "stage", "enriched-universal");
-await $`lipo -create ${join(root, "dist", "stage", "mac-arm64", "enriched")} ${join(root, "dist", "stage", "mac-x64", "enriched")} -output ${fat}`;
-for (const arch of ["arm64", "x64"]) copyFileSync(fat, join(root, "dist", "stage", `mac-${arch}`, "enriched"));
+// One universal `el` in both halves of the app, so Intel and Apple silicon Macs each run their own slice.
+const fat = join(root, "dist", "stage", "el-universal");
+await $`lipo -create ${join(root, "dist", "stage", "mac-arm64", "el")} ${join(root, "dist", "stage", "mac-x64", "el")} -output ${fat}`;
+for (const arch of ["arm64", "x64"]) copyFileSync(fat, join(root, "dist", "stage", `mac-${arch}`, "el"));
 rmSync(fat);
 await builder(["--mac", "dir", "--universal", "--publish", "never"]);
 const app = join(built, "mac-universal", "EnrichedLab.app");
@@ -63,7 +63,10 @@ writeFileSync(
 # Link the terminal command for the person installing; the package installs into their home folder only.
 home="\${HOME:-$(eval echo "~$USER")}"
 mkdir -p "$home/.local/bin"
-ln -sf "$home/Applications/EnrichedLab.app/Contents/Resources/bin/enriched" "$home/.local/bin/enriched"
+ln -sf "$home/Applications/EnrichedLab.app/Contents/Resources/bin/el" "$home/.local/bin/el"
+# Releases before 0.2 named the command "enriched"; drop that link when it pointed into this app.
+old="$home/.local/bin/enriched"
+if [ -L "$old" ] && case "$(readlink "$old")" in *EnrichedLab.app*) true ;; *) false ;; esac; then rm -f "$old"; fi
 exit 0
 `,
 	{ mode: 0o755 },

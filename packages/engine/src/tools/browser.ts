@@ -6,7 +6,7 @@ import type { Tool, ToolContext, ToolResult } from "./types.ts";
 import { str, ToolError } from "./types.ts";
 
 async function act(ctx: ToolContext, op: string, args: Record<string, unknown>): Promise<ToolResult> {
-	if (!ctx.surface) throw new ToolError("The browser is in the EnrichedLab app; open this session there (enriched app) and try again.");
+	if (!ctx.surface) throw new ToolError("The browser is in the EnrichedLab app; open this session there (el app) and try again.");
 	const answer = await ctx.surface.call("browser", op, args, ctx.signal);
 	const images = answer.image && ctx.vision ? [{ type: "image" as const, mime: answer.image.mime, data: answer.image.data }] : undefined;
 	return { ok: true, content: answer.text, images, view: { result: answer.text.split("\n")[0]?.slice(0, 120) } };

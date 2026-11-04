@@ -1,7 +1,7 @@
-// App packages: one file to share an app. `enriched app pack <folder>` writes <name>-<version>.labapp, a gzipped tar
+// App packages: one file to share an app. `el app pack <folder>` writes <name>-<version>.labapp, a gzipped tar
 // of the app's files plus .lab/lock.json: every file's SHA-256, signed with the person's Ed25519 key (made on first
-// pack, kept in ~/.enriched/keys). `enriched app add <file>` checks every hash and the signature, refuses a signer it
-// doesn't know unless told to trust it, and installs to ~/.enriched/apps/<name>. Nothing in a package runs at
+// pack, kept in ~/.el/keys). `el app add <file>` checks every hash and the signature, refuses a signer it
+// doesn't know unless told to trust it, and installs to ~/.el/apps/<name>. Nothing in a package runs at
 // install; the app asks for its permissions when it first opens.
 
 import { createHash } from "node:crypto";
@@ -39,7 +39,7 @@ function signedBytes(lock: Lock): Uint8Array<ArrayBuffer> {
 	return new TextEncoder().encode(JSON.stringify({ format: lock.format, name: lock.name, version: lock.version, created: lock.created, files, publicKey: lock.signer?.publicKey ?? null }));
 }
 
-/** The person's signing key, made on first use. The private half never leaves ~/.enriched/keys (mode 600). */
+/** The person's signing key, made on first use. The private half never leaves ~/.el/keys (mode 600). */
 async function signingKey(p: Paths): Promise<{ privateKey: CryptoKey; publicKey: Uint8Array }> {
 	const dir = join(p.home, "keys");
 	const file = join(dir, "app_signing.jwk");

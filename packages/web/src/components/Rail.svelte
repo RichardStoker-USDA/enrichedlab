@@ -11,7 +11,7 @@
 
 	/** A session's project: its repository for worktree sessions, else its folder. */
 	function projectOf(cwd: string): string {
-		const worktree = /^(.*?)[\\/]\.git[\\/]enriched-worktrees[\\/]/.exec(cwd);
+		const worktree = /^(.*?)[\\/]\.git[\\/]enrichedlab-worktrees[\\/]/.exec(cwd);
 		return worktree ? worktree[1]! : cwd;
 	}
 

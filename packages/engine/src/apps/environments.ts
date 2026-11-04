@@ -1,7 +1,7 @@
 // Environments for apps that need R, Python or other tools. An app that ships a pixi.toml (and, once installed, a
 // pixi.lock) gets exactly that environment, built per user from conda-forge into the app's .pixi folder: no
 // administrator, the same on macOS, Linux and Windows, and the same lock a lab sandbox builds its image from.
-// pixi comes from PATH, or is downloaded once into ~/.enriched/tools and checked against the hashes below.
+// pixi comes from PATH, or is downloaded once into ~/.el/tools and checked against the hashes below.
 
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";

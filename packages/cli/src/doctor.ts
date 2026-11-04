@@ -1,4 +1,4 @@
-// enriched doctor: what this machine has, what the engine sees, and what is missing. Configuration only; it makes no
+// el doctor: what this machine has, what the engine sees, and what is missing. Configuration only; it makes no
 // model request.
 
 import { existsSync } from "node:fs";
@@ -27,13 +27,13 @@ export async function doctor(): Promise<void> {
 	line(onPath("rg") ? true : "warn", "ripgrep", onPath("rg") ? "found" : "not found; grep uses the slower built-in search");
 	line(onPath("git") ? true : "warn", "git", onPath("git") ? "found" : "not found");
 	const shell = desktopShell();
-	line(shell ? true : "warn", "Desktop window", shell ?? "not installed; enriched app opens a browser window instead");
+	line(shell ? true : "warn", "Desktop window", shell ?? "not installed; el app opens a browser window instead");
 
 	const engine = new Engine({ paths: p });
 	await engine.start();
 	const models = engine.registry.list();
 	const bySource = (s: string) => models.filter((m) => m.source === s).length;
-	line(models.length > 0, "Models", models.length ? `${bySource("local")} local, ${bySource("config")} configured, ${bySource("site")} from sites` : "none: start Ollama or LM Studio, add a provider, or enriched login <site>");
+	line(models.length > 0, "Models", models.length ? `${bySource("local")} local, ${bySource("config")} configured, ${bySource("site")} from sites` : "none: start Ollama or LM Studio, add a provider, or el login <site>");
 	for (const [name, problem] of engine.registry.problems) line(false, `Provider ${name}`, problem);
 	const preferred = engine.registry.preferred();
 	if (preferred) line(true, "Default model", `${preferred.ref} (${Math.round(preferred.context / 1024)}k context)`);
@@ -43,7 +43,7 @@ export async function doctor(): Promise<void> {
 	for (const [name, problem] of engine.mcp.errors) line(false, `MCP ${name}`, problem);
 	const { checkForUpdate } = await import("@enrichedlab/engine");
 	const update = await checkForUpdate(p.update);
-	line(update.error ? "warn" : !update.latest, "Updates", update.error ? `couldn't check: ${update.error}` : update.latest ? `${update.latest} is out${update.security ? " (security fix)" : ""}: enriched update` : `${update.current} is the newest`);
+	line(update.error ? "warn" : !update.latest, "Updates", update.error ? `couldn't check: ${update.error}` : update.latest ? `${update.latest} is out${update.security ? " (security fix)" : ""}: el update` : `${update.current} is the newest`);
 	const tools = engine.tools();
 	line(true, "Tools", `${tools.length} (${tools.filter((t) => t.kind.startsWith("site")).length} from sites and MCP)`);
 	await engine.stop();

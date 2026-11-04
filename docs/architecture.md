@@ -8,12 +8,12 @@ the interface direction.
 ## Shape
 
 ```text
- terminal          desktop window    browser tab    editor (ACP)    enriched run -p
+ terminal          desktop window    browser tab    editor (ACP)    el run -p
         \               |                 |             /              /
          \______________|_________________|____________/______________/
                                   │  Lab protocol: JSON-RPC 2.0 over WebSocket (loopback, page key or token)
                        ┌──────────┴───────────┐
-                       │   engine (enriched serve) │  one per person, starts on demand, stops when idle
+                       │   engine (el serve) │  one per person, starts on demand, stops when idle
                        ├──────────────────────┤
                        │ sessions: append-only logs, live fan-out to every attached surface
                        │ agent loop: steps, steering, cancel, retries
@@ -38,20 +38,20 @@ the interface direction.
 | `packages/engine` | Everything in the box above |
 | `packages/tui` | The terminal surface |
 | `packages/web` | The browser and desktop surface (Svelte 5), served by the engine |
-| `packages/cli` | The `enriched` command: starts or finds the engine, routes subcommands |
+| `packages/cli` | The `el` command: starts or finds the engine, routes subcommands |
 | `apps/desktop` | The Electron window around the web surface |
 
 ## The engine
 
-**Process.** `enriched` looks for a running engine through `<home>/run/engine.json` (port, token, pid). If there is none,
-it starts `enriched serve` detached and waits for the file. A lock file stops two engines starting at once: it is created
+**Process.** `el` looks for a running engine through `<home>/run/engine.json` (port, token, pid). If there is none,
+it starts `el serve` detached and waits for the file. A lock file stops two engines starting at once: it is created
 complete under its final name, a stale one is moved aside rather than deleted, and the winner checks again. The
 engine binds to 127.0.0.1 on a free port, checks `Host` on every request and `Origin` on WebSocket upgrades, and stops
 after 30 minutes with no surface attached and no turn running. A session no surface has open leaves memory once its
 turn ends; its log stays on disk.
 
-**Home.** `~/.enriched` (`ENRICHED_HOME` overrides): `config.json`, `sites.json`, `credentials/` (owner-only),
-`sessions/<id>/` (log and output handles), `run/`. The same layout on Windows under `%USERPROFILE%\.enriched`.
+**Home.** `~/.el` (`EL_HOME` overrides): `config.json`, `sites.json`, `credentials/` (owner-only),
+`sessions/<id>/` (log and output handles), `run/`. The same layout on Windows under `%USERPROFILE%\.el`.
 
 **Sessions.** A session is an append-only JSONL log in `sessions/<id>/log.jsonl`. Events are `header`, `user`,
 `assistant` (text, reasoning, tool calls, usage, stop reason), `tool`, `elide`, `compaction`, `model`, `title`.
@@ -110,7 +110,7 @@ inside the project after following symlinks. Anything outside the project asks, 
 "Allow for this session" covers a command's program and subcommand (`git commit`), or the exact command for
 interpreters and compound lines. A site tool runs when the site marks it read-only and asks otherwise. Sandbox
 commands run, since the sandbox is isolated. The person answers from whichever surface they are looking at; the
-first answer wins. `enriched run` refuses what would ask, unless started with `--allow`.
+first answer wins. `el run` refuses what would ask, unless started with `--allow`.
 
 **Windows that act.** A surface can say in `hello` what it can do for the engine. The desktop window says
 "browser": the browser tools (`browser_open`, `browser_read`, `browser_click`, `browser_type`, `browser_screenshot`)
@@ -129,7 +129,7 @@ address carries a per-canvas key.
 
 ## Sites
 
-A site is a place that signs a person in and grants them things. `enriched login <name>` with a site address:
+A site is a place that signs a person in and grants them things. `el login <name>` with a site address:
 
 1. Discovery: the site's protected-resource metadata (RFC 9728) names its sign-in server, which describes itself
    (RFC 8414).

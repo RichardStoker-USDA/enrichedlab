@@ -77,7 +77,7 @@ function sbom(): void {
 		bomFormat: "CycloneDX",
 		specVersion: "1.6",
 		version: 1,
-		metadata: { timestamp: new Date().toISOString(), component: { type: "application", name: "enriched", version: VERSION } },
+		metadata: { timestamp: new Date().toISOString(), component: { type: "application", name: "enrichedlab", version: VERSION } },
 		components: deps.map((d) => ({ type: "library", name: d.name, version: d.version, purl: `pkg:npm/${d.name.replace(/^@/, "%40")}@${d.version}` })),
 	};
 	mkdirSync(join(root, "dist"), { recursive: true });

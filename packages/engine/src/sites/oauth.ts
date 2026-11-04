@@ -233,7 +233,7 @@ async function tokens(
 	const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 	if (!response.ok || typeof body.access_token !== "string") {
 		const reason = typeof body.error === "string" ? `: ${body.error}` : "";
-		if (body.error === "invalid_grant") throw new Error("Your sign-in has ended. Run enriched login again.");
+		if (body.error === "invalid_grant") throw new Error("Your sign-in has ended. Run el login again.");
 		throw new Error(`The site's sign-in server refused the token request (${response.status}${reason}).`);
 	}
 	return body as { access_token: string; refresh_token?: string; expires_in?: number };

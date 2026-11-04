@@ -123,10 +123,10 @@ export function noticeView(t: Theme, event: Ev<"notice">): Component {
 const TIPS = [
 	"Esc stops the agent; type while it works and your message joins after the current step.",
 	"/undo puts back what the last turn changed, shell commands included in a git repository.",
-	"enriched --worktree gives a session its own git branch, away from your checkout.",
-	"enriched app opens this session in the desktop window: tables, plots, a browser and a terminal beside it.",
+	"el --worktree gives a session its own git branch, away from your checkout.",
+	"el app opens this session in the desktop window: tables, plots, a browser and a terminal beside it.",
 	"Ctrl+O opens a step's output or diff.",
-	"The agent keeps notes on each project with remember; they live in ~/.enriched/memory.",
+	"The agent keeps notes on each project with remember; they live in ~/.el/memory.",
 ];
 
 /** The opening lines of a new session: name, where work runs, the labs, what's new, and the day's tip. */

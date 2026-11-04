@@ -317,7 +317,7 @@ describe("git", () => {
 		expect(existsSync(join(root, "new.txt"))).toBe(false);
 		expect(run("diff", "--cached", "--name-only")).toBe("a.txt");
 		const wt = createWorktree(root, "s0abc123", "Fix the parser");
-		expect(wt.branch).toBe("enriched/fix-the-parser-abc123");
+		expect(wt.branch).toBe("enrichedlab/fix-the-parser-abc123");
 		expect(existsSync(wt.path)).toBe(true);
 		removeWorktree(root, wt.path, wt.branch, true);
 		expect(existsSync(wt.path)).toBe(false);
@@ -341,7 +341,7 @@ describe("own-branch commits", () => {
 		const config = { permissions: { mode: "ask", allowCommands: [] } } as unknown as LabConfig;
 		const shell = { name: "shell", kind: "exec" } as unknown as Tool;
 		const repo = scratch("own");
-		const tree = join(repo, ".git", "enriched-worktrees", "w1");
+		const tree = join(repo, ".git", "enrichedlab-worktrees", "w1");
 		mkdirSync(tree, { recursive: true });
 		const own = new LocalWorkspace(tree);
 		const plain = new LocalWorkspace(repo);
@@ -384,7 +384,7 @@ describe("repository handoff", () => {
 		git(far, "commit", "-q", "-m", "Add b");
 		const back = join(far, "..", `${sent.id}.bundle`);
 		git(far, "bundle", "create", "-q", back, `${sent.commit}..work`);
-		expect(fetchBundle(repo, back, "refs/heads/work", "enriched/far", sent.commit).map((l) => l.split(" ").slice(1).join(" "))).toEqual(["Add b"]);
+		expect(fetchBundle(repo, back, "refs/heads/work", "enrichedlab/far", sent.commit).map((l) => l.split(" ").slice(1).join(" "))).toEqual(["Add b"]);
 		expect(git(repo, "branch", "--show-current")).toBe("main");
 		expect(readFileSync(join(repo, "a.txt"), "utf8")).toBe("two\n");
 		for (const [key, value] of [["GIT_CONFIG_GLOBAL", saved.global], ["XDG_CONFIG_HOME", saved.xdg]] as const) {
@@ -448,8 +448,8 @@ describe("memory", () => {
 	test("remember adds a dated line to the project's notes outside the repository, and refuses secrets", async () => {
 		const { rememberTool, readNotes, notesPath } = await import("../packages/engine/src/memory.ts");
 		const home = scratch("memory-home");
-		const saved = process.env.ENRICHED_HOME;
-		process.env.ENRICHED_HOME = home;
+		const saved = process.env.EL_HOME;
+		process.env.EL_HOME = home;
 		try {
 			const project = scratch("memory-project");
 			const ctx = { project } as never;
@@ -458,8 +458,8 @@ describe("memory", () => {
 			expect(notesPath(project).startsWith(home)).toBe(true);
 			await expect(rememberTool.run({ note: "api_key = sk-abcdefghijklmnop" }, ctx)).rejects.toThrow();
 		} finally {
-			if (saved === undefined) delete process.env.ENRICHED_HOME;
-			else process.env.ENRICHED_HOME = saved;
+			if (saved === undefined) delete process.env.EL_HOME;
+			else process.env.EL_HOME = saved;
 		}
 	});
 });

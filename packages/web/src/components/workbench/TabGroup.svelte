@@ -6,7 +6,7 @@
 
 	let { group }: { group: Group } = $props();
 
-	const TYPE = "application/x-enriched-tab";
+	const TYPE = "application/x-enrichedlab-tab";
 	let edge = $state<Edge | undefined>();
 	let body: HTMLDivElement | undefined = $state();
 

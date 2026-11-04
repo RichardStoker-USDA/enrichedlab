@@ -1,7 +1,7 @@
-// Build self-contained `enriched` binaries: the web surface is embedded, so each file is the whole product for its
+// Build self-contained `el` binaries: the web surface is embedded, so each file is the whole product for its
 // platform. No runtime to install and nothing that needs administrator rights.
 //
-//   bun scripts/build.ts            this machine only, linked as dist/bin/current/enriched
+//   bun scripts/build.ts            this machine only, linked as dist/bin/current/el
 //   bun scripts/build.ts --all      macOS, Linux and Windows on x64 and arm64
 
 import { createHash } from "node:crypto";
@@ -55,11 +55,11 @@ const sums: string[] = [];
 try {
 	for (const target of targets) {
 		const exe = target.startsWith("windows") ? ".exe" : "";
-		const file = join(out, `enriched-${target}${exe}`);
+		const file = join(out, `el-${target}${exe}`);
 		await $`bun build ${join(root, "packages", "cli", "src", "main.ts")} --compile --minify --sourcemap=none --target=bun-${target} --outfile ${file}`.cwd(root).quiet();
 		const digest = createHash("sha256").update(readFileSync(file)).digest("hex");
-		sums.push(`${digest}  enriched-${target}${exe}`);
-		console.log(`enriched-${target}${exe}  ${(statSync(file).size / 1_048_576).toFixed(0)} MB`);
+		sums.push(`${digest}  el-${target}${exe}`);
+		console.log(`el-${target}${exe}  ${(statSync(file).size / 1_048_576).toFixed(0)} MB`);
 	}
 } finally {
 	rmSync(generated, { force: true });
@@ -78,6 +78,6 @@ for (const target of targets) {
 	const exe = os === "windows" ? ".exe" : "";
 	const stage = join(root, "dist", "stage", `${OS[os]}-${arch}`);
 	mkdirSync(stage, { recursive: true });
-	rmSync(join(stage, `enriched${exe}`), { force: true });
-	copyFileSync(join(out, `enriched-${target}${exe}`), join(stage, `enriched${exe}`));
+	rmSync(join(stage, `el${exe}`), { force: true });
+	copyFileSync(join(out, `el-${target}${exe}`), join(stage, `el${exe}`));
 }

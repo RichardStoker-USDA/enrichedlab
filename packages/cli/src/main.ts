@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// enriched: the EnrichedLab command. With no arguments it opens the terminal surface for the current folder.
+// el: the EnrichedLab command. With no arguments it opens the terminal surface for the current folder.
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -34,55 +34,55 @@ import { openBrowser, openSurface } from "./open.ts";
 
 const HELP = `EnrichedLab ${VERSION}
 
-  enriched                        open the terminal surface in this folder
+  el                        open the terminal surface in this folder
       --site <name>               work with one site only: its tools and models, and no other site's
       --worktree                  work on a new branch in its own git worktree, away from your checkout
-  enriched app                    open the desktop or browser surface
-  enriched run "prompt"           run one task without a surface and print the answer
+  el app                    open the desktop or browser surface
+  el run "prompt"           run one task without a surface and print the answer
       --model <ref>  --effort <level>  --site <name>  --worktree  --json
       --allow                     run commands and edits without asking
       --push                      let it push to a remote (refused otherwise, even with --allow)
-  enriched worktrees [--prune]    worktrees sessions made in this repository; --prune removes merged ones
+  el worktrees [--prune]    worktrees sessions made in this repository; --prune removes merged ones
 
-  enriched login <site>           sign in to a site in your browser
-  enriched logout <site>
-  enriched site add <name> <https://address> [--title "<Lab name>"] [--lan <https://address> --key <file> --ca <file>] [--isolated]
+  el login <site>           sign in to a site in your browser
+  el logout <site>
+  el site add <name> <https://address> [--title "<Lab name>"] [--lan <https://address> --key <file> --ca <file>] [--isolated]
                                   --isolated: research data; its sessions work in its sandbox with its models only
-  enriched site rename <name> <new-name> [--title "Display name"]
-  enriched sites                  sites, who you are on each, and what they grant
+  el site rename <name> <new-name> [--title "Display name"]
+  el sites                  sites, who you are on each, and what they grant
 
-  enriched bundles                installed add-ons (skills, instructions, MCP servers, hooks)
-  enriched bundle add <folder | https git address>
+  el bundles                installed add-ons (skills, instructions, MCP servers, hooks)
+  el bundle add <folder | https git address>
                                   install one; a Claude Code plugin folder works too
-  enriched bundle remove <name>
+  el bundle remove <name>
 
-  enriched apps                   your apps: installed, from bundles, and opened in projects
-  enriched app new <name> [--template data|blank|shiny|shiny-python]
+  el apps                   your apps: installed, from bundles, and opened in projects
+  el app new <name> [--template data|blank|shiny|shiny-python]
                                   start an app in ./apps/<name>; the agent can build it with you
-  enriched app pack <folder> [--out <folder>]
+  el app pack <folder> [--out <folder>]
                                   one signed .labapp file to share
-  enriched app add <file.labapp> [--trust]
+  el app add <file.labapp> [--trust]
                                   check and install one; --trust accepts a signer you haven't used before
-  enriched app remove <name>
+  el app remove <name>
 
-  enriched models [--refresh]     models you can use now
-  enriched model <ref> [effort]   set the default model
-  enriched sessions               recent sessions in this folder (--all for every folder)
-  enriched service add chatgpt    use your ChatGPT plan (sign in in the browser; --new adds another account)
-  enriched service add <service>  use your own key: openai, anthropic, gemini, openrouter, custom --address <url>
-  enriched doctor                 check the setup
-  enriched update [--check]       install the newest release (signed; no administrator)
-  enriched engine status|stop|restart
-  enriched serve [--foreground] [--port N]
+  el models [--refresh]     models you can use now
+  el model <ref> [effort]   set the default model
+  el sessions               recent sessions in this folder (--all for every folder)
+  el service add chatgpt    use your ChatGPT plan (sign in in the browser; --new adds another account)
+  el service add <service>  use your own key: openai, anthropic, gemini, openrouter, custom --address <url>
+  el doctor                 check the setup
+  el update [--check]       install the newest release (signed; no administrator)
+  el engine status|stop|restart
+  el serve [--foreground] [--port N]
 
-Settings and sessions live in ~/.enriched (ENRICHED_HOME moves them).`;
+Settings and sessions live in ~/.el (EL_HOME moves them).`;
 
-/** enriched app new | pack | add | remove | list. */
+/** el app new | pack | add | remove | list. */
 async function appCommand(action: string, target: string | undefined, flags: Flags): Promise<void> {
 	const p = paths();
 	switch (action) {
 		case "new": {
-			const name = target ?? fail("enriched app new <name> [--template data|blank|shiny|shiny-python]");
+			const name = target ?? fail("el app new <name> [--template data|blank|shiny|shiny-python]");
 			const template = (typeof flags.template === "string" ? flags.template : "data") as Template;
 			if (!TEMPLATES.includes(template)) fail(`--template is one of ${TEMPLATES.join(", ")}.`);
 			const dir = resolve("apps", name);
@@ -102,7 +102,7 @@ async function appCommand(action: string, target: string | undefined, flags: Fla
 			return;
 		}
 		case "add": {
-			const file = resolve(target ?? fail("enriched app add <file.labapp> [--trust]"));
+			const file = resolve(target ?? fail("el app add <file.labapp> [--trust]"));
 			const added = await installApp(p, file, { trust: flags.trust === true });
 			const manifest = readManifest(added.dir);
 			out(`Installed ${manifest.title} ${added.version}, signed ${added.fingerprint}${added.newSigner ? " (now trusted)" : ""}.`);
@@ -111,7 +111,7 @@ async function appCommand(action: string, target: string | undefined, flags: Fla
 			return;
 		}
 		case "remove": {
-			if (!removeApp(p, target ?? fail("enriched app remove <name>"))) fail(`No installed app named ${target}.`);
+			if (!removeApp(p, target ?? fail("el app remove <name>"))) fail(`No installed app named ${target}.`);
 			out(`Removed ${target}.`);
 			return;
 		}
@@ -119,12 +119,12 @@ async function appCommand(action: string, target: string | undefined, flags: Fla
 			const client = await connect();
 			const apps = await client.call("app.list", {});
 			client.close();
-			if (!apps.length) out("No apps yet. Start one with enriched app new <name>, or add one with enriched app add <file>.");
+			if (!apps.length) out("No apps yet. Start one with el app new <name>, or add one with el app add <file>.");
 			for (const a of apps) out(`${a.title} ${a.version}  ${a.source}${a.backend ? `  ${a.backend} backend` : ""}${a.granted ? "" : "  (asks when opened)"}\n  ${a.description || a.dir}`);
 			return;
 		}
 		default:
-			fail("enriched app new|pack|add|remove <…>, or enriched apps");
+			fail("el app new|pack|add|remove <…>, or el apps");
 	}
 }
 
@@ -158,11 +158,11 @@ const out = (text: string): void => {
 	process.stdout.write(`${text}\n`);
 };
 const fail = (text: string): never => {
-	process.stderr.write(`enriched: ${text}\n`);
+	process.stderr.write(`el: ${text}\n`);
 	process.exit(1);
 };
 
-async function connect(name = "enriched-cli"): Promise<EngineClient> {
+async function connect(name = "el"): Promise<EngineClient> {
 	const file = await ensureEngine();
 	const client = new EngineClient(file, name);
 	await client.ready();
@@ -177,7 +177,7 @@ async function runHeadless(prompt: string, flags: Flags): Promise<void> {
 		headlessAnswer: (request: PermissionRequest) => {
 			const pushing = request.reason === PUSH_REASON;
 			if (pushing ? push : allow) return "allow";
-			process.stderr.write(`enriched: refused ${request.tool} (${request.reason}): pass ${pushing ? "--push" : "--allow"} to permit\n`);
+			process.stderr.write(`el: refused ${request.tool} (${request.reason}): pass ${pushing ? "--push" : "--allow"} to permit\n`);
 			return "deny";
 		},
 	});
@@ -214,7 +214,7 @@ async function runHeadless(prompt: string, flags: Flags): Promise<void> {
 }
 
 async function main(): Promise<void> {
-	// Windows containment: enriched __contain <writable folders as JSON> -- program args (see windows_contain.ts).
+	// Windows containment: el __contain <writable folders as JSON> -- program args (see windows_contain.ts).
 	if (process.argv[2] === "__contain") {
 		const { runContained, paths } = await import("@enrichedlab/engine");
 		const split = process.argv.indexOf("--");
@@ -241,7 +241,7 @@ async function main(): Promise<void> {
 			return serve({ port: flags.port ? Number(flags.port) : undefined, foreground: flags.foreground === true });
 		case "run": {
 			const prompt = rest.join(" ") || (process.stdin.isTTY ? "" : await new Response(Bun.stdin.stream()).text());
-			if (!prompt.trim()) fail('give a task: enriched run "what does this project do?"');
+			if (!prompt.trim()) fail('give a task: el run "what does this project do?"');
 			return runHeadless(prompt, flags);
 		}
 		case "apps":
@@ -260,7 +260,7 @@ async function main(): Promise<void> {
 			return;
 		}
 		case "login": {
-			const name = rest[0] ?? fail("which site? enriched login <site>");
+			const name = rest[0] ?? fail("which site? el login <site>");
 			const client = await connect();
 			client.on("site.auth", (auth) => {
 				if (auth.name !== name) return;
@@ -285,7 +285,7 @@ async function main(): Promise<void> {
 			const root = repoRoot(process.cwd());
 			if (!root) fail("Not inside a git repository.");
 			const listing = execFileSync("git", ["worktree", "list", "--porcelain"], { cwd: root, encoding: "utf8" });
-			const trees = listing.split("\n\n").map((block) => ({ path: /^worktree (.+)$/m.exec(block)?.[1] ?? "", branch: /^branch refs\/heads\/(.+)$/m.exec(block)?.[1] ?? "" })).filter((t) => t.path.includes("enriched-worktrees"));
+			const trees = listing.split("\n\n").map((block) => ({ path: /^worktree (.+)$/m.exec(block)?.[1] ?? "", branch: /^branch refs\/heads\/(.+)$/m.exec(block)?.[1] ?? "" })).filter((t) => t.path.includes("enrichedlab-worktrees"));
 			const merged = new Set(execFileSync("git", ["branch", "--merged", "HEAD", "--format=%(refname:short)"], { cwd: root, encoding: "utf8" }).split("\n"));
 			if (!trees.length) out("No worktrees from EnrichedLab here.");
 			for (const t of trees) {
@@ -308,14 +308,14 @@ async function main(): Promise<void> {
 				out(`Removed ${target}.`);
 			} else if (action === "list" || action === undefined) {
 				const all = listBundles(paths());
-				if (!all.length) out("No bundles. Add one with enriched bundle add <folder | https git address>.");
+				if (!all.length) out("No bundles. Add one with el bundle add <folder | https git address>.");
 				for (const b of all) out(`${b.name} ${b.version}  ${b.source}\n  ${b.description || "(no description)"}  sha256 ${b.sha256.slice(0, 12)}`);
 				return;
-			} else fail("enriched bundle add <folder | https git address> | enriched bundle remove <name> | enriched bundles");
+			} else fail("el bundle add <folder | https git address> | el bundle remove <name> | el bundles");
 			// A running engine picks the change up now; new sessions see the bundle's skills and instructions.
 			const running = await findEngine();
 			if (running) {
-				const client = new EngineClient(running, "enriched-cli");
+				const client = new EngineClient(running, "el");
 				await client.call("config.reload", {});
 				client.close();
 			}
@@ -324,36 +324,36 @@ async function main(): Promise<void> {
 		case "site": {
 			if (rest[0] === "rename") {
 				const [, from, to] = rest;
-				if (!from || !to) fail('enriched site rename <name> <new-name> [--title "Display name"]');
+				if (!from || !to) fail('el site rename <name> <new-name> [--title "Display name"]');
 				const renamed = new Sites(paths(), () => undefined).rename(from, to, typeof flags.title === "string" ? flags.title : undefined);
 				const running = await findEngine();
 				if (running) {
-					const client = new EngineClient(running, "enriched-cli");
+					const client = new EngineClient(running, "el");
 					await client.call("site.refresh", {});
 					client.close();
 				}
 				out(`${from} is now ${renamed.name}, shown as ${renamed.title ?? renamed.name}. Its tools are named ${renamed.name}_….`);
 				return;
 			}
-			if (rest[0] !== "add") fail("enriched site add <name> <https://address> [--lan <https://address> --key <file> --ca <file>]");
+			if (rest[0] !== "add") fail("el site add <name> <https://address> [--lan <https://address> --key <file> --ca <file>]");
 			const [, name, url] = rest;
-			if (!name || !url) fail("enriched site add <name> <https://address>");
+			if (!name || !url) fail("el site add <name> <https://address>");
 			const sites = new Sites(paths(), () => undefined);
 			const lan = typeof flags.lan === "string" && typeof flags.key === "string" ? { url: flags.lan, keyFile: flags.key, caFile: typeof flags.ca === "string" ? flags.ca : undefined } : undefined;
 			sites.add({ name, title: typeof flags.title === "string" ? flags.title : undefined, url: new URL(url).origin, kind: "gate", lan, isolated: flags.isolated === true || undefined });
 			const running = await findEngine();
 			if (running) {
-				const client = new EngineClient(running, "enriched-cli");
+				const client = new EngineClient(running, "el");
 				await client.call("site.refresh", { name });
 				client.close();
 			}
-			out(`Added ${name}. ${lan ? "It will use the LAN key until you run enriched login " + name + "." : `Run enriched login ${name} to sign in.`}`);
+			out(`Added ${name}. ${lan ? "It will use the LAN key until you run el login " + name + "." : `Run el login ${name} to sign in.`}`);
 			return;
 		}
 		case "sites": {
 			const client = await connect();
 			const list = await client.call("site.refresh", {});
-			if (!list.length) out("No sites yet. Add one with enriched site add <name> <https://address>.");
+			if (!list.length) out("No sites yet. Add one with el site add <name> <https://address>.");
 			for (const s of list) {
 				const state = s.signedIn ? `signed in as ${s.who ?? "?"} (${s.via})` : s.error ? `not connected: ${s.error}` : "not signed in";
 				out(`${s.name}  ${s.url}\n  ${state}; ${s.models} models, ${s.tools} tools${s.sandbox ? ", sandbox" : ""}${s.signedIn && s.warning ? `\n  ${s.warning}` : ""}`);
@@ -402,7 +402,7 @@ async function main(): Promise<void> {
 				for (const a of accounts) out(`chatgpt  ChatGPT plan  ${a.label}${a.active ? " (in use)" : ""}${a.signedIn ? (a.plan ? "" : ", plan use not allowed") : ", signed out"}`);
 				for (const a of added) out(`${a.name}  ${a.label}  ${a.baseUrl}`);
 				if (!added.length && !accounts.length) out("No services added.");
-				out(`\nAdd one: enriched service add <chatgpt|${presets.map((p) => p.id).join("|")}> [--address <url> for custom]`);
+				out(`\nAdd one: el service add <chatgpt|${presets.map((p) => p.id).join("|")}> [--address <url> for custom]`);
 			}
 			client.close();
 			return;
@@ -410,7 +410,7 @@ async function main(): Promise<void> {
 		case "models": {
 			const client = await connect();
 			const { models, default: preferred } = await client.call("model.list", { refresh: flags.refresh === true });
-			if (!models.length) out("No models found. Sign in to your lab (enriched login <lab>), start Ollama or LM Studio, or enriched service add <service>.");
+			if (!models.length) out("No models found. Sign in to your lab (el login <lab>), start Ollama or LM Studio, or el service add <service>.");
 			for (const m of models) {
 				const tags = [`${Math.round(m.context / 1024)}k`, m.vision ? "vision" : "", m.efforts.length ? `effort ${m.efforts.join("/")}` : ""].filter(Boolean).join(", ");
 				out(`${m.ref === preferred ? "*" : " "} ${m.ref}  (${m.source}; ${tags})`);
@@ -420,7 +420,7 @@ async function main(): Promise<void> {
 		}
 		case "model": {
 			const client = await connect();
-			await client.call("model.default", { model: rest[0] ?? fail("enriched model <ref> [effort]"), effort: rest[1] });
+			await client.call("model.default", { model: rest[0] ?? fail("el model <ref> [effort]"), effort: rest[1] });
 			out(`Default model: ${rest[0]}${rest[1] ? ` at ${rest[1]}` : ""}.`);
 			client.close();
 			return;
@@ -460,7 +460,7 @@ async function main(): Promise<void> {
 			return out(file ? `Engine ${file.version} on port ${file.port}, pid ${file.pid}, since ${file.started}.` : "No engine running. It starts on demand.");
 		}
 		default:
-			fail(`unknown command "${command}". enriched help lists commands.`);
+			fail(`unknown command "${command}". el help lists commands.`);
 	}
 }
 
