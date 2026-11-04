@@ -3,12 +3,6 @@
 // pdf.js, which reads AcroForm and hybrid forms; a pure XFA form is reported as such.
 
 import { basename, dirname, extname, join } from "node:path";
-import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
-// pdf.js runs its parser in-process when this global holds the worker module; importing it here also bundles it
-// into the compiled binary, where a worker file path wouldn't exist.
-import * as pdfWorker from "pdfjs-dist/legacy/build/pdf.worker.mjs";
-
-(globalThis as { pdfjsWorker?: unknown }).pdfjsWorker = pdfWorker;
 import type { Tool } from "./types.ts";
 import { str, ToolError } from "./types.ts";
 
@@ -25,7 +19,29 @@ interface Widget {
 
 type Item = { str: string; transform: number[]; width: number; height: number };
 
+/** pdf.js, loaded the first time a PDF tool runs. Its Node build warns that it can't draw (no canvas package); these
+ * tools only read and fill forms, so the warnings are dropped. The worker module is imported here too, which bundles
+ * it into the compiled binary and lets pdf.js parse in-process. */
+let library: Promise<typeof import("pdfjs-dist/legacy/build/pdf.mjs")> | undefined;
+function pdfjs() {
+	library ??= (async () => {
+		const [log, warn] = [console.log, console.warn];
+		const quiet = (...args: unknown[]) => (/^Warning: Cannot (load|polyfill)/.test(String(args[0])) ? undefined : log(...args));
+		console.log = quiet;
+		console.warn = quiet;
+		try {
+			const [lib, worker] = await Promise.all([import("pdfjs-dist/legacy/build/pdf.mjs"), import("pdfjs-dist/legacy/build/pdf.worker.mjs")]);
+			(globalThis as { pdfjsWorker?: unknown }).pdfjsWorker = worker;
+			return lib;
+		} finally {
+			[console.log, console.warn] = [log, warn];
+		}
+	})();
+	return library;
+}
+
 async function open(data: Buffer) {
+	const { getDocument } = await pdfjs();
 	return getDocument({ data: new Uint8Array(data), verbosity: 0, disableFontFace: true, useSystemFonts: false }).promise;
 }
 
