@@ -3,10 +3,11 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "n
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-export const VERSION = "0.2.4";
+export const VERSION = "0.2.5";
 
 /** What changed in this version, one line each, newest first. Surfaces show the first lines when a session opens. */
 export const NEWS = [
+	"0.2.5: at labs that run one, the agent can browse in a browser in your lab sandbox, which has none of your sign-ins and which you watch and use live in a pane; files leaving a lab sandbox must match what the lab's malware scanner passed; a lab agent waiting for your approval links to where you approve it.",
 	"0.2.4: apps your lab offers install from the Apps menu (el app add <lab>/<name>), checked against the lab's signers; lab sandboxes stop when idle and come back on use; a new computer at a lab waits for approval from one of your others.",
 	"0.2.3: in a session that works in a lab, an app's backend runs in that lab's sandbox, so the lab's data stays there.",
 	"0.2.2: at labs that ask for it, requests are bound to this computer with a device key kept in the OS credential store; web apps in a lab sandbox (Shiny, Streamlit) open in the browser pane.",
