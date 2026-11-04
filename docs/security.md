@@ -22,7 +22,13 @@ the lab.
 
 The engine listens on loopback only, checks `Host` and `Origin`, and authenticates every surface (docs/architecture.md).
 Keys for model services go to the OS credential store; lab tokens are owner-only files, short-lived, and bound to
-the lab that issued them. ChatGPT sign-in tokens stay in the engine (`~/.el/credentials/chatgpt.json`, owner-only,
+the lab that issued them. At a lab that asks for it, every request also carries a DPoP proof signed by a per-lab device
+key whose private half stays in the OS credential store, so a copied token is useless elsewhere ([labs.md](labs.md)).
+
+A sandbox port opened on this computer (`<lab>_sandbox_open_port`) is a loopback proxy that adds the person's lab
+sign-in to what it forwards. It answers only its own page: the Host must be its loopback address, a browser Origin
+its own origin, and each request carries a per-port cookie (HttpOnly, SameSite=Strict) set from a one-time token in
+the first address. Other sites in the browser and other programs get 403. ChatGPT sign-in tokens stay in the engine (`~/.el/credentials/chatgpt.json`, owner-only,
 refreshed before they expire, revoked at OpenAI on sign-out); windows and the terminal see only the account's email.
 
 ## Updates

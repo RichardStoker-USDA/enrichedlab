@@ -19,7 +19,8 @@ export interface McpConnection {
 
 interface RemoteOptions {
 	url: string;
-	headers: () => Promise<Record<string, string>>;
+	/** Headers for one request; a lab that binds tokens to devices signs each request's method and address. */
+	headers: (request: { method: string; url: string }) => Promise<Record<string, string>>;
 	ca?: string;
 	/** `site` tools are named and gated as site tools. */
 	origin: "site" | "local";
@@ -185,7 +186,7 @@ async function connect(name: string, transport: StdioClientTransport | Streamabl
 export async function connectRemote(name: string, options: RemoteOptions): Promise<McpConnection> {
 	const transport = new StreamableHTTPClientTransport(new URL(options.url), {
 		fetch: (async (url: string | URL, init?: RequestInit) =>
-			labFetch(String(url), { ...init, headers: { ...Object.fromEntries(new Headers(init?.headers).entries()), ...(await options.headers()) }, ca: options.ca })) as typeof fetch,
+			labFetch(String(url), { ...init, headers: { ...Object.fromEntries(new Headers(init?.headers).entries()), ...(await options.headers({ method: init?.method ?? "GET", url: String(url) })) }, ca: options.ca })) as typeof fetch,
 	});
 	return connect(name, transport, options.origin);
 }

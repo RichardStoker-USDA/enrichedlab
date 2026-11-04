@@ -5,6 +5,7 @@
 //   POST /mcp           the tools their role grants (MCP, Streamable HTTP)
 //   /v1/containers      their sandbox: run, background jobs, copy files in and out
 
+import { hostname } from "node:os";
 import { createReadStream, createWriteStream, realpathSync } from "node:fs";
 import { mkdir, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname } from "node:path";
@@ -14,6 +15,8 @@ import type { BundleGrant } from "../bundles.ts";
 import { repoRoot } from "../git.ts";
 import { connectRemote, type McpConnection } from "../mcp.ts";
 import { labFetch, sseData } from "../models/http.ts";
+import { DeviceKey, dpopError } from "./dpop.ts";
+import { type OpenPort, openPort } from "./port_proxy.ts";
 import type { ModelProfile } from "../models/types.ts";
 import { num, str, type Tool, ToolError } from "../tools/types.ts";
 import { errorText, redact, SECRET_NAME, sleep } from "../util.ts";
@@ -61,17 +64,66 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	/** Repositories sent to the sandbox from this engine: sandbox folder → local repository and the commit sent. */
 	private sent = new Map<string, { repo: string; base: string }>();
 
+	/** This computer's key for the lab, when the lab binds tokens to devices (dpop.ts). */
+	private device?: DeviceKey;
+	/** The latest DPoP nonce the lab handed out, if it uses them. */
+	private nonce?: string;
+	/** Sandbox ports opened on this computer, by container and port. */
+	private ports = new Map<string, OpenPort>();
+
 	constructor(
 		readonly config: SiteConfig,
 		readonly route: SiteRoute,
 		/** The sandbox an earlier connection to this site made; a reconnect keeps using it. */
 		container?: string,
+		/** Where this computer's device key for the lab is kept. */
+		private deviceFile?: string,
 	) {
 		this.container = container;
 	}
 
-	private async call(method: string, path: string, init: { json?: unknown; body?: BodyInit; headers?: Record<string, string>; signal?: AbortSignal } = {}): Promise<Response> {
-		const headers: Record<string, string> = { accept: "application/json", ...init.headers, ...(await this.route.headers()) };
+	/** The lab's public address for a request URL or path: proofs name it even when the request goes over the LAN. */
+	private publicUrl(url: string): string {
+		const pub = this.config.url.replace(/\/+$/, "");
+		if (url.startsWith(this.route.base)) return pub + url.slice(this.route.base.length);
+		return url.startsWith("/") ? pub + url : url;
+	}
+
+	/** The route's sign-in, plus a proof for this request when the lab binds tokens to devices. */
+	private async authHeaders(method: string, url: string): Promise<Record<string, string>> {
+		const headers = await this.route.headers();
+		if (!this.device || this.device.revoked) return headers;
+		const bearer = /^(?:Bearer|DPoP)\s+(.+)$/i.exec(headers.authorization ?? "")?.[1];
+		return { ...headers, dpop: await this.device.proof(method, this.publicUrl(url), bearer, this.nonce) };
+	}
+
+	/** Register this computer's key with the lab, once; the lab registers the key that signed the request. */
+	private async enroll(): Promise<void> {
+		if (!this.deviceFile) return;
+		const key = await DeviceKey.open(this.deviceFile, this.config.url);
+		if (key.revoked) throw Object.assign(new Error(`${this.title} revoked this computer's key. Sign in again (el login ${this.config.name}) to register a new one.`), { status: 401, revoked: true });
+		this.device = key;
+		if (key.id) return;
+		const made = await this.json<{ id: string; thumbprint?: string }>("POST", "/v1/devices", { json: { name: `EnrichedLab on ${hostname().replace(/\.local$/i, "")}`, jwk: key.publicJwk }, signal: AbortSignal.timeout(15_000) });
+		if (made.thumbprint && made.thumbprint !== key.thumbprint) throw new Error(`${this.title} registered a different key than this computer sent.`);
+		key.registered(made.id);
+	}
+
+	async forget(): Promise<void> {
+		const key = this.device ?? (this.deviceFile ? await DeviceKey.open(this.deviceFile, this.config.url) : undefined);
+		if (key?.id && !key.revoked) await this.call("DELETE", `/v1/devices/${encodeURIComponent(key.id)}`, { signal: AbortSignal.timeout(10_000) }).catch(() => undefined);
+		key?.discard();
+		this.device = undefined;
+	}
+
+	private async call(
+		method: string,
+		path: string,
+		init: { json?: unknown; body?: BodyInit; headers?: Record<string, string>; signal?: AbortSignal; /** a proof to send instead of a fresh one (el lab check) */ dpop?: string } = {},
+		retried = false,
+	): Promise<Response> {
+		const headers: Record<string, string> = { accept: "application/json", ...init.headers, ...(await this.authHeaders(method, path)) };
+		if (init.dpop !== undefined) headers.dpop = init.dpop;
 		let body = init.body;
 		if (init.json !== undefined) {
 			headers["content-type"] = "application/json";
@@ -87,8 +139,31 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			redirect: "manual",
 			...(streamed ? { duplex: "half" } : {}),
 		} as RequestInit & { ca?: string });
+		const nonce = response.headers.get("dpop-nonce");
+		if (nonce) this.nonce = nonce;
 		if (response.status === 304) return response;
 		if (response.status >= 300 && response.status < 400) throw new Error(`${this.config.name} asked for a sign-in. Run el login ${this.config.name}.`);
+		const refused = response.status === 401 || response.status === 400 ? dpopError(response) : undefined;
+		if (refused && init.dpop === undefined) {
+			const again = !retried && !streamed;
+			if (refused === "use_dpop_nonce" && nonce && again) return this.call(method, path, init, true);
+			if ((refused === "device_unregistered" || refused === "device_proof_required") && again && this.deviceFile && path !== "/v1/devices") {
+				// No proof was sent: load (or register) this computer's key. The lab lost the key: register a new one.
+				await response.arrayBuffer();
+				this.device = undefined;
+				if (refused === "device_unregistered") {
+					const key = await DeviceKey.open(this.deviceFile, this.config.url);
+					if (key.id && !key.revoked) key.discard();
+				}
+				await this.enroll();
+				return this.call(method, path, init, true);
+			}
+			if (refused === "device_revoked") {
+				// A revoked key is not replaced on its own: the person signs in again first.
+				this.device?.markRevoked();
+				throw Object.assign(new Error(`${this.title} revoked this computer's key. Sign in again (el login ${this.config.name}) to register a new one.`), { status: 401 });
+			}
+		}
 		if (!response.ok) {
 			const challenge = response.headers.get("www-authenticate") ?? "";
 			if (response.status === 401 && this.route.via === "oauth" && /invalid_token/.test(challenge)) {
@@ -144,6 +219,16 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			const fit = validate(SCHEMAS.lab, this.descriptor);
 			if (fit.length) this.warning = `${this.title}'s description doesn't fit the lab contract (${fit[0]}).`;
 		}
+		if (this.offers("devices") && this.deviceFile) {
+			try {
+				await this.enroll();
+			} catch (error) {
+				// Proofs are optional at this lab: work without them and say so. A required proof or a revoked key stops here.
+				if (this.descriptor?.policy?.device_proof === "required" || (error as { revoked?: boolean }).revoked) throw error;
+				this.device = undefined;
+				this.warning = `Couldn't register this computer's key with ${this.title} (${redact(errorText(error))}).`;
+			}
+		}
 		const me = await this.cached<GateMe>("/v1/me", AbortSignal.timeout(10_000));
 		this.who = me.handle;
 		this.owner = me.owner === true;
@@ -152,7 +237,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		this.models = (list.data ?? []).filter((m) => !m.gate?.endpoints?.length || m.gate.endpoints.includes("chat")).map((m) => this.profile(m));
 		const tools: Tool[] = [];
 		try {
-			this.mcp = await connectRemote(this.config.name, { url: `${this.route.base}/mcp`, headers: () => this.route.headers(), ca: this.route.ca, origin: "site" });
+			this.mcp = await connectRemote(this.config.name, { url: `${this.route.base}/mcp`, headers: (request) => this.authHeaders(request.method, request.url), ca: this.route.ca, origin: "site" });
 			tools.push(...this.mcp.tools);
 		} catch (error) {
 			this.warning = `Tools unavailable: ${redact(errorText(error))}`;
@@ -326,9 +411,45 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			fits("GET /v1/models", "models", list, `${list.data?.length ?? 0} models`);
 		});
 
+		if (has("devices")) {
+			const key = this.device;
+			if (!key?.id) add("device key", "fail", this.warning ?? "this computer's key isn't registered");
+			else {
+				await attempt("device key", async () => {
+					const listed = await this.json<unknown>("GET", "/v1/devices", { signal: t() });
+					const devices = (Array.isArray(listed) ? listed : ((listed as { data?: unknown[] }).data ?? [])) as { id?: string; thumbprint?: string; current?: boolean; revoked?: boolean }[];
+					const mine = devices.find((x) => x.id === key.id);
+					const fits = mine && mine.thumbprint === key.thumbprint && !mine.revoked;
+					add("device key", fits ? "pass" : "fail", !mine ? "the lab doesn't list this computer's key" : fits ? `registered${mine.current ? ", marked current" : ""}` : "listed with another thumbprint or revoked");
+				});
+				// A lab that accepts these bound nothing: each must be refused.
+				const bearer = /^(?:Bearer|DPoP)\s+(.+)$/i.exec((await this.route.headers()).authorization ?? "")?.[1];
+				const status = (dpop: string) =>
+					this.call("GET", "/v1/me", { dpop, signal: t() }).then(
+						async (r) => (await r.arrayBuffer(), r.status),
+						(e: { status?: number }) => e.status,
+					);
+				const me = this.publicUrl("/v1/me");
+				await attempt("proof for another token", async () => {
+					const got = await status(await key.proof("GET", me, "not-the-token-this-request-carries"));
+					add("proof for another token", got === 401 ? "pass" : "fail", `answered ${got ?? "?"}`);
+				});
+				await attempt("proof for another address", async () => {
+					const got = await status(await key.proof("GET", this.publicUrl("/v1/models"), bearer));
+					add("proof for another address", got === 401 ? "pass" : "fail", `answered ${got ?? "?"}`);
+				});
+				await attempt("proof used twice", async () => {
+					const proof = await key.proof("GET", me, bearer);
+					const first = await status(proof);
+					const second = await status(proof);
+					add("proof used twice", first === 200 && second === 401 ? "pass" : "fail", `first ${first ?? "?"}, again ${second ?? "?"}`);
+				});
+			}
+		} else skip("device key");
+
 		if (has("mcp") || !d) {
 			await attempt("MCP tools", async () => {
-				const connection = await connectRemote(`${this.config.name}-check`, { url: `${this.route.base}/mcp`, headers: () => this.route.headers(), ca: this.route.ca, origin: "site" });
+				const connection = await connectRemote(`${this.config.name}-check`, { url: `${this.route.base}/mcp`, headers: (request) => this.authHeaders(request.method, request.url), ca: this.route.ca, origin: "site" });
 				const unreviewed = connection.tools.filter((tool) => tool.unreviewed).length;
 				add("MCP tools", "pass", `${connection.tools.length} tools${unreviewed ? `, ${unreviewed} unreviewed` : ""}`);
 				const data = d?.conformance?.data_tool;
@@ -382,6 +503,24 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				try {
 					const ran = await this.json<{ exit_code?: number; stdout?: string }>("POST", `/v1/containers/${made.id}/exec`, { json: { command: "echo ok", timeout_seconds: 30 }, signal: AbortSignal.timeout(120_000) });
 					add("sandbox runs a command", ran.exit_code === 0 && ran.stdout?.trim() === "ok" ? "pass" : "fail", `exit ${ran.exit_code}`);
+					if (has("ports")) {
+						// A web server in the sandbox, read through the lab's port path; app pages must come sandboxed (CSP).
+						const served = await this.json<{ exit_code?: number }>("POST", `/v1/containers/${made.id}/exec`, {
+							json: { command: "command -v python3 >/dev/null || exit 3; mkdir -p /tmp/el-check && echo el-port-ok > /tmp/el-check/index.html && (cd /tmp/el-check && nohup python3 -m http.server 8765 >/dev/null 2>&1 &) && sleep 2", timeout_seconds: 30 },
+							signal: AbortSignal.timeout(60_000),
+						});
+						if (served.exit_code === 3) add("sandbox port", "skip", "the sandbox image has no python3 to serve a page");
+						else {
+							const page = await this.call("GET", `/v1/containers/${made.id}/ports/8765/`, { headers: { accept: "text/html" }, signal: t() }).catch((error: { status?: number; message?: string }) => error);
+							if (!(page instanceof Response)) add("sandbox port", "fail", `answered ${page.status ?? page.message}`);
+							else {
+								const text = await page.text();
+								const csp = page.headers.get("content-security-policy") ?? "";
+								add("sandbox port", text.includes("el-port-ok") ? "pass" : "fail", text.includes("el-port-ok") ? "the page came through" : `answered ${page.status} without the page`);
+								add("app pages sandboxed", /(^|;)\s*sandbox\b/.test(csp) ? "pass" : "fail", csp ? `Content-Security-Policy: ${csp.slice(0, 80)}` : "no Content-Security-Policy");
+							}
+						}
+					}
 				} finally {
 					await this.call("DELETE", `/v1/containers/${made.id}`, { signal: t() }).catch(() => undefined);
 				}
@@ -670,7 +809,27 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				};
 			},
 		};
-		return [run, jobStart, jobStatus, jobCancel, upload, download, repoSend, repoFetch];
+		const openPortTool: Tool = {
+			name: `${site}_sandbox_open_port`,
+			kind: "sandbox",
+			description: `Open a web app running in your ${site} sandbox (Shiny, Streamlit, a dev server) in the browser pane. Start the app first, in the background (${site}_sandbox_job_start), listening on 0.0.0.0 at that port. Returns the page, or a local address when no window is open.`,
+			parameters: {
+				type: "object",
+				properties: { port: { type: "integer", minimum: 1, maximum: 65535 }, path: { type: "string", description: "Path to open, default /" } },
+				required: ["port"],
+				additionalProperties: false,
+			},
+			view: (a) => ({ verb: `${site} sandbox`, target: `open port ${a.port}` }),
+			run: async (args, ctx) => {
+				const opened = await this.openPort(num(args, "port") ?? 0, typeof args.path === "string" ? args.path : "/", ctx.signal);
+				if (ctx.surface) {
+					const page = await ctx.surface.call("browser", "open", { url: opened.url }, ctx.signal).catch(() => undefined);
+					if (page) return { ok: true, content: page.text, view: { result: `opened ${opened.origin}` } };
+				}
+				return { ok: true, content: `Open ${opened.url} in a browser on this computer. The address works only here, while this engine runs.`, view: { result: opened.origin } };
+			},
+		};
+		return [run, jobStart, jobStatus, jobCancel, upload, download, repoSend, repoFetch, ...(this.offers("ports") ? [openPortTool] : [])];
 	}
 
 	/** Stop using this connection but keep the sandbox: a reconnect (refresh, sign-in, route change) hands it on. */
@@ -682,7 +841,22 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	}
 
 	/** Engine shutdown: delete the sandbox unless a background job is still running in it; Gate expires it then. */
+	/** Open a port of the sandbox on this computer (port_proxy.ts); one loopback address per port, reused. */
+	async openPort(port: number, path = "/", signal?: AbortSignal): Promise<OpenPort> {
+		if (!this.offers("ports")) throw new Error(`${this.title} doesn't open sandbox ports.`);
+		if (!Number.isInteger(port) || port < 1 || port > 65535) throw new ToolError("Give a port from 1 to 65535.");
+		const id = await this.sandbox(signal);
+		const kept = this.ports.get(`${id}:${port}`);
+		if (kept) return kept;
+		const prefix = `${this.route.base}/v1/containers/${encodeURIComponent(id)}/ports/${port}`;
+		const opened = openPort({ url: (p) => `${prefix}${p}`, headers: (method, url) => this.authHeaders(method, url), ca: this.route.ca }, path);
+		this.ports.set(`${id}:${port}`, opened);
+		return opened;
+	}
+
 	async close(): Promise<void> {
+		for (const opened of this.ports.values()) opened.close();
+		this.ports.clear();
 		await this.mcp?.close().catch(() => undefined);
 		const id = this.container;
 		this.container = undefined;

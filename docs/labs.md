@@ -26,8 +26,9 @@ look the same to EnrichedLab.
 | `GET /v1/events` | server-sent events with a commit-ordered `id`; resume with `Last-Event-ID`; a cursor older than the history kept gets `event: reset` | built: shown as notices; cursor kept across restarts |
 | `POST /v1/guard` | the lab's classifiers: `{stage, text, session?, tool?}` → `{decision, categories, reasons, policy_version, receipt_id}` | checked by `el lab check`; sessions call it next |
 | `GET /v1/usage` | tokens, GPU and sandbox seconds by lab and group, for a 7- or 30-day window | `el usage <lab>` |
-| `POST /v1/devices` | registers the client's device key (ES256) for sender-bound tokens; `DELETE /v1/devices/{id}` revokes one | to add |
-| `/v1/containers/{id}/attach`, `/ports/{port}` | stdio over a WebSocket, and an HTTP and WebSocket proxy into the sandbox, for app backends and Shiny | to add |
+| `POST /v1/devices` | registers the client's device key (ES256) for sender-bound tokens; `GET` lists them; `DELETE /v1/devices/{id}` revokes one | built: proofs on every request; `el lab check` tries a proof for another token, another address, and one used twice |
+| `/v1/containers/{id}/ports/{port}/…` | HTTP and WebSocket into a port of the sandbox, header auth only, every app page served with `Content-Security-Policy: sandbox` | built: `<lab>_sandbox_open_port` opens the app in the browser pane through a loopback proxy |
+| `/v1/containers/{id}/attach` | stdio over a WebSocket (JSON frames), for app backends that run in the sandbox | to add |
 | `/v1/apps`, `/v1/signers` | the apps a group may install, and whose signatures to trust | to add |
 
 Tools and results carry two markers. `_meta["org.enrichedlab/tier"]: "unvalidated"` marks a tool no person has
@@ -92,10 +93,15 @@ Anyone who can use a lab from their computer holds a credential there, and no cl
 from copying it. The lab makes a copied token worth little:
 
 - **Short lifetimes.** Access tokens last minutes and refresh; revoking a person ends both.
-- **Sender-bound tokens.** EnrichedLab makes a key it can't export (the OS key store) and registers it at sign-in
-  (`POST /v1/devices`). Every request then carries a DPoP proof (RFC 9449) signed with that key, and the lab refuses a
-  token without one. A token copied into another tool fails. Access doesn't issue DPoP-bound tokens, so the lab's
-  endpoint checks the proof. MCP is standardizing the same profile (SEP-1932).
+- **Sender-bound tokens.** For a lab whose descriptor lists `devices`, EnrichedLab makes a P-256 key per lab, keeps
+  its private half in the OS credential store (an owner-only file where there is none), and registers the public half
+  (`POST /v1/devices`, signed by that key). Every request, MCP included, then carries a DPoP proof (RFC 9449): `htm`,
+  `htu` (the lab's public address even over the LAN), `iat`, a single-use `jti`, and `ath`, the hash of the exact
+  bearer in that request. `policy.device_proof` says whether proofs are `optional` or `required`. A token copied into
+  another tool fails. Access doesn't issue DPoP-bound tokens, so the lab's endpoint checks the proof. On
+  `device_unregistered` the client registers a new key; on `device_revoked` it stops until the person signs in again,
+  so revoking a lost laptop sticks. Sign-out revokes the key (`DELETE /v1/devices/{id}`). MCP is standardizing the same
+  profile (SEP-1932).
 - **Quotas and alerts.** Per-person request and token limits, and an alert when use leaves the person's pattern.
 
 ## Classifiers and the audit record

@@ -749,7 +749,7 @@ export class Engine {
 					return { path: relative(runtime.cwd, target), bytes: bytes.length };
 				}
 				case "site.logout":
-					this.sites.logout(need("name"));
+					await this.sites.logout(need("name"));
 					return { ok: true };
 				case "site.refresh":
 					if (p.name) await this.sites.connect(String(p.name));

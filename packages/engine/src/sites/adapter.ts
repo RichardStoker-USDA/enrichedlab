@@ -11,6 +11,8 @@ import type { SandboxApi } from "./sandbox_workspace.ts";
 import type { SiteConfig, SiteRoute } from "./sites.ts";
 
 export interface SiteAdapter {
+	/** On sign-out: revoke this computer's device key at the lab (best effort) and delete it here. */
+	forget?(): Promise<void>;
 	/** Who the site says the person is. */
 	readonly who?: string;
 	/** The models and tools this person was granted, read at connect. */
@@ -43,8 +45,8 @@ export interface SiteAdapter {
 	check?(): Promise<CheckRow[]>;
 }
 
-export type SiteAdapterFactory = (config: SiteConfig, route: SiteRoute, carried?: string) => SiteAdapter;
+export type SiteAdapterFactory = (config: SiteConfig, route: SiteRoute, carried?: string, deviceFile?: string) => SiteAdapter;
 
 export const SITE_KINDS: Record<string, SiteAdapterFactory> = {
-	gate: (config, route, carried) => new GateSite(config, route, carried),
+	gate: (config, route, carried, deviceFile) => new GateSite(config, route, carried, deviceFile),
 };

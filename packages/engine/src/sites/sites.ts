@@ -96,7 +96,7 @@ export class Sites {
 				const title = this.title(name);
 				const text = noticeText(title, event);
 				if (text) this.onNotice({ site: name, type: event.type, at: event.at, text, session: event.session });
-				if (event.type === "signin.revoked") this.logout(name);
+				if (event.type === "signin.revoked") void this.logout(name);
 			},
 		});
 		this.following.set(name, stop);
@@ -154,6 +154,7 @@ export class Sites {
 		if (!/^[a-z][a-z0-9_-]{0,31}$/.test(to)) throw new Error("Site names are lowercase letters, digits, - and _, starting with a letter.");
 		const renamed = { ...site, name: to, title: title ?? site.title };
 		if (from !== to && existsSync(this.credPath(from))) renameSync(this.credPath(from), this.credPath(to));
+		if (from !== to && existsSync(this.deviceFile(from))) renameSync(this.deviceFile(from), this.deviceFile(to));
 		this.saveConfigs(sites.map((s) => (s.name === from ? renamed : s)));
 		this.adapters.delete(from);
 		this.states.delete(from);
@@ -227,12 +228,22 @@ export class Sites {
 		const stored = this.creds(name);
 		const result = await login(config.url, { onAuth: ({ url, instructions }) => onAuth(url, instructions ?? ""), signal }, stored.client);
 		this.saveCreds(name, { oauth: result.credentials, client: result.client });
+		// A fresh sign-in is what lets a computer whose key the lab revoked register a new one.
+		if (readJson<{ revoked?: boolean }>(this.deviceFile(name), {}).revoked) rmSync(this.deviceFile(name), { force: true });
 		return this.connect(name);
 	}
 
-	logout(name: string): void {
+	/** This computer's device key for a lab that binds tokens to devices (dpop.ts). */
+	private deviceFile(name: string): string {
+		return join(this.p.credentials, `device_${name}.json`);
+	}
+
+	async logout(name: string): Promise<void> {
 		this.following.get(name)?.();
 		this.following.delete(name);
+		// Revoke the device key at the lab while the sign-in still works, then drop both here.
+		await this.adapters.get(name)?.forget?.().catch(() => undefined);
+		rmSync(this.deviceFile(name), { force: true });
 		rmSync(this.credPath(name), { force: true });
 		this.adapters.get(name)?.close();
 		this.adapters.delete(name);
@@ -257,7 +268,7 @@ export class Sites {
 		if (!factory) state.error = `This version of EnrichedLab doesn't know sites of kind "${config.kind}".`;
 		for (const route of routes) {
 			if (!factory) break;
-			const adapter = factory(config, route, container);
+			const adapter = factory(config, route, container, this.deviceFile(name));
 			try {
 				await adapter.connect();
 				this.adapters.set(name, adapter);

@@ -19,7 +19,7 @@
       }
     },
     "sign_in": { "type": "object", "required": ["kind"], "properties": { "kind": { "type": "string", "enum": ["cloudflare-access-oauth", "oauth"] } } },
-    "policy": { "type": "object", "properties": { "keep_data_inside": { "type": "boolean" } } },
+    "policy": { "type": "object", "properties": { "keep_data_inside": { "type": "boolean" }, "device_proof": { "enum": ["optional", "required"] } } },
     "support": { "type": "object", "required": ["url"], "properties": { "url": { "type": "string", "pattern": "^https://" } } },
     "docs": { "type": "object", "required": ["url"], "properties": { "url": { "type": "string", "pattern": "^https://" } } },
     "sandbox_profiles": {
