@@ -8,6 +8,9 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { Subprocess } from "bun";
 import { startBackend } from "../packages/engine/src/apps/backends.ts";
+import { AppHost } from "../packages/engine/src/apps/host.ts";
+import { paths } from "../packages/engine/src/paths.ts";
+import type { Workspace } from "../packages/engine/src/tools/workspace.ts";
 import type { AppManifest } from "../packages/engine/src/apps/manifest.ts";
 import { attachSocket } from "../packages/engine/src/sites/attach.ts";
 import { GateSite } from "../packages/engine/src/sites/gate.ts";
@@ -122,13 +125,16 @@ describe.skipIf(process.platform === "win32")("app backends in a lab sandbox", (
 		mkdirSync(app, { recursive: true });
 		writeFileSync(
 			join(app, "backend.ts"),
-			`export const tools = { where: { description: "Where it runs", async run(_args, app) { return "data at " + app.dataDir; } }, quit: { description: "Stop", async run() { setTimeout(() => process.exit(0), 50); return "bye"; } } };\n`,
+			`export const tools = { where: { description: "Where it runs", async run(_args, app) { return "data at " + app.dataDir; } }, quit: { description: "Stop", async run() { setTimeout(() => process.exit(0), 50); return "bye"; } }, project: { description: "Project", async run(_args, app) { return String(app.projectDir); } } };\n`,
 		);
 		const manifest = { name: "yield_app", version: "1.0.0", backend: { runtime: "bun", main: "backend.ts" } } as unknown as AppManifest;
 		const lines: string[] = [];
 		const backend = await startBackend(manifest, { dir: app, dataDir: join(box, "local_data"), runDir: join(box, "run"), toolsDir: join(box, "tools"), network: false, log: (l) => lines.push(l), sandbox, sandboxOnly: true });
 		if (backend.kind !== "mcp") throw new Error("expected an MCP backend");
-		expect(backend.tools.map((t) => t.name)).toEqual(["where", "quit"]);
+		expect(backend.tools.map((t) => t.name)).toEqual(["where", "quit", "project"]);
+		// One backend serves every session in the lab: each call names its session's project.
+		expect((await backend.call("project", {}, undefined, "/sandbox/work/trial-a1")).content[0]).toEqual({ type: "text", text: "/sandbox/work/trial-a1" });
+		expect((await backend.call("project", {}, undefined, "/sandbox/work/soil-b2")).content[0]).toEqual({ type: "text", text: "/sandbox/work/soil-b2" });
 		const result = await backend.call("where", {});
 		expect(result.content[0]).toEqual({ type: "text", text: `data at ${home}/.el-apps/yield_app/data` });
 		// A process that ends (or a lab closing an idle connection) shows as closed, so the host starts it again.
@@ -164,6 +170,30 @@ describe.skipIf(process.platform === "win32")("app backends in a lab sandbox", (
 		for (let i = 0; i < 50 && (await fetch(backend.url).then(() => true, () => false)); i++) await Bun.sleep(50);
 		expect(await fetch(backend.url).then(() => "up", () => "down")).toBe("down");
 	});
+
+	test("sessions in the same lab share one backend per app, and each call sees its own project", async () => {
+		const kit = join(box, "labkit");
+		const app = join(kit, "apps", "shared");
+		mkdirSync(app, { recursive: true });
+		writeFileSync(join(app, "app.json"), JSON.stringify({ name: "shared", title: "Shared", version: "1.0.0", description: "", entry: "index.html", backend: { runtime: "bun", main: "backend.ts" }, permissions: {} }));
+		writeFileSync(join(app, "index.html"), "<p>shared</p>");
+		writeFileSync(join(app, "backend.ts"), `export const tools = { project: { description: "Project", async run(_args, app) { return String(app.projectDir); } } };\n`);
+		let attaches = 0;
+		const counted: SandboxApi = { ...sandbox, attach: (spec, signal) => (attaches++, sandbox.attach!(spec, signal)) };
+		const session = (root: string) => ({ project: root, workspace: { root } as Workspace, place: "devlab", sealed: false, prompt: () => undefined, context: () => undefined, ask: async () => "" });
+		const sessions: Record<string, ReturnType<typeof session>> = { s1: session("/sandbox/work/trial-a1"), s2: session("/sandbox/work/soil-b2") };
+		const p = paths(join(box, "el_home"));
+		mkdirSync(p.run, { recursive: true });
+		const apps = new AppHost({ paths: p, emit: () => undefined, session: (id) => sessions[id], sandbox: () => counted, isolated: () => false, bundles: () => [{ name: "labkit", dir: kit }], origin: () => "http://127.0.0.1:9" });
+		const first = await apps.open({ sessionId: "s1", id: "labkit.shared" });
+		if (!first.app.granted) apps.grant(first.app.id, true);
+		const one = await apps.open({ sessionId: "s1", id: "labkit.shared" });
+		const two = await apps.open({ sessionId: "s2", id: "labkit.shared" });
+		expect((await apps.call(one.token, "project", {}, AbortSignal.timeout(30_000))).content[0]).toEqual({ type: "text", text: "/sandbox/work/trial-a1" });
+		expect((await apps.call(two.token, "project", {}, AbortSignal.timeout(30_000))).content[0]).toEqual({ type: "text", text: "/sandbox/work/soil-b2" });
+		expect(attaches).toBe(1);
+		await apps.stop();
+	}, 60_000);
 
 	test("a full lab says so instead of a closed connection", async () => {
 		const app = join(box, "busy_app");

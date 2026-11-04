@@ -12,7 +12,7 @@
 //   };
 //
 // `run` returns a string, { text, data } (data becomes structuredContent), or a full MCP CallToolResult. `app` holds
-// dataDir (the app's writable folder), projectDir and log (to stderr). The runner serves the tools as an MCP server
+// dataDir (the app's writable folder), projectDir (the calling session's project) and log (to stderr). The runner serves the tools as an MCP server
 // on stdio and answers both handshakes: initialize (2025-11-25) and server/discover (2026-07-28).
 
 export const RUNNER_SOURCE = String.raw`
@@ -65,7 +65,9 @@ async function answer(method, params) {
 			const tool = tools[params?.name];
 			if (!tool || typeof tool.run !== "function") throw failure(-32602, "No tool named " + params?.name + ".");
 			try {
-				return asResult(await tool.run(params.arguments ?? {}, app));
+				// A backend shared by several sessions in one lab sandbox learns the calling session's project per call.
+				const project = params._meta?.["org.enrichedlab/project"];
+				return asResult(await tool.run(params.arguments ?? {}, typeof project === "string" ? { ...app, projectDir: project } : app));
 			} catch (error) {
 				return { content: [{ type: "text", text: String(error?.message ?? error) }], isError: true };
 			}

@@ -12,7 +12,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, type FSWatcher, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, watch, writeFileSync } from "node:fs";
-import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { AppPermissions, AppSummary, AppToolResult, Notification, Notifications } from "@enrichedlab/protocol";
 import type { Paths } from "../paths.ts";
 import type { SandboxApi } from "../sites/sandbox_workspace.ts";
@@ -341,10 +341,16 @@ export class AppHost {
 		return summary;
 	}
 
+	/** One backend per app per session on this computer; sessions that work in the same lab share one per app. */
+	private backendKey(id: string, sessionId: string | undefined): string {
+		const place = sessionId ? this.deps.session(sessionId)?.place : undefined;
+		return place && place !== "local" ? `${id}|lab:${place}` : `${id}|${sessionId ?? ""}`;
+	}
+
 	private mint(id: string, sessionId?: string): string {
 		const token = randomBytes(18).toString("base64url");
 		this.opened.set(token, { token, id, sessionId });
-		const key = `${id}|${sessionId ?? ""}`;
+		const key = this.backendKey(id, sessionId);
 		clearTimeout(this.idle.get(key));
 		this.idle.delete(key);
 		return token;
@@ -354,9 +360,9 @@ export class AppHost {
 		const open = this.opened.get(token);
 		if (!open) return;
 		this.opened.delete(token);
-		const key = `${open.id}|${open.sessionId ?? ""}`;
-		if ([...this.opened.values()].some((o) => `${o.id}|${o.sessionId ?? ""}` === key)) return;
-		// The last view of this app in this session closed: stop its backend after a while, in case it reopens.
+		const key = this.backendKey(open.id, open.sessionId);
+		if ([...this.opened.values()].some((o) => this.backendKey(o.id, o.sessionId) === key)) return;
+		// The last view using this backend closed: stop it after a while, in case it reopens.
 		this.idle.set(key, setTimeout(() => void this.stopBackend(key), BACKEND_IDLE_MS));
 		if (![...this.opened.values()].some((o) => o.id === open.id)) {
 			this.watchers.get(open.id)?.close();
@@ -426,7 +432,8 @@ export class AppHost {
 	// ── Calls ────────────────────────────────────────────────────────────────────────────────────────────────────
 
 	private backend(app: Loaded, sessionId: string | undefined): Promise<Backend> {
-		const key = `${app.id}|${sessionId ?? ""}`;
+		// Sessions that work in the same lab share one backend per app: a lab sandbox has few long-running process slots.
+		const key = this.backendKey(app.id, sessionId);
 		const current = this.live.get(key);
 		if (current?.kind === "mcp" && current.closed) {
 			this.backends.delete(key);
@@ -448,7 +455,8 @@ export class AppHost {
 				: startBackend(app.manifest, {
 					dir: app.dir,
 					dataDir: this.dataDir(app.id),
-					projectDir: session?.place === "local" ? session.project : lab ? session?.workspace.root : undefined,
+					// A shared lab backend sees the folder holding every session's project; each call names its own.
+					projectDir: session?.place === "local" ? session.project : lab ? dirname(session!.workspace.root) : undefined,
 					...(lab ? { sandbox: lab, sandboxOnly: this.deps.isolated(session!.place) } : {}),
 					runDir: join(this.deps.paths.home, "runtime"),
 					toolsDir: join(this.deps.paths.home, "tools"),
@@ -503,7 +511,8 @@ export class AppHost {
 		const tool = backend.tools.find((t) => t.name === name);
 		if (!tool) throw new Error(`The app's backend has no tool ${name}.`);
 		if (!tool.visibility.includes("app")) throw new Error(`${name} is for the model only.`);
-		return backend.call(name, args, signal);
+		const session = open.sessionId ? this.deps.session(open.sessionId) : undefined;
+		return backend.call(name, args, signal, session && session.place !== "local" ? session.workspace.root : undefined);
 	}
 
 	message(token: string, text: string): void {

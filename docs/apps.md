@@ -33,7 +33,10 @@ over its stdin and stdout, and a `serve` backend listens on `$PORT` (0.0.0.0) an
 The sandbox has no network, so an app's own environment isn't installed there; its command runs with what the lab's
 image has, and a `bun` backend needs Bun in that image. `container` backends run on this computer only. A lab that
 keeps its data inside never runs the backend here; for other labs, a lab without attach falls back to this computer.
-Installed apps (and apps the lab grants in bundles) open in a lab session by id: `app_open` with the id.
+Installed apps (and apps the lab grants in bundles) open in a lab session by id: `app_open` with the id. Sessions
+that work in the same lab share one backend per app, since a sandbox has few long-running process slots: its
+`PROJECT_DIR` is the folder holding every session's project, and each call names the calling session's project in
+MCP `_meta["org.enrichedlab/project"]`, which a `bun` backend gets as `app.projectDir`.
 
 ## app.json
 

@@ -38,7 +38,8 @@ export interface McpBackend {
 	/** The process or its connection ended (a lab closes an idle attach); the host starts it again on next use. */
 	readonly closed?: boolean;
 	tools: BackendTool[];
-	call(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<AppToolResult>;
+	/** `project` names the calling session's project, for a backend that sessions in one lab sandbox share. */
+	call(name: string, args: Record<string, unknown>, signal?: AbortSignal, project?: string): Promise<AppToolResult>;
 	close(): Promise<void>;
 }
 
@@ -106,6 +107,9 @@ async function connectStdio(command: string, args: string[], env: Record<string,
 	return connectTransport(transport);
 }
 
+/** The MCP `_meta` key that names the calling session's project folder. */
+export const PROJECT_META = "org.enrichedlab/project";
+
 async function connectTransport(transport: Transport): Promise<McpBackend> {
 	const client = new Client({ name: "enrichedlab-app-host", version: VERSION }, { capabilities: {} });
 	await client.connect(transport);
@@ -126,8 +130,8 @@ async function connectTransport(transport: Transport): Promise<McpBackend> {
 			return closed;
 		},
 		tools,
-		async call(name, args, signal) {
-			const result = await client.callTool({ name, arguments: args }, { signal, timeout: 300_000 });
+		async call(name, args, signal, project) {
+			const result = await client.callTool({ name, arguments: args, ...(project ? { _meta: { [PROJECT_META]: project } } : {}) }, { signal, timeout: 300_000 });
 			return { content: (result.content ?? []) as AppToolResult["content"], structuredContent: result.structuredContent as Record<string, unknown> | undefined, isError: result.isError === true };
 		},
 		close: () => client.close(),
