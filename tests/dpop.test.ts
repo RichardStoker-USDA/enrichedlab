@@ -20,6 +20,8 @@ const lab = {
 	deleted: [] as string[],
 	/** Answer the next requests with this code, as Gate does for a bound or stale sign-in. */
 	code: undefined as string | undefined,
+	/** Nonce challenges sent (401 use_dpop_nonce). */
+	challenges: 0,
 };
 let next = 1;
 
@@ -39,8 +41,9 @@ async function verify(request: Request, url: URL): Promise<{ thumb: string; jwk:
 	const bearer = request.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
 	const fresh = typeof claims.iat === "number" && Math.abs(Date.now() / 1000 - claims.iat) < 120;
 	if (!signed || claims.htm !== request.method || claims.htu !== `${PUBLIC}${url.pathname}` || claims.ath !== tokenHash(bearer) || !fresh || !claims.jti || lab.jtis.has(claims.jti)) return { code: "invalid_dpop_proof" };
-	lab.jtis.add(claims.jti);
+	// As Gate does: a missing or stale nonce is refused before the jti is spent, so the retry may reuse nothing.
 	if (lab.nonce && claims.nonce !== lab.nonce) return { code: "use_dpop_nonce" };
+	lab.jtis.add(claims.jti);
 	return { thumb: thumbprint(header.jwk), jwk: header.jwk };
 }
 
@@ -48,17 +51,31 @@ const server = Bun.serve({
 	port: 0,
 	hostname: "127.0.0.1",
 	async fetch(request) {
+		const response = await answer(request);
+		// While the lab uses nonces, every response carries the current one.
+		if (lab.nonce && !response.headers.has("dpop-nonce")) response.headers.set("dpop-nonce", lab.nonce);
+		return response;
+	},
+});
+
+async function answer(request: Request): Promise<Response> {
+	{
 		const url = new URL(request.url);
 		if (request.headers.get("authorization") !== `Bearer ${TOKEN}`) return new Response("", { status: 401 });
 		if (url.pathname === "/.well-known/enrichedlab-lab") {
 			return Response.json({ contract: "2026-11", name: "devlab", title: "Dev Lab", endpoints: { devices: true, models: true }, sign_in: { kind: "key" }, policy: { device_proof: "required" } });
 		}
+		if (url.pathname === "/v1/echo" && !request.headers.get("dpop")) return refuse("device_proof_required");
 		const proof = await verify(request, url);
 		if ("code" in proof) {
 			const refused = refuse(proof.code);
-			if (proof.code === "use_dpop_nonce") refused.headers.set("dpop-nonce", lab.nonce!);
+			if (proof.code === "use_dpop_nonce") {
+				lab.challenges++;
+				refused.headers.set("dpop-nonce", lab.nonce!);
+			}
 			return refused;
 		}
+		if (url.pathname === "/v1/echo") return new Response(await request.text());
 		if (url.pathname === "/v1/devices" && request.method === "POST") {
 			const body = (await request.json()) as { jwk?: JsonWebKey };
 			if (body.jwk && thumbprint(body.jwk) !== proof.thumb) return Response.json({ error: { message: "the jwk isn't the key that signed" } }, { status: 400 });
@@ -78,8 +95,8 @@ const server = Bun.serve({
 		if (url.pathname === "/v1/me") return Response.json({ subject: "u_1", handle: "pat", memberships: [{ lab: "devlab", roles: ["member"] }] });
 		if (url.pathname === "/v1/models") return Response.json({ data: [] });
 		return new Response("", { status: 404 });
-	},
-});
+	}
+}
 const home = mkdtempSync(join(tmpdir(), "el-dpop-"));
 afterAll(() => {
 	server.stop(true);
@@ -158,6 +175,47 @@ describe("device-bound lab tokens", () => {
 		await expect(me(s)).rejects.toThrow("is older than a device revocation");
 		lab.code = undefined;
 		expect(lab.jtis.size).toBe(before + 2);
+	});
+
+	test("a lab that uses nonces: the latest one rides on every proof, so requests don't bounce", async () => {
+		lab.nonce = "n-a";
+		const s = site();
+		await s.connect();
+		const before = lab.challenges;
+		for (let i = 0; i < 3; i++) expect((await me(s)).handle).toBe("pat");
+		expect(lab.challenges).toBe(before);
+		// The lab moves to a new nonce: one challenge, one retry, then quiet again.
+		lab.nonce = "n-b";
+		expect((await me(s)).handle).toBe("pat");
+		expect((await me(s)).handle).toBe("pat");
+		expect(lab.challenges).toBe(before + 1);
+	});
+
+	test("before an upload that can't be sent twice, a nonce older than 4 minutes is refreshed first", async () => {
+		lab.nonce = "n-c";
+		const s = site();
+		await s.connect();
+		lab.nonce = "n-d";
+		(s as unknown as { nonceAt: number }).nonceAt = Date.now() - 300_000;
+		const body = new ReadableStream({
+			start(c) {
+				c.enqueue(new TextEncoder().encode("plot,yield\n"));
+				c.close();
+			},
+		});
+		const call = (s as unknown as { call(m: string, p: string, i: object): Promise<Response> }).call.bind(s);
+		const response = await call("POST", "/v1/echo", { body, headers: { "content-type": "text/csv" } });
+		expect(await response.text()).toBe("plot,yield\n");
+	});
+
+	test("an MCP response's nonce challenge is answered by sending again", () => {
+		const s = site();
+		const answered = (s as unknown as { answered(r: Response): boolean }).answered;
+		const challenge = new Response("", { status: 401, headers: { "www-authenticate": 'DPoP algs="ES256", error="use_dpop_nonce"', "dpop-nonce": "n-e" } });
+		expect(answered(challenge)).toBe(true);
+		expect(answered(new Response("{}", { headers: { "dpop-nonce": "n-f" } }))).toBe(false);
+		expect((s as unknown as { nonce: string }).nonce).toBe("n-f");
+		lab.nonce = undefined;
 	});
 
 	test("sign-out revokes the key at the lab and deletes it here", async () => {

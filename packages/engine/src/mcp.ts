@@ -24,6 +24,8 @@ interface RemoteOptions {
 	ca?: string;
 	/** `site` tools are named and gated as site tools. */
 	origin: "site" | "local";
+	/** Sees each response; true sends the request once more with fresh headers (a lab's DPoP nonce challenge). */
+	answered?: (response: Response) => boolean;
 }
 
 const safeName = (text: string) => text.replace(/[^a-zA-Z0-9_-]/g, "_").replace(/_+/g, "_");
@@ -185,8 +187,18 @@ async function connect(name: string, transport: StdioClientTransport | Streamabl
 
 export async function connectRemote(name: string, options: RemoteOptions): Promise<McpConnection> {
 	const transport = new StreamableHTTPClientTransport(new URL(options.url), {
-		fetch: (async (url: string | URL, init?: RequestInit) =>
-			labFetch(String(url), { ...init, headers: { ...Object.fromEntries(new Headers(init?.headers).entries()), ...(await options.headers({ method: init?.method ?? "GET", url: String(url) })) }, ca: options.ca })) as typeof fetch,
+		fetch: (async (url: string | URL, init?: RequestInit) => {
+			const send = async () =>
+				labFetch(String(url), { ...init, headers: { ...Object.fromEntries(new Headers(init?.headers).entries()), ...(await options.headers({ method: init?.method ?? "GET", url: String(url) })) }, ca: options.ca });
+			const response = await send();
+			// MCP request bodies are text, so a challenged request can be sent again as it was.
+			const resendable = init?.body === undefined || typeof init.body === "string";
+			if (options.answered?.(response) && resendable) {
+				await response.arrayBuffer().catch(() => undefined);
+				return send();
+			}
+			return response;
+		}) as typeof fetch,
 	});
 	return connect(name, transport, options.origin);
 }

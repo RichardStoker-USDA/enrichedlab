@@ -15,6 +15,8 @@ export interface PortTarget {
 	url(path: string): string;
 	/** The lab's sign-in for one request (with a device proof when the lab binds tokens to devices). */
 	headers(method: string, url: string): Promise<Record<string, string>>;
+	/** Sees each response from the lab (to keep its DPoP nonce). */
+	answered?(response: Response): void;
 	ca?: string;
 }
 
@@ -94,6 +96,7 @@ export function openPort(target: PortTarget, path = "/"): OpenPort {
 				ca: target.ca,
 				...(request.body ? { duplex: "half" } : {}),
 			} as RequestInit & { ca?: string }).catch((error: Error) => new Response(`The lab didn't answer: ${error.message}`, { status: 502 }));
+			target.answered?.(response);
 			const headers = new Headers();
 			for (const [name, value] of response.headers) if (!HOP.has(name) && name !== "content-encoding") headers.append(name, value);
 			// A redirect inside the app stays on this address; a redirect to a sign-in page means the lab's sign-in ended.

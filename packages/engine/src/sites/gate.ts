@@ -69,8 +69,10 @@ export class GateSite implements SiteAdapter, SandboxApi {
 
 	/** This computer's key for the lab, when the lab binds tokens to devices (dpop.ts). */
 	private device?: DeviceKey;
-	/** The latest DPoP nonce the lab handed out, if it uses them. */
+	/** The latest DPoP nonce the lab handed out, if it uses them, and when it came. */
 	private nonce?: string;
+	private nonceAt = 0;
+	private nonceRefresh?: Promise<void>;
 	/** Plain-language notices for the person (a sandbox restored or replaced); Sites passes them to every surface. */
 	onNotice?: (text: string) => void;
 	/** Sandbox ports opened on this computer, by container and port. */
@@ -93,6 +95,40 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		if (url.startsWith(this.route.base)) return pub + url.slice(this.route.base.length);
 		return url.startsWith("/") ? pub + url : url;
 	}
+
+	/** Keep the lab's latest DPoP nonce (RFC 9449 section 8); every response may carry one. */
+	private noteNonce(response: Response): string | undefined {
+		const nonce = response.headers.get("dpop-nonce") ?? undefined;
+		if (nonce) {
+			this.nonce = nonce;
+			this.nonceAt = Date.now();
+		}
+		return nonce;
+	}
+
+	/**
+	 * Before a request that can't be sent twice (a streamed upload, a WebSocket, a page's request through a port), make
+	 * sure the nonce is recent: a lab keeps one valid 5 to 10 minutes, so past 4 a cheap read fetches a fresh one.
+	 */
+	private async freshNonce(): Promise<void> {
+		if (!this.device || this.device.revoked || !this.nonce || Date.now() - this.nonceAt < 240_000) return;
+		this.nonceRefresh ??= this.call("GET", "/v1/me", { signal: AbortSignal.timeout(10_000) })
+			.then((r) => r.arrayBuffer())
+			.then(
+				() => undefined,
+				() => undefined,
+			)
+			.finally(() => {
+				this.nonceRefresh = undefined;
+			});
+		await this.nonceRefresh;
+	}
+
+	/** For MCP requests: note the nonce, and say whether a nonce challenge should be answered by sending again. */
+	private answered = (response: Response): boolean => {
+		const fresh = this.noteNonce(response);
+		return Boolean(fresh) && response.status === 401 && dpopError(response) === "use_dpop_nonce";
+	};
 
 	/** The route's sign-in, plus a proof for this request when the lab binds tokens to devices. */
 	private async authHeaders(method: string, url: string): Promise<Record<string, string>> {
@@ -138,14 +174,15 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		} = {},
 		retried = false,
 	): Promise<Response> {
+		let body = init.body;
+		const streamed = typeof ReadableStream !== "undefined" && body instanceof ReadableStream;
+		if (streamed) await this.freshNonce();
 		const headers: Record<string, string> = { accept: "application/json", ...init.headers, ...(await this.authHeaders(method, path)) };
 		if (init.dpop !== undefined) headers.dpop = init.dpop;
-		let body = init.body;
 		if (init.json !== undefined) {
 			headers["content-type"] = "application/json";
 			body = JSON.stringify(init.json);
 		}
-		const streamed = typeof ReadableStream !== "undefined" && body instanceof ReadableStream;
 		const response = await labFetch(`${this.route.base}${path}`, {
 			method,
 			headers,
@@ -155,8 +192,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			redirect: "manual",
 			...(streamed ? { duplex: "half" } : {}),
 		} as RequestInit & { ca?: string });
-		const nonce = response.headers.get("dpop-nonce");
-		if (nonce) this.nonce = nonce;
+		const nonce = this.noteNonce(response);
 		if (response.status === 304) return response;
 		if (response.status >= 300 && response.status < 400) throw new Error(`${this.config.name} asked for a sign-in. Run el login ${this.config.name}.`);
 		const refused = response.status === 401 || response.status === 400 ? dpopError(response) : undefined;
@@ -213,7 +249,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			const detail = ((await response.json().catch(() => undefined)) ?? {}) as { error?: { message?: string } };
 			const message = detail.error?.message ?? `${this.config.name} answered ${response.status}.`;
 			const error = new Error(response.status === 401 ? `${message.replace(/\.$/, "")}. Run el login ${this.config.name}.` : message);
-			throw Object.assign(error, { status: response.status });
+			throw Object.assign(error, { status: response.status, ...(refused ? { dpop: refused } : {}) });
 		}
 		return response;
 	}
@@ -276,7 +312,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		this.models = (list.data ?? []).filter((m) => !m.gate?.endpoints?.length || m.gate.endpoints.includes("chat")).map((m) => this.profile(m));
 		const tools: Tool[] = [];
 		try {
-			this.mcp = await connectRemote(this.config.name, { url: `${this.route.base}/mcp`, headers: (request) => this.authHeaders(request.method, request.url), ca: this.route.ca, origin: "site" });
+			this.mcp = await connectRemote(this.config.name, { url: `${this.route.base}/mcp`, headers: (request) => this.authHeaders(request.method, request.url), ca: this.route.ca, origin: "site", answered: this.answered });
 			tools.push(...this.mcp.tools);
 		} catch (error) {
 			this.warning = `Tools unavailable: ${redact(errorText(error))}`;
@@ -484,34 +520,38 @@ export class GateSite implements SiteAdapter, SandboxApi {
 					const fits = mine && mine.thumbprint === key.thumbprint && !mine.revoked;
 					add("device key", fits ? "pass" : "fail", !mine ? "the lab doesn't list this computer's key" : fits ? `registered${mine.current ? ", marked current" : ""}` : "listed with another thumbprint or revoked");
 				});
-				// A lab that accepts these bound nothing: each must be refused.
+				// A lab that accepts these bound nothing: each must be refused, as an invalid proof. Each proof carries the
+				// lab's current nonce, so the refusal is for what the row tests.
 				const bearer = /^(?:Bearer|DPoP)\s+(.+)$/i.exec((await this.route.headers()).authorization ?? "")?.[1];
-				const status = (dpop: string) =>
+				const answer = (dpop: string) =>
 					this.call("GET", "/v1/me", { dpop, signal: t() }).then(
-						async (r) => (await r.arrayBuffer(), r.status),
-						(e: { status?: number }) => e.status,
+						async (r) => (await r.arrayBuffer(), { status: r.status, code: undefined as string | undefined }),
+						(e: { status?: number; dpop?: string }) => ({ status: e.status, code: e.dpop }),
 					);
+				const current = async () => (await this.call("GET", "/v1/me", { signal: t() }).then((r) => r.arrayBuffer()).catch(() => undefined), this.nonce);
+				const refusedRight = (got: { status?: number; code?: string }) => got.status === 401 && (!got.code || got.code === "invalid_dpop_proof");
+				const said = (got: { status?: number; code?: string }) => `answered ${got.status ?? "?"}${got.code ? ` ${got.code}` : ""}`;
 				const me = this.publicUrl("/v1/me");
 				await attempt("proof for another token", async () => {
-					const got = await status(await key.proof("GET", me, "not-the-token-this-request-carries"));
-					add("proof for another token", got === 401 ? "pass" : "fail", `answered ${got ?? "?"}`);
+					const got = await answer(await key.proof("GET", me, "not-the-token-this-request-carries", await current()));
+					add("proof for another token", refusedRight(got) ? "pass" : "fail", said(got));
 				});
 				await attempt("proof for another address", async () => {
-					const got = await status(await key.proof("GET", this.publicUrl("/v1/models"), bearer));
-					add("proof for another address", got === 401 ? "pass" : "fail", `answered ${got ?? "?"}`);
+					const got = await answer(await key.proof("GET", this.publicUrl("/v1/models"), bearer, await current()));
+					add("proof for another address", refusedRight(got) ? "pass" : "fail", said(got));
 				});
 				await attempt("proof used twice", async () => {
-					const proof = await key.proof("GET", me, bearer);
-					const first = await status(proof);
-					const second = await status(proof);
-					add("proof used twice", first === 200 && second === 401 ? "pass" : "fail", `first ${first ?? "?"}, again ${second ?? "?"}`);
+					const proof = await key.proof("GET", me, bearer, await current());
+					const first = await answer(proof);
+					const second = await answer(proof);
+					add("proof used twice", first.status === 200 && refusedRight(second) ? "pass" : "fail", `first ${first.status ?? "?"}, again ${said(second).replace("answered ", "")}`);
 				});
 			}
 		} else skip("device key");
 
 		if (has("mcp") || !d) {
 			await attempt("MCP tools", async () => {
-				const connection = await connectRemote(`${this.config.name}-check`, { url: `${this.route.base}/mcp`, headers: (request) => this.authHeaders(request.method, request.url), ca: this.route.ca, origin: "site" });
+				const connection = await connectRemote(`${this.config.name}-check`, { url: `${this.route.base}/mcp`, headers: (request) => this.authHeaders(request.method, request.url), ca: this.route.ca, origin: "site", answered: this.answered });
 				const unreviewed = connection.tools.filter((tool) => tool.unreviewed).length;
 				add("MCP tools", "pass", `${connection.tools.length} tools${unreviewed ? `, ${unreviewed} unreviewed` : ""}`);
 				const data = d?.conformance?.data_tool;
@@ -971,6 +1011,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		if (!this.offers("attach")) throw Object.assign(new Error(`${this.title} doesn't stream sandbox processes.`), { unsupported: true });
 		const id = await this.sandbox(signal);
 		const url = `${this.route.base}/v1/containers/${encodeURIComponent(id)}/attach`;
+		await this.freshNonce();
 		return attachSocket(url.replace(/^http/, "ws"), await this.authHeaders("GET", url), spec, this.route.ca);
 	}
 
@@ -982,7 +1023,16 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		const kept = this.ports.get(`${id}:${port}`);
 		if (kept) return kept;
 		const prefix = `${this.route.base}/v1/containers/${encodeURIComponent(id)}/ports/${port}`;
-		const opened = openPort({ url: (p) => `${prefix}${p}`, headers: (method, url) => this.authHeaders(method, url), ca: this.route.ca }, path);
+		const opened = openPort(
+			{
+				url: (p) => `${prefix}${p}`,
+				// A page's requests through the port can't be sent twice, so the nonce is kept recent beforehand.
+				headers: async (method, url) => (await this.freshNonce(), this.authHeaders(method, url)),
+				answered: (response) => void this.noteNonce(response),
+				ca: this.route.ca,
+			},
+			path,
+		);
 		this.ports.set(`${id}:${port}`, opened);
 		return opened;
 	}

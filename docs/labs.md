@@ -108,10 +108,14 @@ from copying it. The lab makes a copied token worth little:
   its private half in the OS credential store (an owner-only file where there is none), and registers the public half
   (`POST /v1/devices`, signed by that key). Every request, MCP included, then carries a DPoP proof (RFC 9449): `htm`,
   `htu` (the lab's public address even over the LAN), `iat`, a single-use `jti`, and `ath`, the hash of the exact
-  bearer in that request. `policy.device_proof` is `off` (a lab staging the change: proofs it gets are still checked, none are asked for), `optional` or `required`. A token copied into
-  another tool fails. Access doesn't issue DPoP-bound tokens, so the lab's endpoint checks the proof. On
-  `device_unregistered` the client registers a new key; on `device_revoked` it stops until the person signs in again,
-  so revoking a lost laptop sticks. Sign-out revokes the key (`DELETE /v1/devices/{id}`). MCP is standardizing the same
+  bearer in that request. `policy.device_proof` is `off` (a lab staging the change: proofs it gets are still checked,
+  none are asked for), `optional` or `required`. A token copied into another tool fails. Access doesn't issue
+  DPoP-bound tokens, so the lab's endpoint checks the proof. On `device_unregistered` the client registers a new key;
+  on `device_revoked` it stops until the person signs in again, so revoking a lost laptop sticks; on `device_mismatch`
+  or `signin_stale` it asks for a new sign-in. A lab that issues nonces (RFC 9449 section 8) sends `DPoP-Nonce` on its
+  responses: the client puts the latest one in every proof and answers `use_dpop_nonce` by sending once more. Before a
+  request it can't send twice (an upload, a WebSocket, a page's request through a port), it fetches a fresh nonce if
+  its own is over 4 minutes old. Sign-out revokes the key (`DELETE /v1/devices/{id}`). MCP is standardizing the same
   profile (SEP-1932).
 - **Quotas and alerts.** Per-person request and token limits, and an alert when use leaves the person's pattern.
 
