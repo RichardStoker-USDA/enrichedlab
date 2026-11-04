@@ -19,6 +19,9 @@ import { Sites } from "../packages/engine/src/sites/sites.ts";
 import { Checkpoints } from "../packages/engine/src/session/checkpoint.ts";
 import { findSkills } from "../packages/engine/src/skills.ts";
 import { runHooks } from "../packages/engine/src/hooks.ts";
+
+// The shell checks and hooks below are written for sh-style shells; on Windows every command asks.
+const posix = process.platform !== "win32";
 import { searchTool } from "../packages/engine/src/tools/search.ts";
 
 /** A temporary folder for one test; all of them are removed when the file's tests finish. */
@@ -109,7 +112,7 @@ describe("shell", () => {
 	const ws = new LocalWorkspace(root);
 	const inside = (p: string) => ws.inside(p);
 
-	test("everyday reading runs without asking", () => {
+	test.if(posix)("everyday reading runs without asking", () => {
 		for (const c of [
 			"ls -la", "git status && git diff", "rg foo src | head", "cat src/a.txt 2>/dev/null", "node --version",
 			"rg 'a|b' src", "git log --oneline -5", "git branch", "git branch -a", "git config --get user.name",
@@ -158,7 +161,7 @@ describe("permissions", () => {
 		expect(local.action === "ask" && local.reason).toContain("your network");
 	});
 
-	test("a read-only command outside the project says why it asks", () => {
+	test.if(posix)("a read-only command outside the project says why it asks", () => {
 		const verdict = decide(shell, { command: "cat /etc/hosts" }, ws, config, new Set());
 		expect(verdict.action === "ask" && verdict.reason).toBe("It reads outside the project folder.");
 	});
@@ -247,7 +250,7 @@ describe("skills, hooks and search", () => {
 		expect(skills.map((s) => `${s.name}:${s.description}`)).toEqual(["plots:Make figures", "review:project"]);
 	});
 
-	test("a before-tool hook that exits 2 blocks the call with its message", async () => {
+	test.if(posix)("a before-tool hook that exits 2 blocks the call with its message", async () => {
 		const outcome = await runHooks([{ match: "shell", command: "echo 'no deploys from here' >&2; exit 2" }], { tool: "shell", args: { command: "deploy" } }, tmpdir());
 		expect(outcome.blocked).toBe("no deploys from here");
 		expect((await runHooks([{ match: "edit", command: "exit 2" }], { tool: "shell", args: {} }, tmpdir())).blocked).toBeUndefined();
@@ -260,7 +263,7 @@ describe("skills, hooks and search", () => {
 });
 
 describe("sandbox", () => {
-	test("sandboxed commands run without asking; unsandboxed ones go through the usual question", () => {
+	test.if(posix)("sandboxed commands run without asking; unsandboxed ones go through the usual question", () => {
 		const config = { permissions: { mode: "ask", allowCommands: [] } } as unknown as LabConfig;
 		const shell = { name: "shell", kind: "exec" } as unknown as Tool;
 		const ws = { sandboxed: "seatbelt", inside: () => true } as never;
@@ -287,7 +290,7 @@ describe("second review", () => {
 		expect(decide(read, { path: "/etc/hosts" }, ws, config, new Set([key])).action).toBe("run");
 	});
 
-	test("a sandboxed command still asks when it names a path outside the project", () => {
+	test.if(posix)("a sandboxed command still asks when it names a path outside the project", () => {
 		const shell = { name: "shell", kind: "exec" } as unknown as Tool;
 		const sandboxed = Object.assign(Object.create(ws), { sandboxed: "seatbelt" });
 		expect(decide(shell, { command: "make test" }, sandboxed, config, new Set()).action).toBe("run");
@@ -334,7 +337,7 @@ describe("git push", () => {
 });
 
 describe("own-branch commits", () => {
-	test("in a session's own worktree, add and commit run; push, amend and commits elsewhere ask", () => {
+	test.if(posix)("in a session's own worktree, add and commit run; push, amend and commits elsewhere ask", () => {
 		const config = { permissions: { mode: "ask", allowCommands: [] } } as unknown as LabConfig;
 		const shell = { name: "shell", kind: "exec" } as unknown as Tool;
 		const repo = scratch("own");
@@ -373,7 +376,8 @@ describe("repository handoff", () => {
 		git(far, "init", "-q");
 		git(far, "fetch", "-q", bundle, `${sent.ref}:refs/heads/work`);
 		git(far, "checkout", "-q", "work");
-		expect(readFileSync(join(far, "a.txt"), "utf8")).toBe("two\n");
+		// git may check files out with CRLF on Windows.
+		expect(readFileSync(join(far, "a.txt"), "utf8").replace(/\r\n/g, "\n")).toBe("two\n");
 		expect(existsSync(join(far, ".env"))).toBe(false);
 		writeFileSync(join(far, "b.txt"), "made far away\n");
 		git(far, "add", ".");

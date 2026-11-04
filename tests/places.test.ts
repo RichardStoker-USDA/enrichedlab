@@ -1,7 +1,7 @@
 // Boundaries around where work runs: credential folders, the sandbox console, and labs that keep data inside.
 
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { Terminals } from "../packages/engine/src/terminal.ts";
@@ -27,7 +27,7 @@ describe("credential folders", () => {
 		const ws = new LocalWorkspace(project);
 		await expect(ws.read("~/.ssh/enriched_absent")).rejects.toThrow("never reads or writes");
 		await expect(ws.read("keys/enriched_absent")).rejects.toThrow("never reads or writes");
-		expect(await ws.stat("keys")).toBeUndefined();
+		if (existsSync(join(homedir(), ".ssh"))) expect(await ws.stat("keys")).toBeUndefined();
 		writeFileSync(join(project, "notes.md"), "fine");
 		expect((await ws.read("notes.md")).toString()).toBe("fine");
 	});

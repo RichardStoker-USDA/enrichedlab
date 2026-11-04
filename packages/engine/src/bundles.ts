@@ -58,7 +58,8 @@ const GRANT_MAX_BYTES = 5 * 1024 * 1024;
 export function readBundle(dir: string): BundleContents {
 	const root = resolve(dir);
 	const fill = (value: string) => value.replaceAll("${BUNDLE_ROOT}", root).replaceAll("${CLAUDE_PLUGIN_ROOT}", root);
-	const filled = <T>(value: T): T => JSON.parse(fill(JSON.stringify(value ?? {})));
+	// Fill each string where it sits: a Windows path's backslashes would break the JSON text if filled there.
+	const filled = <T>(value: T): T => JSON.parse(JSON.stringify(value ?? {}), (_key, v) => (typeof v === "string" ? fill(v) : v));
 	const inside = (path: string | undefined) => {
 		if (!path) return undefined;
 		const full = resolve(root, fill(path));

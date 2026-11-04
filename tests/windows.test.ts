@@ -16,6 +16,11 @@ describe("Windows command lines", () => {
 });
 
 describe.if(process.platform === "win32")("Windows containment", () => {
+	test("the helper starts a command under the restricted token and returns its exit code", () => {
+		const helper = Bun.spawnSync([process.execPath, join(import.meta.dir, "..", "packages", "cli", "src", "main.ts"), "__contain", JSON.stringify([tmpdir()]), "--", "cmd.exe", "/d", "/c", "exit 7"]);
+		expect({ code: helper.exitCode, stderr: helper.stderr.toString().slice(0, 1_500) }).toEqual({ code: 7, stderr: "" });
+	}, 60_000);
+
 	test("writes inside the project, not elsewhere in the home folder", () => {
 		const project = mkdtempSync(join(tmpdir(), "contain-"));
 		const outside = join(homedir(), "contain_outside_codetestfile.txt");
