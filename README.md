@@ -30,8 +30,10 @@ Updates are signed and install themselves the same way: the app offers them, `el
 
 - **Your lab sends an invite link.** Open it; EnrichedLab adds the lab and opens the lab's sign-in page. Its models,
   tools and sandbox appear once you're signed in.
-- **Your own account.** Add an OpenAI, Anthropic, Google Gemini or OpenRouter key under *Add a service* in the model
-  menu. Keys go to your computer's credential store.
+- **Your ChatGPT plan.** Choose *Continue with ChatGPT* under *Model services* in the model menu (or run
+  `el service add chatgpt`). Requests then use the usage included in your plan.
+- **Your own key.** Add an OpenAI, Anthropic, Google Gemini or OpenRouter key in the same place. Keys go to your
+  computer's credential store.
 - **On this computer.** Models running in Ollama or LM Studio appear on their own.
 
 ## What it does
@@ -56,7 +58,7 @@ el                       # a session in this folder; the window opens when the a
 el app                   # open the window
 el run "task"            # one task, no interface; --allow lets it edit and run commands
 el login <lab>           # sign in to a lab you've added
-el service add gemini    # use your own key for a model service
+el service add chatgpt   # use your ChatGPT plan; or add a key: el service add gemini
 el doctor                # check the setup
 ```
 
