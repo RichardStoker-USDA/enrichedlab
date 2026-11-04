@@ -2,7 +2,7 @@
 // without changing its tools. The local workspace acts in the project folder with the person's own rights.
 
 import { spawn } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readlinkSync, realpathSync } from "node:fs";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -54,13 +54,22 @@ function pickShell(): { file: string; args: (command: string) => string[]; name:
 }
 
 /** realpath of the longest existing prefix, with the rest appended: works for files that don't exist yet. */
-function real(path: string): string {
+function real(path: string, depth = 0): string {
 	const rest: string[] = [];
 	let current = path;
 	for (;;) {
 		try {
 			return join(realpathSync.native(current), ...rest);
 		} catch {
+			// A link whose target doesn't exist yet still says where a write would land: follow it.
+			if (depth < 16) {
+				try {
+					const target = readlinkSync(current);
+					return real(join(isAbsolute(target) ? target : join(dirname(current), target), ...rest), depth + 1);
+				} catch {
+					// Not a link: look at the parent.
+				}
+			}
 			const parent = dirname(current);
 			if (parent === current) return path;
 			rest.unshift(basename(current));

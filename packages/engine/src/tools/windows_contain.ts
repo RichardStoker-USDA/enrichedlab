@@ -46,16 +46,22 @@ export function sandboxSid(home: string): string {
 	return sid;
 }
 
-/** Let the sandbox SID write in `folders` (once per folder; the grant is inherited by what's inside). */
+/** Let the sandbox SID write in `folders` (once per folder; the grant is inherited by what's inside). icacls can't
+ * name a SID that isn't an account, so this goes through .NET's ACL API, changing access rules only. */
 export function grantWrites(home: string, sid: string, folders: string[]): void {
 	const record = join(home, "sandbox_grants.json");
 	const done = new Set<string>(existsSync(record) ? (JSON.parse(readFileSync(record, "utf8")) as string[]) : []);
-	for (const folder of folders) {
-		if (done.has(folder.toLowerCase()) || !existsSync(folder)) continue;
-		const run = Bun.spawnSync(["icacls", folder, "/grant", `*${sid}:(OI)(CI)M`, "/Q", "/C"], { stdout: "ignore", stderr: "pipe" });
-		if (run.exitCode !== 0) throw new Error(`Couldn't let the sandbox write in ${folder}: ${run.stderr.toString().trim()}`);
-		done.add(folder.toLowerCase());
-	}
+	const todo = folders.filter((f) => !done.has(f.toLowerCase()) && existsSync(f));
+	if (!todo.length) return;
+	const quote = (text: string) => `'${text.replaceAll("'", "''")}'`;
+	const script = [
+		`$sid = New-Object System.Security.Principal.SecurityIdentifier(${quote(sid)})`,
+		"$rule = New-Object System.Security.AccessControl.FileSystemAccessRule($sid, 'Modify', 'ContainerInherit,ObjectInherit', 'None', 'Allow')",
+		`foreach ($p in @(${todo.map(quote).join(",")})) { $d = Get-Item -LiteralPath $p; $acl = $d.GetAccessControl('Access'); $acl.AddAccessRule($rule); $d.SetAccessControl($acl) }`,
+	].join("; ");
+	const run = Bun.spawnSync(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script], { stdout: "ignore", stderr: "pipe" });
+	if (run.exitCode !== 0) throw new Error(`Couldn't let the sandbox write in ${todo.join(", ")}: ${run.stderr.toString().trim().slice(0, 400)}`);
+	for (const f of todo) done.add(f.toLowerCase());
 	writeFileSync(record, JSON.stringify([...done]));
 }
 
