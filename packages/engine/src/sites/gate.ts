@@ -52,6 +52,12 @@ interface GateMe {
 
 const title = (entry: LabAppEntry) => `${entry.title || entry.name} ${entry.version}`;
 
+/** The sha-256 a response's `Repr-Digest` (RFC 9530) gives, in hex; undefined when it carries none. */
+export function reprSha256(response: Response): string | undefined {
+	const match = /(?:^|,)\s*sha-256=:([A-Za-z0-9+/]+={0,2}):/.exec(response.headers.get("repr-digest") ?? "");
+	return match ? Buffer.from(match[1]!, "base64").toString("hex") : undefined;
+}
+
 export class GateSite implements SiteAdapter, SandboxApi {
 	who?: string;
 	owner = false;
@@ -247,9 +253,9 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			signal?: AbortSignal;
 			/** a proof to send instead of a fresh one (el lab check) */
 			dpop?: string;
-			/** don't wait for a sandbox that's starting; answer at once */
+			/** don't wait for a sandbox that's starting, or a scanner that's down; answer at once */
 			noWait?: boolean;
-			/** milliseconds already spent waiting for the sandbox to start */
+			/** milliseconds already spent waiting for the sandbox to start or the scanner to come back */
 			waited?: number;
 		} = {},
 		retried = false,
@@ -302,16 +308,18 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				throw Object.assign(new Error(`${this.title} revoked this computer's key. Sign in again (el login ${this.config.name}) to register a new one.`), { status: 401 });
 			}
 		}
-		if (response.status === 409 && !streamed && !init.noWait) {
+		if ((response.status === 409 || response.status === 503) && !streamed && !init.noWait) {
 			const code = ((await response.clone().json().catch(() => undefined)) as { error?: { code?: string } } | undefined)?.error?.code;
 			const waited = init.waited ?? 0;
-			if (code === "sandbox_starting" && waited < 180_000) {
-				// The lab is starting a stopped sandbox for this request: wait as long as it says, then send it again.
+			// The lab is starting a stopped sandbox for this request, or its malware scanner is down while a file leaves the
+			// sandbox: wait as long as it says, then send the request again, for up to 3 minutes in all.
+			const most = code === "sandbox_starting" ? 30 : code === "scanner_unavailable" ? 60 : 0;
+			if (most && waited < 180_000) {
 				const after = Number(response.headers.get("retry-after"));
-				const wait = (Number.isFinite(after) && response.headers.has("retry-after") ? Math.min(after, 30) : 5) * 1000;
+				const wait = Math.max((Number.isFinite(after) && response.headers.has("retry-after") ? Math.min(after, most) : 5) * 1000, 1_000);
 				await response.arrayBuffer();
-				await sleep(Math.max(wait, 1_000), init.signal);
-				return this.call(method, path, { ...init, waited: waited + Math.max(wait, 1_000) }, retried);
+				await sleep(wait, init.signal);
+				return this.call(method, path, { ...init, waited: waited + wait }, retried);
 			}
 		}
 		if (response.status === 410 && this.container && path.startsWith(`/v1/containers/${this.container}`)) {
@@ -330,6 +338,9 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			const worded: Record<string, string> = {
 				device_pending: this.pendingText,
 				approve_requires_device: `Approve from a computer that's already approved for ${this.title}.`,
+				file_refused: "The malware scanner stopped this file from leaving the sandbox.",
+				scanner_unavailable: `${this.title}'s malware scanner is down, so files can't leave the sandbox right now. Try again in a few minutes.`,
+				file_too_large: `This file is larger than ${this.title} lets you download. Compress or split it in the sandbox and try again.`,
 			};
 			const message = (detail.error?.code && worded[detail.error.code]) || detail.error?.message || `${this.config.name} answered ${response.status}.`;
 			if (detail.error?.code === "device_pending" && this.device && !this.device.pending) {
@@ -545,7 +556,10 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		const base = [this.route.base, new URL(this.config.url).origin].find((b) => uri === b || uri.startsWith(`${b}/`));
 		if (!base) throw new Error(`${uri} isn't an address of ${this.title}.`);
 		const response = await this.call("GET", uri.slice(base.length), { headers: { accept: "*/*" }, signal });
-		return new Uint8Array(await response.arrayBuffer());
+		const bytes = new Uint8Array(await response.arrayBuffer());
+		const said = reprSha256(response);
+		if (said && said !== createHash("sha256").update(bytes).digest("hex")) throw new Error(`The file from ${this.title} doesn't match the checksum the lab sent with it.`);
+		return bytes;
 	}
 
 	/** Use by lab and group (GET /v1/usage). */
@@ -710,6 +724,22 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				try {
 					const ran = await this.json<{ exit_code?: number; stdout?: string }>("POST", `/v1/containers/${made.id}/exec`, { json: { command: "echo ok", timeout_seconds: 30 }, signal: AbortSignal.timeout(120_000) });
 					add("sandbox runs a command", ran.exit_code === 0 && ran.stdout?.trim() === "ok" ? "pass" : "fail", `exit ${ran.exit_code}`);
+					await attempt("file download", async () => {
+						// A small file in and out again: the lab scans it on the way out and says the checksum it passed (RFC 9530).
+						const text = `el-file-ok ${randomBytes(6).toString("hex")}\n`;
+						const boundary = `enrichedlab-${randomBytes(12).toString("hex")}`;
+						const form = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="el-check.txt"\r\nContent-Type: text/plain\r\n\r\n${text}\r\n--${boundary}--\r\n`;
+						const sent = await this.json<{ path: string }>("POST", `/v1/containers/${made.id}/files`, { body: form, headers: { "content-type": `multipart/form-data; boundary=${boundary}` }, signal: t() });
+						const list = await this.json<{ data: { id: string; path: string }[] }>("GET", `/v1/containers/${made.id}/files?limit=100&order=asc`, { signal: t() });
+						const file = list.data.find((f) => f.path === sent.path);
+						if (!file) return add("file download", "fail", `the file list doesn't show ${sent.path}`);
+						const got = await this.call("GET", `/v1/containers/${made.id}/files/${file.id}/content`, { headers: { accept: "*/*" }, signal: t() });
+						const bytes = Buffer.from(await got.arrayBuffer());
+						const said = reprSha256(got);
+						if (bytes.toString() !== text) return add("file download", "fail", "the bytes that came back differ from the ones sent");
+						const right = said === createHash("sha256").update(bytes).digest("hex");
+						add("file download", right ? "pass" : "fail", right ? "same bytes, and Repr-Digest matches them" : said ? "Repr-Digest doesn't match the bytes" : "no Repr-Digest header");
+					});
 					if (has("attach")) {
 						const url = `${this.route.base}/v1/containers/${encodeURIComponent(made.id)}/attach`;
 						const process = await attachSocket(url.replace(/^http/, "ws"), await this.authHeaders("GET", url), { argv: ["sh", "-c", "read line; echo got:$line; read more; echo also:$more; echo note >&2; exit 3"], timeout_seconds: 60 }, this.route.ca);
@@ -921,6 +951,9 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				if (!out.write(chunk)) await new Promise((r) => out.once("drain", r));
 			}
 			await new Promise<void>((resolve, reject) => out.end((error?: Error | null) => (error ? reject(error) : resolve())));
+			// The lab sends the checksum of the bytes its scanners passed (RFC 9530): keep the file only if it matches.
+			const said = reprSha256(response);
+			if (said && said !== hash.copy().digest("hex")) throw new ToolError(`${wanted} arrived different from what ${this.title}'s scanner passed, so it wasn't saved. Try again.`);
 			await rename(temp, target);
 		} catch (error) {
 			await rm(temp, { force: true });

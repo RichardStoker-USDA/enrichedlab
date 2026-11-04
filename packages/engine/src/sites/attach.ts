@@ -19,7 +19,7 @@ export interface Attached {
 	signal(name: "TERM" | "KILL"): void;
 	onStdout(listener: (chunk: Uint8Array) => void): void;
 	onStderr(listener: (chunk: Uint8Array) => void): void;
-	/** The exit code, null when the process was stopped; rejects when the lab refused or the connection broke. */
+	/** The exit code (124 when it ran past timeout_seconds), null when it was stopped; rejects when the lab refused or the connection broke. */
 	readonly exit: Promise<number | null>;
 	close(): void;
 }

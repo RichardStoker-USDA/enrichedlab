@@ -28,7 +28,7 @@ const me = {
 	],
 	policy: { keep_data_inside: false },
 };
-const seen: { cursor?: string | null; deleted?: string } = {};
+const seen: { cursor?: string | null; deleted?: string; uploaded: string } = { uploaded: "" };
 
 const lab = Bun.serve<{ stdin: string; started: boolean }, never>({
 	port: 0,
@@ -61,6 +61,15 @@ const lab = Bun.serve<{ stdin: string; started: boolean }, never>({
 				return Response.json({ exit_code: 0, stdout: "ok\n", stderr: "" });
 			case "/v1/containers/c1/attach":
 				return srv.upgrade(request, { data: { stdin: "", started: false } }) ? undefined : new Response("", { status: 400 });
+			case "/v1/containers/c1/files":
+				if (request.method === "POST") {
+					const file = (await request.formData()).get("file") as File;
+					seen.uploaded = await file.text();
+					return Response.json({ path: `/sandbox/work/${file.name}`, bytes: file.size });
+				}
+				return Response.json({ data: [{ id: "u1", path: "/sandbox/work/el-check.txt", bytes: seen.uploaded.length }] });
+			case "/v1/containers/c1/files/u1/content":
+				return new Response(seen.uploaded, { headers: { "repr-digest": `sha-256=:${createHash("sha256").update(seen.uploaded).digest("base64")}:` } });
 			case "/v1/files/f1/content":
 				return new Response("plot,yield\nP1,5.1\n");
 			case "/v1/events": {

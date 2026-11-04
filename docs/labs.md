@@ -21,14 +21,14 @@ look the same to EnrichedLab.
 | `GET /v1/me` | a stable pseudonymous `subject` (never an email), memberships (lab, research group, roles), policy | built, with ETag |
 | `GET /v1/models` | the models this person may use, with context, output limit and reasoning levels | built, with ETag |
 | `POST /mcp` | MCP tools, filtered per person; MCP 2026-07-28 stateless, so any replica answers any request | built |
-| `/v1/containers` | the person's sandbox: run, background jobs, files in and out; `profile` picks a size | built |
+| `/v1/containers` | the person's sandbox: run, background jobs, files in and out; `profile` picks a size. A file leaving the sandbox passes the lab's malware scanners first and comes with `Repr-Digest` (RFC 9530) of the bytes they passed; `422 file_refused` when a scanner stops it, `503 scanner_unavailable` with `Retry-After` while one is down, `413 file_too_large` past the person's limit | built: downloads are kept only when their sha-256 matches `Repr-Digest`; waits out `scanner_unavailable` for up to 3 minutes; `el lab check` sends a file in and out |
 | `GET /v1/bundles` | skills, instructions, MCP servers and apps granted by role | built, with ETag |
 | `GET /v1/events` | server-sent events with a commit-ordered `id`; resume with `Last-Event-ID`; a cursor older than the history kept gets `event: reset` | built: shown as notices; cursor kept across restarts |
 | `POST /v1/guard` | the lab's classifiers: `{stage, text, session?, tool?}` → `{decision, categories, reasons, policy_version, receipt_id}` | checked by `el lab check`; sessions call it next |
 | `GET /v1/usage` | tokens, GPU and sandbox seconds by lab and group, for a 7- or 30-day window | `el usage <lab>` |
 | `POST /v1/devices` | registers the client's device key (ES256) for sender-bound tokens; `GET` lists them; `DELETE /v1/devices/{id}` revokes one | built: proofs on every request; `el lab check` tries a proof for another token, another address, and one used twice |
 | `/v1/containers/{id}/ports/{port}/…` | HTTP and WebSocket into a port of the sandbox, header auth only, every app page served with `Content-Security-Policy: sandbox` | built: `<lab>_sandbox_open_port` opens the app in the browser pane through a loopback proxy |
-| `/v1/containers/{id}/attach` | a process with stdin and output streamed over a WebSocket of JSON frames: the command first, then `{stdin}`, `{eof}`, `{signal}` in and `{stdout}`, `{stderr}`, `{exit_code}` out | built: app backends in a lab session run this way (apps.md); `el lab check` runs one |
+| `/v1/containers/{id}/attach` | a process with stdin and output streamed over a WebSocket of JSON frames: the command first, then `{stdin}`, `{eof}`, `{signal}` in and `{stdout}`, `{stderr}`, `{exit_code}` out (124 past `timeout_seconds`, null when stopped) | built: app backends in a lab session run this way (apps.md); `el lab check` runs one |
 | `GET /v1/apps`, `GET /v1/signers` | the app versions a person's groups may install (withdrawn ones stay listed with `withdrawn_at`), each package at `/v1/apps/{name}/{version}/package` with ETag = its sha256; and the signers the lab vouches for (`revoked_at` once revoked) | built: the Apps menu and `el apps` list them; installs check size and sha256 against the listing, then the package's signature and every file hash |
 
 Events carry `{type, at, id, session?}` plus fields of their own. Known types: `job.finished`, `agent.finished`,
@@ -116,12 +116,11 @@ from copying it. The lab makes a copied token worth little:
   responses: the client puts the latest one in every proof and answers `use_dpop_nonce` by sending once more. Before a
   request it can't send twice (an upload, a WebSocket, a page's request through a port), it fetches a fresh nonce if
   its own is over 4 minutes old. When the person already has a device, a new one registers as pending (202,
-  `device_approval_needed`): it works
-without proofs where they're optional, says "approve this computer from one of your other devices", and tries a signed
-read every 5 seconds until it's approved or the request lapses (15 minutes). The other devices get `device.pending`;
-the window asks the person (Approve, or Not mine to revoke it) and `el devices <lab>` lists them, with
-`el device approve|revoke <lab> <id>`. Nothing approves on its own. Sign-out revokes the key (`DELETE /v1/devices/{id}`). MCP is standardizing the same
-  profile (SEP-1932).
+  `device_approval_needed`): it works without proofs where they're optional, says "approve this computer from one of
+  your other devices", and tries a signed read every 5 seconds until it's approved or the request lapses (15 minutes).
+  The other devices get `device.pending`; the window asks the person (Approve, or Not mine to revoke it) and
+  `el devices <lab>` lists them, with `el device approve|revoke <lab> <id>`. Nothing approves on its own. Sign-out
+  revokes the key (`DELETE /v1/devices/{id}`). MCP is standardizing the same profile (SEP-1932).
 - **Quotas and alerts.** Per-person request and token limits, and an alert when use leaves the person's pattern.
 
 ## Classifiers and the audit record
