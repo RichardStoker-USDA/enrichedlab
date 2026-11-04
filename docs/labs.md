@@ -44,7 +44,8 @@ stops with its files kept; the next use answers `409 sandbox_starting` with `Ret
 EnrichedLab waits and sends the request again. A stopped one is archived after a while (`409 sandbox_archived`):
 EnrichedLab calls `POST /v1/containers/{id}/restore` (202, same id), tells the person, and polls until it runs. A
 deleted one reads 404 (using it, `410 container_expired`); one still being deleted reads `deleting`. Either way
-EnrichedLab starts a new one and says the old files are gone.
+EnrichedLab starts a new one and says the old files are gone; if the lab refuses it with `429 too_many_containers`
+because the old one still counts, it waits up to a minute for that one to go, then asks again.
 
 Tools and results carry two markers. `_meta["org.enrichedlab/tier"]: "unvalidated"` marks a tool no person has
 reviewed yet: EnrichedLab shows it as unreviewed and asks before every call, in every permission mode. Data tools return

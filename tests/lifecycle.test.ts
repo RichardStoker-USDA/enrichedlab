@@ -9,7 +9,7 @@ const box = new Map<string, { status: string; polls: number; files: string }>();
 const calls: string[] = [];
 let made = 0;
 // How the next new sandbox is refused: once while Gate is busy, or because the person holds too many or storage is full.
-let refuse: "" | "busy-once" | "full" | "storage" = "";
+let refuse: "" | "busy-once" | "full" | "storage" | "one-at-once" = "";
 let deletes = 0;
 
 const lab = Bun.serve({
@@ -28,6 +28,8 @@ const lab = Bun.serve({
 				return Response.json({ error: { code: "sandbox_busy", message: "Gate is busy starting other sandboxes. Try again shortly." } }, { status: 503, headers: { "retry-after": "0" } });
 			}
 			if (refuse === "full") return Response.json({ error: { code: "too_many_containers", message: "You hold 20 containers, the most one person may keep. Delete one you no longer need first." } }, { status: 429 });
+			// One sandbox at a time: one still being deleted counts until it's gone.
+			if (refuse === "one-at-once" && [...box.values()].some((c) => c.status === "deleting")) return Response.json({ error: { code: "too_many_containers", message: "You may run 1 container at once. Delete one first." } }, { status: 429 });
 			if (refuse === "storage") return Response.json({ error: { code: "storage_full", message: "Your files and resting sandboxes fill your storage. Delete some first." } }, { status: 413 });
 			const id = `new${++made}`;
 			box.set(id, { status: "running", polls: 0, files: "" });
@@ -49,7 +51,11 @@ const lab = Bun.serve({
 			return c.files === "slow-delete" ? Response.json({ id, object: "container.deleted", deleted: false, status: "deleting" }, { status: 202 }) : Response.json({ id, object: "container.deleted", deleted: true });
 		}
 		if (!rest) {
-			// Starting and restoring finish after a couple of looks.
+			// A delete in progress, starting and restoring finish after a couple of looks.
+			if (c.status === "deleting" && c.files === "goes" && ++c.polls >= 2) {
+				c.status = "deleted";
+				return Response.json({ error: { code: "not_found", message: "no such container" } }, { status: 404 });
+			}
 			if ((c.status === "starting" || c.status === "restoring") && ++c.polls >= 2) c.status = c.status === "restoring" && c.files === "fail" ? "archived" : "running";
 			return Response.json({ id, status: c.status });
 		}
@@ -131,6 +137,22 @@ describe("sandbox lifecycle", () => {
 		expect((await going.s.run("echo hi", 30)).stdout).toMatch(/^ran in new\d+\n$/);
 		expect(Date.now() - started).toBeLessThan(2_000);
 	});
+
+	test("with one sandbox allowed at a time, a new one waits for the one still being deleted, then starts", async () => {
+		// Earlier tests leave sandboxes mid-delete; only this test's count here.
+		for (const [id, c] of box) if (c.status === "deleting") box.delete(id);
+		refuse = "one-at-once";
+		const { s } = await site("c-going", { status: "deleting", files: "goes" });
+		expect((await s.run("echo hi", 30)).stdout).toMatch(/^ran in new\d+\n$/);
+		expect(box.get("c-going")!.status).toBe("deleted");
+		// One that stays deleting: the lab's refusal stands, with where to act on it.
+		GateSite.leavingWaitMs = 50;
+		const stuck = await site("c-stuck", { status: "deleting" });
+		await expect(stuck.s.run("echo hi", 30)).rejects.toThrow("You may run 1 container at once. Delete one first. el sandboxes devlab lists");
+		box.delete("c-stuck");
+		GateSite.leavingWaitMs = 60_000;
+		refuse = "";
+	}, 15_000);
 
 	test("a lab too busy to take a new sandbox is waited out; one that's full says how to make room", async () => {
 		const { s } = await site("c-gone", { status: "deleted" });

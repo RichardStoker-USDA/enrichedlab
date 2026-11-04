@@ -76,6 +76,8 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	private mcp?: McpConnection;
 	private container?: string;
 	private starting?: Promise<string>;
+	/** A sandbox of the person's the lab is still deleting: it counts toward their limits until the lab confirms. */
+	private leaving?: string;
 	/** Background jobs started in the sandbox, so shutdown never deletes a sandbox while one runs. */
 	private jobs = new Set<string>();
 	/** Repositories sent to the sandbox from this engine: sandbox folder → local repository and the commit sent. */
@@ -182,6 +184,9 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	/** How often a key waiting for approval tries a signed read. */
 	static approvalPollMs = 5_000;
 
+	/** How long a new sandbox waits for one the lab is still deleting to free its place. */
+	static leavingWaitMs = 60_000;
+
 	/** Set by Sites: this computer's key was approved by another device, so connect again with it. */
 	onApproved?: () => void;
 	private approving?: ReturnType<typeof setInterval>;
@@ -266,9 +271,13 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	async deleteSandbox(id: string): Promise<"deleted" | "deleting"> {
 		const response = await this.call("DELETE", `/v1/containers/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(200_000) });
 		const body = (await response.json().catch(() => ({}))) as { deleted?: boolean };
-		// The engine's own one: the next command starts a new sandbox.
-		if (id === this.container) this.container = undefined;
-		return response.status === 202 || body.deleted === false ? "deleting" : "deleted";
+		const status = response.status === 202 || body.deleted === false ? "deleting" : "deleted";
+		// The engine's own one: the next command starts a new sandbox, after this one is gone if the lab needs that.
+		if (id === this.container) {
+			this.container = undefined;
+			if (status === "deleting") this.leaving = id;
+		}
+		return status;
 	}
 
 	async forget(): Promise<void> {
@@ -893,15 +902,16 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	private async sandbox(signal?: AbortSignal): Promise<string> {
 		if (this.container) {
 			const id = this.container;
-			const status = await this.containerStatus(id, signal);
-			if (status !== "deleted") {
+			const status = await this.containerStatus(id, signal, true);
+			if (status !== "deleted" && status !== "deleting") {
 				await this.wake(id, status, signal);
 				return id;
 			}
 			this.container = undefined;
+			if (status === "deleting") this.leaving = id;
 			this.onNotice?.(`Your ${this.title} sandbox was deleted, with its files. A new one starts now.`);
 		}
-		this.starting ??= this.json<{ id: string }>("POST", "/v1/containers", { json: { name: "EnrichedLab" }, signal: AbortSignal.timeout(300_000) })
+		this.starting ??= this.create(signal)
 			.then((made) => {
 				this.container = made.id;
 				return made.id;
@@ -912,11 +922,38 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		return this.starting;
 	}
 
-	/** A sandbox's lifecycle status; "deleted" when the lab no longer has it (404 or 410) or is still deleting it. */
-	private async containerStatus(id: string, signal?: AbortSignal): Promise<string> {
+	/**
+	 * POST /v1/containers. A sandbox the lab is still deleting counts toward the person's limits until it's gone
+	 * (usually seconds), so a refusal for too many is met by waiting for that one, then asking once more; the
+	 * refusal stands if it's still there after a minute.
+	 */
+	private async create(signal?: AbortSignal): Promise<{ id: string }> {
+		const post = () => this.json<{ id: string }>("POST", "/v1/containers", { json: { name: "EnrichedLab" }, signal: AbortSignal.timeout(300_000) });
+		try {
+			const made = await post();
+			this.leaving = undefined;
+			return made;
+		} catch (error) {
+			const leaving = this.leaving;
+			if ((error as { code?: string }).code !== "too_many_containers" || !leaving) throw error;
+			for (const until = Date.now() + GateSite.leavingWaitMs; Date.now() < until; ) {
+				await sleep(Math.min(2_000, GateSite.leavingWaitMs), signal);
+				if ((await this.containerStatus(leaving, signal, true)) !== "deleted") continue;
+				this.leaving = undefined;
+				return post();
+			}
+			throw error;
+		}
+	}
+
+	/**
+	 * A sandbox's lifecycle status; "deleted" when the lab no longer has it (404 or 410), and also while it's still
+	 * deleting it unless `exact`.
+	 */
+	private async containerStatus(id: string, signal?: AbortSignal, exact = false): Promise<string> {
 		try {
 			const status = (await this.json<{ status?: string }>("GET", `/v1/containers/${encodeURIComponent(id)}`, { signal })).status ?? "running";
-			return status === "deleting" ? "deleted" : status;
+			return status === "deleting" && !exact ? "deleted" : status;
 		} catch (error) {
 			const status = (error as { status?: number }).status;
 			if (status === 404 || status === 410) return "deleted";
