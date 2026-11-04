@@ -18,6 +18,8 @@ const lab = {
 	jtis: new Set<string>(),
 	nonce: undefined as string | undefined,
 	deleted: [] as string[],
+	/** Answer the next requests with this code, as Gate does for a bound or stale sign-in. */
+	code: undefined as string | undefined,
 };
 let next = 1;
 
@@ -64,6 +66,7 @@ const server = Bun.serve({
 			lab.devices.set(proof.thumb, device);
 			return Response.json({ ...device, current: true });
 		}
+		if (lab.code) return refuse(lab.code);
 		const device = lab.devices.get(proof.thumb);
 		if (!device) return refuse("device_unregistered");
 		if (device.revoked) return refuse("device_revoked");
@@ -142,6 +145,19 @@ describe("device-bound lab tokens", () => {
 		const registered = lab.devices.size;
 		await expect(site().connect()).rejects.toThrow("Sign in again");
 		expect(lab.devices.size).toBe(registered);
+	});
+
+	test("a sign-in bound to another key, or older than a revocation, asks for a new sign-in without retrying", async () => {
+		rmSync(file, { force: true });
+		const s = site();
+		await s.connect();
+		const before = lab.jtis.size;
+		lab.code = "device_mismatch";
+		await expect(me(s)).rejects.toThrow("is bound to another device key. Sign in again (el login devlab)");
+		lab.code = "signin_stale";
+		await expect(me(s)).rejects.toThrow("is older than a device revocation");
+		lab.code = undefined;
+		expect(lab.jtis.size).toBe(before + 2);
 	});
 
 	test("sign-out revokes the key at the lab and deletes it here", async () => {

@@ -158,6 +158,12 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				await this.enroll();
 				return this.call(method, path, init, true);
 			}
+			if (refused === "device_mismatch" || refused === "signin_stale") {
+				// The sign-in belongs to another key, or predates a revocation: only a new sign-in fixes it, so don't retry.
+				await response.arrayBuffer();
+				const why = refused === "device_mismatch" ? "is bound to another device key" : "is older than a device revocation";
+				throw Object.assign(new Error(`Your sign-in to ${this.title} ${why}. Sign in again (el login ${this.config.name}).`), { status: 401 });
+			}
 			if (refused === "device_revoked") {
 				// A revoked key is not replaced on its own: the person signs in again first.
 				this.device?.markRevoked();
