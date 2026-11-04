@@ -51,6 +51,7 @@ const HELP = `EnrichedLab ${VERSION}
   el site rename <name> <new-name> [--title "Display name"]
   el sites                        sites, who you are on each, and what they grant
   el lab check <lab> [--json]     check a lab against the lab contract (for people who run labs)
+  el devices <lab>                your computers at a lab; el device approve|revoke <lab> <id>
   el usage <lab> [--window 7d|30d]
                                   your use of a lab: tokens, GPU and sandbox hours
 
@@ -394,6 +395,22 @@ async function main(): Promise<void> {
 				out(`\n${rows.filter((r) => r.status === "pass").length} pass, ${failed} fail, ${rows.filter((r) => r.status === "skip").length} skip`);
 			}
 			process.exit(rows.some((r) => r.status === "fail") ? 1 : 0);
+		}
+		case "devices":
+		case "device": {
+			// A lab that binds sign-ins to devices: list them, and approve a new one or revoke one that isn't yours.
+			const [action, lab, id] = command === "devices" ? ["list", rest[0]] : rest;
+			const client = await connect();
+			if (action === "list" && lab) {
+				const devices = await client.call("lab.devices", { name: lab });
+				for (const d of devices) out(`${d.id}  ${d.status ?? "active"}${d.current ? "  this computer" : ""}  ${d.name ?? ""}\n  added ${d.created?.slice(0, 16).replace("T", " ") ?? "?"}${d.last_seen ? `, last used ${d.last_seen.slice(0, 16).replace("T", " ")}` : ""}`);
+				if (devices.some((d) => d.status === "pending")) out(`\nApprove one only if you just signed in on it: el device approve ${lab} <id>. If not, revoke it: el device revoke ${lab} <id>`);
+			} else if ((action === "approve" || action === "revoke") && lab && id) {
+				await client.call(action === "approve" ? "lab.device.approve" : "lab.device.revoke", { name: lab, id });
+				out(action === "approve" ? `Approved ${id}; it can use your ${lab} sign-in now.` : `Revoked ${id}; it can't use your ${lab} sign-in any more.`);
+			} else fail("el devices <lab> | el device approve <lab> <id> | el device revoke <lab> <id>");
+			client.close();
+			return;
 		}
 		case "usage": {
 			const name = rest[0] ?? fail("el usage <lab> [--window 7d|30d]");

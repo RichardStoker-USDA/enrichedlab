@@ -11,6 +11,12 @@ import type { SandboxApi } from "./sandbox_workspace.ts";
 import type { SiteConfig, SiteRoute } from "./sites.ts";
 
 export interface SiteAdapter {
+	/** Set by Sites: another device approved this computer's key, so connect again. */
+	onApproved?: () => void;
+	/** The person's devices at this lab, and approving or revoking one of them. */
+	devices?(): Promise<{ id: string; name?: string; status?: string; created?: string; last_seen?: string; current?: boolean; thumbprint?: string }[]>;
+	approveDevice?(id: string): Promise<void>;
+	revokeDevice?(id: string): Promise<void>;
 	/** Apps the lab offers this person, withdrawn versions included (GET /v1/apps). */
 	labApps?(): Promise<LabAppEntry[]>;
 	/** Signers the lab vouches for, revoked ones included (GET /v1/signers). */

@@ -125,6 +125,7 @@ export class Engine {
 			this.emit("site.updated", summary);
 		}, (notice) => this.emit("lab.notice", notice));
 		this.sites.onAppsChanged = (site) => this.emit("lab.apps.changed", { site });
+		this.sites.onDeviceRequest = (request) => this.emit("lab.device.pending", request);
 		this.terminals = new Terminals((name, params) => this.emit(name, params as never));
 		this.canvas = new CanvasStore(this.paths.canvases, () => this.origin(), (summary) => {
 			this.emit("canvas.updated", summary, summary.sessionId);
@@ -754,6 +755,14 @@ export class Engine {
 					if (!summary) throw new RpcError(-32000, `Installed ${done.name}, but it didn't load.`);
 					return summary;
 				}
+				case "lab.devices":
+					return (await this.sites.devices(need("name"))) as never;
+				case "lab.device.approve":
+					await this.sites.approveDevice(need("name"), need("id"));
+					return { ok: true };
+				case "lab.device.revoke":
+					await this.sites.revokeDevice(need("name"), need("id"));
+					return { ok: true };
 				case "lab.check":
 					return { rows: await this.sites.check(need("name")) };
 				case "lab.usage":

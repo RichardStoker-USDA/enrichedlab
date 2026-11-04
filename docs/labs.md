@@ -115,7 +115,12 @@ from copying it. The lab makes a copied token worth little:
   or `signin_stale` it asks for a new sign-in. A lab that issues nonces (RFC 9449 section 8) sends `DPoP-Nonce` on its
   responses: the client puts the latest one in every proof and answers `use_dpop_nonce` by sending once more. Before a
   request it can't send twice (an upload, a WebSocket, a page's request through a port), it fetches a fresh nonce if
-  its own is over 4 minutes old. Sign-out revokes the key (`DELETE /v1/devices/{id}`). MCP is standardizing the same
+  its own is over 4 minutes old. When the person already has a device, a new one registers as pending (202,
+  `device_approval_needed`): it works
+without proofs where they're optional, says "approve this computer from one of your other devices", and tries a signed
+read every 5 seconds until it's approved or the request lapses (15 minutes). The other devices get `device.pending`;
+the window asks the person (Approve, or Not mine to revoke it) and `el devices <lab>` lists them, with
+`el device approve|revoke <lab> <id>`. Nothing approves on its own. Sign-out revokes the key (`DELETE /v1/devices/{id}`). MCP is standardizing the same
   profile (SEP-1932).
 - **Quotas and alerts.** Per-person request and token limits, and an alert when use leaves the person's pattern.
 

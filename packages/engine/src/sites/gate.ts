@@ -133,7 +133,8 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	/** The route's sign-in, plus a proof for this request when the lab binds tokens to devices. */
 	private async authHeaders(method: string, url: string): Promise<Record<string, string>> {
 		const headers = await this.route.headers();
-		if (!this.device || this.device.revoked) return headers;
+		// A pending key can't sign yet: until another device approves it, requests go as they would without one.
+		if (!this.device || this.device.revoked || this.device.pending) return headers;
 		const bearer = /^(?:Bearer|DPoP)\s+(.+)$/i.exec(headers.authorization ?? "")?.[1];
 		return { ...headers, dpop: await this.device.proof(method, this.publicUrl(url), bearer, this.nonce) };
 	}
@@ -143,11 +144,90 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		if (!this.deviceFile) return;
 		const key = await DeviceKey.open(this.deviceFile, this.config.url);
 		if (key.revoked) throw Object.assign(new Error(`${this.title} revoked this computer's key. Sign in again (el login ${this.config.name}) to register a new one.`), { status: 401, revoked: true });
+		if (key.lapsed) {
+			// Nobody approved it in time and the lab dropped the request: ask again with a new key.
+			key.discard();
+			return this.enroll();
+		}
 		this.device = key;
-		if (key.id) return;
-		const made = await this.json<{ id: string; thumbprint?: string }>("POST", "/v1/devices", { json: { name: `EnrichedLab on ${hostname().replace(/\.local$/i, "")}`, jwk: key.publicJwk }, signal: AbortSignal.timeout(15_000) });
+		if (key.id) {
+			if (key.pending) this.awaitApproval(key);
+			return;
+		}
+		const made = await this.json<{ id: string; thumbprint?: string; status?: string; expires_at?: string }>("POST", "/v1/devices", {
+			json: { name: `EnrichedLab on ${hostname().replace(/\.local$/i, "")}`, jwk: key.publicJwk },
+			signal: AbortSignal.timeout(15_000),
+		});
 		if (made.thumbprint && made.thumbprint !== key.thumbprint) throw new Error(`${this.title} registered a different key than this computer sent.`);
-		key.registered(made.id);
+		// The person already has a device: this one waits until one of those approves it.
+		const pending = made.status === "pending" ? (made.expires_at ?? new Date(Date.now() + 15 * 60_000).toISOString()) : undefined;
+		key.registered(made.id, pending);
+		if (key.pending) this.awaitApproval(key);
+	}
+
+	/** How often a key waiting for approval tries a signed read. */
+	static approvalPollMs = 5_000;
+
+	/** Set by Sites: this computer's key was approved by another device, so connect again with it. */
+	onApproved?: () => void;
+	private approving?: ReturnType<typeof setInterval>;
+
+	private get pendingText(): string {
+		return `Approve this computer for ${this.title} from one of your other devices (el devices ${this.config.name} there, or the request it shows).`;
+	}
+
+	/** Wait for another device to approve this key: try a signed read every 5 seconds until it works or the request lapses. */
+	private awaitApproval(key: DeviceKey): void {
+		this.warning = this.pendingText;
+		if (this.approving) return;
+		this.onNotice?.(this.pendingText);
+		const stop = () => {
+			clearInterval(this.approving);
+			this.approving = undefined;
+		};
+		this.approving = setInterval(async () => {
+			if (!key.pending) {
+				stop();
+				if (key.lapsed) this.onNotice?.(`Nobody approved this computer for ${this.title} in time. Connect again (el login ${this.config.name}) to ask once more.`);
+				return;
+			}
+			const bearer = /^(?:Bearer|DPoP)\s+(.+)$/i.exec((await this.route.headers().catch(() => ({}) as Record<string, string>)).authorization ?? "")?.[1];
+			const proof = await key.proof("GET", this.publicUrl("/v1/me"), bearer, this.nonce);
+			const answer = await this.call("GET", "/v1/me", { dpop: proof, signal: AbortSignal.timeout(10_000) }).then(
+				async (r) => (await r.arrayBuffer(), "ok"),
+				(error: { dpop?: string; code?: string }) => error.dpop ?? error.code ?? "error",
+			);
+			if (answer === "ok") {
+				stop();
+				key.approved();
+				this.warning = undefined;
+				this.onNotice?.(`This computer is approved for ${this.title}.`);
+				this.onApproved?.();
+			} else if (answer === "device_revoked") {
+				stop();
+				key.markRevoked();
+				this.onNotice?.(`${this.title} refused this computer's key. Sign in again (el login ${this.config.name}) to ask once more.`);
+			}
+		}, GateSite.approvalPollMs);
+		this.approving.unref?.();
+	}
+
+	/** The person's devices at this lab (GET /v1/devices). */
+	async devices(): Promise<{ id: string; name?: string; status?: string; created?: string; last_seen?: string; current?: boolean; thumbprint?: string }[]> {
+		if (!this.offers("devices")) throw new Error(`${this.title} doesn't bind sign-ins to devices.`);
+		const listed = await this.json<unknown>("GET", "/v1/devices", { signal: AbortSignal.timeout(15_000) });
+		return (Array.isArray(listed) ? listed : ((listed as { data?: unknown[] }).data ?? [])) as never;
+	}
+
+	/** Approve another of the person's devices; the lab takes it only signed by an approved device, such as this one. */
+	async approveDevice(id: string): Promise<void> {
+		if (!this.device?.id || this.device.pending) throw new Error(`Approve from a computer that's already approved for ${this.title}; this one isn't yet.`);
+		await this.json("POST", `/v1/devices/${encodeURIComponent(id)}/approve`, { json: {}, signal: AbortSignal.timeout(15_000) });
+	}
+
+	/** Revoke one of the person's devices (a lost laptop, or a request that wasn't theirs). */
+	async revokeDevice(id: string): Promise<void> {
+		await this.call("DELETE", `/v1/devices/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(15_000) }).then((r) => r.arrayBuffer());
 	}
 
 	async forget(): Promise<void> {
@@ -246,10 +326,19 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				// gets another token Access will refuse the same way, so say what has to change instead.
 				throw new Error(`Cloudflare Access refused the sign-in token for ${this.config.name} (invalid_token). The site's Access application has to accept OAuth tokens (its binding cookie off); signing in again won't change it.`);
 			}
-			const detail = ((await response.json().catch(() => undefined)) ?? {}) as { error?: { message?: string } };
-			const message = detail.error?.message ?? `${this.config.name} answered ${response.status}.`;
+			const detail = ((await response.json().catch(() => undefined)) ?? {}) as { error?: { message?: string; code?: string } };
+			const worded: Record<string, string> = {
+				device_pending: this.pendingText,
+				approve_requires_device: `Approve from a computer that's already approved for ${this.title}.`,
+			};
+			const message = (detail.error?.code && worded[detail.error.code]) || detail.error?.message || `${this.config.name} answered ${response.status}.`;
+			if (detail.error?.code === "device_pending" && this.device && !this.device.pending) {
+				// The lab says this key still waits for approval: wait with it.
+				this.device.registered(this.device.id ?? "", new Date(Date.now() + 15 * 60_000).toISOString());
+				this.awaitApproval(this.device);
+			}
 			const error = new Error(response.status === 401 ? `${message.replace(/\.$/, "")}. Run el login ${this.config.name}.` : message);
-			throw Object.assign(error, { status: response.status, ...(refused ? { dpop: refused } : {}) });
+			throw Object.assign(error, { status: response.status, ...(refused ? { dpop: refused } : {}), ...(detail.error?.code ? { code: detail.error.code } : {}) });
 		}
 		return response;
 	}
@@ -303,6 +392,8 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				this.device = undefined;
 				this.warning = `Couldn't register this computer's key with ${this.title} (${redact(errorText(error))}).`;
 			}
+			// Waiting for approval where proofs are required: nothing works until then; the wait goes on in the background.
+			if (this.device?.pending && this.descriptor?.policy?.device_proof === "required") throw Object.assign(new Error(this.pendingText), { pending: true });
 		}
 		const me = await this.cached<GateMe>("/v1/me", AbortSignal.timeout(10_000));
 		this.who = me.handle;
@@ -319,6 +410,8 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		}
 		if (this.sandboxOn) tools.push(...this.sandboxTools());
 		this.tools = tools;
+		// Waiting for approval is what the person has to act on: it leads whatever else went wrong.
+		if (this.device?.pending && !this.warning?.startsWith(this.pendingText)) this.warning = [this.pendingText, this.warning].filter(Boolean).join(" ");
 	}
 
 	get title(): string {
@@ -512,13 +605,14 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		if (has("devices")) {
 			const key = this.device;
 			if (!key?.id) add("device key", "fail", this.warning ?? "this computer's key isn't registered");
+			else if (key.pending) add("device key", "skip", "registered; waiting for one of your other devices to approve it, so proofs can't be tried yet");
 			else {
 				await attempt("device key", async () => {
 					const listed = await this.json<unknown>("GET", "/v1/devices", { signal: t() });
 					const devices = (Array.isArray(listed) ? listed : ((listed as { data?: unknown[] }).data ?? [])) as { id?: string; thumbprint?: string; current?: boolean; revoked?: boolean }[];
-					const mine = devices.find((x) => x.id === key.id);
-					const fits = mine && mine.thumbprint === key.thumbprint && !mine.revoked;
-					add("device key", fits ? "pass" : "fail", !mine ? "the lab doesn't list this computer's key" : fits ? `registered${mine.current ? ", marked current" : ""}` : "listed with another thumbprint or revoked");
+					const mine = devices.find((x) => x.id === key.id) as { id?: string; thumbprint?: string; revoked?: unknown; status?: string; current?: boolean } | undefined;
+					const fits = mine && mine.thumbprint === key.thumbprint && !mine.revoked && (mine.status === undefined || mine.status === "active");
+					add("device key", fits ? "pass" : "fail", !mine ? "the lab doesn't list this computer's key" : fits ? `registered${mine.current ? ", marked current" : ""}` : `listed ${mine.status ?? ""} with ${mine.thumbprint === key.thumbprint ? "this" : "another"} thumbprint`.replace("  ", " "));
 				});
 				// A lab that accepts these bound nothing: each must be refused, as an invalid proof. Each proof carries the
 				// lab's current nonce, so the refusal is for what the row tests.
@@ -1043,6 +1137,10 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	}
 
 	async close(): Promise<void> {
+		// The next connection waits for approval itself. (A connect that failed is never closed: its wait goes on
+		// and reconnects through onApproved.)
+		clearInterval(this.approving);
+		this.approving = undefined;
 		for (const opened of this.ports.values()) opened.close();
 		this.ports.clear();
 		await this.mcp?.close().catch(() => undefined);

@@ -14,7 +14,7 @@ process.env.EL_KEYSTORE = "file";
 const PUBLIC = "https://lab.example.org";
 const TOKEN = "lab-token";
 const lab = {
-	devices: new Map<string, { id: string; thumbprint: string; revoked: boolean }>(),
+	devices: new Map<string, { id: string; thumbprint: string; revoked: boolean; status?: string }>(),
 	jtis: new Set<string>(),
 	nonce: undefined as string | undefined,
 	deleted: [] as string[],
@@ -22,6 +22,10 @@ const lab = {
 	code: undefined as string | undefined,
 	/** Nonce challenges sent (401 use_dpop_nonce). */
 	challenges: 0,
+	/** A person with a device already: new devices wait for approval (Gate's rule from publication 53). */
+	approval: false,
+	/** Proofs optional: a request without one is served. */
+	optional: false,
 };
 let next = 1;
 
@@ -63,9 +67,14 @@ async function answer(request: Request): Promise<Response> {
 		const url = new URL(request.url);
 		if (request.headers.get("authorization") !== `Bearer ${TOKEN}`) return new Response("", { status: 401 });
 		if (url.pathname === "/.well-known/enrichedlab-lab") {
-			return Response.json({ contract: "2026-11", name: "devlab", title: "Dev Lab", endpoints: { devices: true, models: true }, sign_in: { kind: "key" }, policy: { device_proof: "required" } });
+			return Response.json({ contract: "2026-11", name: "devlab", title: "Dev Lab", endpoints: { devices: true, models: true }, sign_in: { kind: "key" }, policy: { device_proof: lab.optional ? "optional" : "required" } });
 		}
 		if (url.pathname === "/v1/echo" && !request.headers.get("dpop")) return refuse("device_proof_required");
+		if (lab.optional && !request.headers.get("dpop")) {
+			// Proofs optional: an unsigned read is served.
+			if (url.pathname === "/v1/me") return Response.json({ subject: "u_1", handle: "pat", memberships: [{ lab: "devlab", roles: ["member"] }] });
+			if (url.pathname === "/v1/models") return Response.json({ data: [] });
+		}
 		const proof = await verify(request, url);
 		if ("code" in proof) {
 			const refused = refuse(proof.code);
@@ -79,14 +88,25 @@ async function answer(request: Request): Promise<Response> {
 		if (url.pathname === "/v1/devices" && request.method === "POST") {
 			const body = (await request.json()) as { jwk?: JsonWebKey };
 			if (body.jwk && thumbprint(body.jwk) !== proof.thumb) return Response.json({ error: { message: "the jwk isn't the key that signed" } }, { status: 400 });
-			const device = { id: `d${next++}`, thumbprint: proof.thumb, revoked: false };
+			const live = [...lab.devices.values()].some((d) => !d.revoked && d.status !== "pending");
+			const pending = lab.approval && live;
+			const device = { id: `d${next++}`, thumbprint: proof.thumb, revoked: false, status: pending ? "pending" : "active" };
 			lab.devices.set(proof.thumb, device);
+			if (pending) return Response.json({ id: device.id, status: "pending", expires_at: new Date(Date.now() + 15 * 60_000).toISOString() }, { status: 202 });
 			return Response.json({ ...device, current: true });
 		}
 		if (lab.code) return refuse(lab.code);
 		const device = lab.devices.get(proof.thumb);
 		if (!device) return refuse("device_unregistered");
 		if (device.revoked) return refuse("device_revoked");
+		if (device.status === "pending") return Response.json({ error: { code: "device_pending", message: "waiting for approval" } }, { status: 403 });
+		if (/^\/v1\/devices\/[^/]+\/approve$/.test(url.pathname) && request.method === "POST") {
+			const id = url.pathname.split("/")[3];
+			const target = [...lab.devices.values()].find((d) => d.id === id);
+			if (!target) return new Response("", { status: 404 });
+			target.status = "active";
+			return Response.json({ id, status: "active" });
+		}
 		if (url.pathname === "/v1/devices" && request.method === "GET") return Response.json({ data: [...lab.devices.values()].map((d) => ({ ...d, current: d === device })) });
 		if (url.pathname.startsWith("/v1/devices/") && request.method === "DELETE") {
 			lab.deleted.push(url.pathname.split("/").at(-1)!);
@@ -111,6 +131,8 @@ const me = (s: GateSite) => (s as unknown as { json(method: string, path: string
 describe("device-bound lab tokens", () => {
 	beforeEach(() => {
 		lab.nonce = undefined;
+		lab.approval = false;
+		lab.optional = false;
 	});
 
 	test("connect registers this computer's key, keeps it owner-only, and signs requests for the public address", async () => {
@@ -216,6 +238,37 @@ describe("device-bound lab tokens", () => {
 		expect(answered(new Response("{}", { headers: { "dpop-nonce": "n-f" } }))).toBe(false);
 		expect((s as unknown as { nonce: string }).nonce).toBe("n-f");
 		lab.nonce = undefined;
+	});
+
+	test("a second computer waits for approval, works without proofs meanwhile, and signs once another device approves it", async () => {
+		GateSite.approvalPollMs = 50;
+		lab.devices.clear();
+		lab.approval = true;
+		lab.optional = true;
+		const first = site();
+		await first.connect();
+		const otherFile = join(home, "device_other.json");
+		const second = new GateSite({ name: "devlab", url: PUBLIC, kind: "gate" }, { base, via: "key", headers: async () => ({ authorization: `Bearer ${TOKEN}` }) }, undefined, otherFile);
+		const notices: string[] = [];
+		let approved = false;
+		second.onNotice = (text) => notices.push(text);
+		second.onApproved = () => (approved = true);
+		await second.connect();
+		expect(second.warning).toContain("Approve this computer for Dev Lab from one of your other devices");
+		expect(second.who).toBe("pat");
+		const pendingId = JSON.parse(readFileSync(otherFile, "utf8")).id as string;
+		expect([...lab.devices.values()].find((d) => d.id === pendingId)?.status).toBe("pending");
+		await first.approveDevice(pendingId);
+		for (let i = 0; i < 100 && !approved; i++) await Bun.sleep(20);
+		expect(approved).toBe(true);
+		expect(JSON.parse(readFileSync(otherFile, "utf8")).pendingUntil).toBeUndefined();
+		expect(notices.at(-1)).toBe("This computer is approved for Dev Lab.");
+		// Approved: its requests now carry proofs the lab accepts.
+		lab.optional = false;
+		expect((await me(second)).handle).toBe("pat");
+		await second.close();
+		lab.approval = false;
+		GateSite.approvalPollMs = 5_000;
 	});
 
 	test("sign-out revokes the key at the lab and deletes it here", async () => {

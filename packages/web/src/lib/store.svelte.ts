@@ -1,7 +1,7 @@
 // The web surface's state. Everything comes from the engine; this file mirrors it and sends requests. The workbench
 // layout is the one piece kept here: it belongs to this person's screen, per session, in local storage.
 
-import type { AppSummary, CanvasSummary, LabApp, ModelInfo, Part, Partial_, PermissionDecision, PermissionRequest, SessionEvent, SessionStatus, SessionSummary, SiteSummary, UiPrefs } from "@enrichedlab/protocol";
+import type { AppSummary, CanvasSummary, DeviceRequest, LabApp, ModelInfo, Part, Partial_, PermissionDecision, PermissionRequest, SessionEvent, SessionStatus, SessionSummary, SiteSummary, UiPrefs } from "@enrichedlab/protocol";
 import { close as closeTab, emptyLayout, move, type Node, open as openTab, resize as resizeSplit, revive, sync, type Edge, type PaneKind, type Tab, uid, activate, groups } from "./layout.ts";
 import { placeOf, places, type Place } from "./places.ts";
 import { rpc } from "./rpc.ts";
@@ -36,6 +36,8 @@ class Lab {
 	apps = $state<AppSummary[]>([]);
 	/** Apps the person's labs offer, every listed version (newest first per app). */
 	labApps = $state<LabApp[]>([]);
+	/** Other devices asking to use the person's sign-in at a lab, oldest first; the window asks about each. */
+	deviceRequests = $state<DeviceRequest[]>([]);
 	/** Lab apps being installed, by "site/name". */
 	installing = $state(new Set<string>());
 	models = $state<ModelInfo[]>([]);
@@ -491,6 +493,9 @@ class Lab {
 		});
 		rpc.on("lab.notice", (notice) => this.say(notice.text));
 		rpc.on("lab.apps.changed", () => void this.refreshApps());
+		rpc.on("lab.device.pending", (request) => {
+			if (!this.deviceRequests.some((r) => r.site === request.site && r.id === request.id)) this.deviceRequests = [...this.deviceRequests, request];
+		});
 		rpc.on("provider.auth", (auth) => {
 			window.open(auth.url, "_blank", "noopener");
 		});

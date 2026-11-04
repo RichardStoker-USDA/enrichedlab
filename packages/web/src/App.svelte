@@ -8,6 +8,7 @@
 	import Workbench from "./components/Workbench.svelte";
 	import Palette from "./components/Palette.svelte";
 	import ModelServices from "./components/ModelServices.svelte";
+	import DeviceRequest from "./components/DeviceRequest.svelte";
 	import JoinLab from "./components/JoinLab.svelte";
 
 	let railOpen = $state(false);
@@ -87,6 +88,7 @@
 	{/if}
 	<Palette />
 	<ModelServices bind:open={lab.services} />
+	<DeviceRequest />
 	<JoinLab />
 	{#if lab.lost}
 		<p class="status" role="status">Reconnecting to the engine…</p>

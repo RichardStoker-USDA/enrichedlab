@@ -4,7 +4,7 @@
 
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { LabApp, LabNotice, SiteSummary } from "@enrichedlab/protocol";
+import type { DeviceRequest, LabApp, LabNotice, SiteSummary } from "@enrichedlab/protocol";
 import type { ModelProfile } from "../models/types.ts";
 import type { Paths } from "../paths.ts";
 import type { Tool } from "../tools/types.ts";
@@ -75,6 +75,8 @@ export class Sites {
 	private catalog = new Map<string, { apps: LabAppEntry[]; signers: LabSigner[] }>();
 	/** Set by the engine: a lab's app list changed. */
 	onAppsChanged?: (site: string) => void;
+	/** Set by the engine: a new device asks to use the person's sign-in at a lab. */
+	onDeviceRequest?: (request: DeviceRequest) => void;
 
 	constructor(
 		private p: Paths,
@@ -99,6 +101,10 @@ export class Sites {
 				// What was granted changed: read it again. A revoked sign-in shows as one.
 				if (event.type === "models.changed" || event.type === "bundles.changed") void this.connect(name).catch(() => undefined);
 				if (event.type === "app.published" || event.type === "app.withdrawn") void this.readCatalog(name, adapter);
+				// Another device asks to use this sign-in: the person decides, here or on any approved device.
+				if (event.type === "device.pending" && typeof event.device_id === "string") {
+					this.onDeviceRequest?.({ site: name, lab: this.title(name), id: event.device_id, name: typeof event.name === "string" ? event.name : "a new device", created: typeof event.created_at === "string" ? event.created_at : event.at });
+				}
 				const title = this.title(name);
 				const text = noticeText(title, event);
 				if (text) this.onNotice({ site: name, type: event.type, at: event.at, text, session: event.session });
@@ -179,6 +185,31 @@ export class Sites {
 		} finally {
 			rmSync(file, { force: true });
 		}
+	}
+
+	private async adapterFor(name: string): Promise<SiteAdapter> {
+		if (!this.adapters.has(name)) await this.connect(name);
+		const adapter = this.adapters.get(name);
+		if (!adapter) throw new Error(this.states.get(name)?.error ?? `Couldn't connect to ${name}.`);
+		return adapter;
+	}
+
+	async devices(name: string) {
+		const adapter = await this.adapterFor(name);
+		if (!adapter.devices) throw new Error(`${this.title(name)} doesn't bind sign-ins to devices.`);
+		return adapter.devices();
+	}
+
+	async approveDevice(name: string, id: string): Promise<void> {
+		const adapter = await this.adapterFor(name);
+		if (!adapter.approveDevice) throw new Error(`${this.title(name)} doesn't bind sign-ins to devices.`);
+		await adapter.approveDevice(id);
+	}
+
+	async revokeDevice(name: string, id: string): Promise<void> {
+		const adapter = await this.adapterFor(name);
+		if (!adapter.revokeDevice) throw new Error(`${this.title(name)} doesn't bind sign-ins to devices.`);
+		await adapter.revokeDevice(id);
 	}
 
 	/** A lab by its short name here, or by its own name (its descriptor's), as apps a lab publishes name it. */
@@ -359,7 +390,8 @@ export class Sites {
 		for (const route of routes) {
 			if (!factory) break;
 			const adapter = factory(config, route, container, this.deviceFile(name));
-			adapter.onNotice = (text) => this.onNotice({ site: name, type: "sandbox.notice", at: new Date().toISOString(), text });
+			adapter.onNotice = (text) => this.onNotice({ site: name, type: "site.notice", at: new Date().toISOString(), text });
+			adapter.onApproved = () => void this.connect(name).catch(() => undefined);
 			try {
 				await adapter.connect();
 				this.adapters.set(name, adapter);
@@ -500,6 +532,8 @@ function noticeText(lab: string, e: LabEvent): string | undefined {
 			return `${lab}: a new app is available${said ? `: ${said}` : ""}. Find it under Apps.`;
 		case "ticket.updated":
 			return `${lab}: your help request was updated${said ? `: ${said}` : "."}`;
+		case "device.pending":
+			return `${lab}: ${typeof e.name === "string" ? `"${e.name}"` : "a new device"} asks to use your sign-in. Approve it only if you just signed in there; if not, revoke it (el devices).`;
 		case "signin.revoked":
 			return `${lab} ended your sign-in. Sign in again to keep using it.`;
 		default:

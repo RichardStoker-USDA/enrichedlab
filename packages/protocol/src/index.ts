@@ -300,6 +300,26 @@ export interface AppPermissions {
 	network?: string[];
 }
 
+/** Another device asks to use the person's sign-in at a lab: the person approves it, or revokes it if it isn't theirs. */
+export interface DeviceRequest {
+	site: string;
+	lab: string;
+	id: string;
+	name: string;
+	created: string;
+}
+
+/** One of the person's devices at a lab. */
+export interface LabDevice {
+	id: string;
+	name?: string;
+	status?: string;
+	created?: string;
+	last_seen?: string;
+	current?: boolean;
+	thumbprint?: string;
+}
+
 /** An app version a lab offers this person (its /v1/apps), as the Apps list shows it. */
 export interface LabApp {
 	/** The lab's short name on this computer. */
@@ -414,6 +434,10 @@ export interface Requests {
 	"site.logout": { params: { name: string }; result: { ok: true } };
 	/** Exercise a lab against the lab contract (contract/ in the repository); read-only apart from one throwaway sandbox. */
 	"lab.check": { params: { name: string }; result: { rows: { row: string; status: "pass" | "fail" | "skip"; detail?: string }[] } };
+	/** The person's devices at a lab, and approving or revoking one (a lab that binds sign-ins to devices). */
+	"lab.devices": { params: { name: string }; result: LabDevice[] };
+	"lab.device.approve": { params: { name: string; id: string }; result: { ok: true } };
+	"lab.device.revoke": { params: { name: string; id: string }; result: { ok: true } };
 	/** Use by lab and group over the window (GET /v1/usage). */
 	"lab.usage": { params: { name: string; window?: "7d" | "30d" }; result: unknown };
 	/** Save a file a lab tool returned by reference into the session's project; the checksum is checked when given. */
@@ -536,6 +560,8 @@ export interface Notifications {
 	"canvas.updated": CanvasSummary;
 	/** An app's files changed: open views reload. */
 	"app.changed": { id: string };
+	/** Another device asks to use the person's sign-in at a lab. */
+	"lab.device.pending": DeviceRequest;
 	/** A lab's app list changed (read again, or an app was published or withdrawn). */
 	"lab.apps.changed": { site: string };
 	/** The agent opened an app in a session: surfaces show it. */

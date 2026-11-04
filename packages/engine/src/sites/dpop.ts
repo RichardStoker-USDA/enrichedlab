@@ -15,6 +15,8 @@ interface DeviceRecord {
 	id?: string;
 	/** The lab revoked this key. A new one is made only after the person signs in again. */
 	revoked?: boolean;
+	/** Registered while the person already had a device: unusable until one of those approves it, by this time. */
+	pendingUntil?: string;
 	publicJwk: JsonWebKey;
 	/** Only when there is no OS credential store. */
 	privateJwk?: JsonWebKey;
@@ -84,6 +86,26 @@ export class DeviceKey {
 		return this.record.revoked === true;
 	}
 
+	/** Waiting for one of the person's other devices to approve it. */
+	get pending(): boolean {
+		return Boolean(this.record.pendingUntil) && Date.parse(this.record.pendingUntil!) > Date.now();
+	}
+
+	/** The approval request ran out: the lab dropped it, so the key is registered again from scratch. */
+	get lapsed(): boolean {
+		return Boolean(this.record.pendingUntil) && Date.parse(this.record.pendingUntil!) <= Date.now();
+	}
+
+	get pendingUntil(): string | undefined {
+		return this.record.pendingUntil;
+	}
+
+	approved(): void {
+		const { pendingUntil: _, ...rest } = this.record;
+		this.record = rest;
+		writeJson(this.file, this.record, true);
+	}
+
 	markRevoked(): void {
 		this.record = { ...this.record, revoked: true };
 		writeJson(this.file, this.record, true);
@@ -97,8 +119,8 @@ export class DeviceKey {
 		return thumbprint(this.record.publicJwk);
 	}
 
-	registered(id: string): void {
-		this.record = { ...this.record, id };
+	registered(id: string, pendingUntil?: string): void {
+		this.record = { ...this.record, id, ...(pendingUntil ? { pendingUntil } : {}) };
 		writeJson(this.file, this.record, true);
 	}
 
