@@ -1003,16 +1003,22 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			});
 		}
 		const browserInfo = d?.browser;
+		// The DevTools of the browser in sandbox `id`, through its port path with this sign-in; undefined when the
+		// browser gives no WebSocket address.
+		const devtools = async (id: string, port: number): Promise<Cdp | undefined> => {
+			const path = `/v1/containers/${encodeURIComponent(id)}/ports/${port}`;
+			const version = await this.json<{ webSocketDebuggerUrl?: string }>("GET", `${path}/json/version`, { signal: AbortSignal.timeout(120_000) });
+			if (!version.webSocketDebuggerUrl) return undefined;
+			const url = `${this.route.base}${path}${new URL(version.webSocketDebuggerUrl).pathname}`;
+			await this.freshNonce();
+			return Cdp.open(url.replace(/^http/, "ws"), await this.authHeaders("GET", url), this.route.ca);
+		};
 		if (has("containers") && has("ports") && browserInfo?.protocol === "cdp" && browserInfo.image) {
 			await attempt("browser sandbox", async () => {
 				const made = await this.json<{ id: string }>("POST", "/v1/containers", { json: { name: "el-lab-check-browser", image: browserInfo.image }, signal: AbortSignal.timeout(300_000) });
 				try {
-					const path = `/v1/containers/${encodeURIComponent(made.id)}/ports/${browserInfo.port}`;
-					const version = await this.json<{ webSocketDebuggerUrl?: string }>("GET", `${path}/json/version`, { signal: AbortSignal.timeout(120_000) });
-					if (!version.webSocketDebuggerUrl) return add("browser sandbox", "fail", "json/version gave no webSocketDebuggerUrl");
-					const url = `${this.route.base}${path}${new URL(version.webSocketDebuggerUrl).pathname}`;
-					await this.freshNonce();
-					const cdp = await Cdp.open(url.replace(/^http/, "ws"), await this.authHeaders("GET", url), this.route.ca);
+					const cdp = await devtools(made.id, browserInfo.port);
+					if (!cdp) return add("browser sandbox", "fail", "json/version gave no webSocketDebuggerUrl");
 					try {
 						const got = await cdp.send<{ product?: string }>("Browser.getVersion");
 						add("browser sandbox", got.product ? "pass" : "fail", got.product ? `${got.product} in the ${browserInfo.image} image` : "Browser.getVersion gave no product");
@@ -1064,6 +1070,43 @@ export class GateSite implements SiteAdapter, SandboxApi {
 					await this.call("DELETE", `/v1/containers/${encodeURIComponent(made.id)}`, { signal: t() }).then((r) => r.arrayBuffer(), () => undefined);
 				}
 			});
+			// The browser in an internet sandbox loads a public HTTPS page. A proxy that re-signs HTTPS needs its CA
+			// trusted by the browser too: Chrome reads none of the CA variables python, curl, node and git follow.
+			if (has("ports") && browserInfo?.protocol === "cdp" && browserInfo.image) {
+				const row = "browser in an internet sandbox";
+				const { image, port } = browserInfo;
+				await attempt(row, async () => {
+					const allowed = (await this.json<GateMe>("GET", "/v1/me", { signal: t() })).sandbox_networks ?? [];
+					if (!allowed.includes("internet")) return add(row, "skip", "your policy doesn't allow internet sandboxes");
+					const made = await this.json<{ id: string; network?: string | null }>("POST", "/v1/containers", { json: { name: "el-lab-check-internet-browser", image, network: "internet" }, signal: AbortSignal.timeout(300_000) });
+					try {
+						if (made.network !== "internet") return add(row, "fail", `the lab made it with network ${made.network ?? "unset"}`);
+						const cdp = await devtools(made.id, port);
+						if (!cdp) return add(row, "fail", "json/version gave no webSocketDebuggerUrl");
+						try {
+							const { targetId } = await cdp.send<{ targetId: string }>("Target.createTarget", { url: "about:blank" });
+							const { sessionId } = await cdp.send<{ sessionId: string }>("Target.attachToTarget", { targetId, flatten: true });
+							const went = await cdp.send<{ errorText?: string }>("Page.navigate", { url: "https://example.com/" }, sessionId, 45_000);
+							let title = "";
+							for (let i = 0; i < 30 && !went.errorText; i++) {
+								const got = await cdp.send<{ result?: { value?: unknown } }>("Runtime.evaluate", { expression: "document.title", returnByValue: true }, sessionId);
+								title = typeof got.result?.value === "string" ? got.result.value : "";
+								// Chrome's certificate warning page is titled "Privacy error".
+								if (title === "Example Domain" || title === "Privacy error") break;
+								await sleep(500);
+							}
+							const untrusted = /CERT/.test(went.errorText ?? "") || title === "Privacy error";
+							const hint = untrusted ? ". The browser doesn't trust the certificate it got; a proxy that re-signs HTTPS needs its CA trusted by the browser" : "";
+							if (title === "Example Domain") add(row, "pass", `Chrome loaded https://example.com/ through the lab's proxy`);
+							else add(row, "fail", `${went.errorText ? `Chrome couldn't load https://example.com/: ${went.errorText}` : `Chrome showed "${title || "no title"}" for https://example.com/`}${hint}`);
+						} finally {
+							cdp.close();
+						}
+					} finally {
+						await this.call("DELETE", `/v1/containers/${encodeURIComponent(made.id)}`, { signal: t() }).then((r) => r.arrayBuffer(), () => undefined);
+					}
+				});
+			}
 		}
 		if (has("events")) {
 			await attempt("GET /v1/events", async () => {

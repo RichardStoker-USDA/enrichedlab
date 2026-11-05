@@ -315,3 +315,87 @@ describe.skipIf(!devtools)("the browser in a lab's sandbox", () => {
 		expect(asked).toEqual(["open"]);
 	}, 60_000);
 });
+
+// A browser in an internet sandbox, against a DevTools stand-in: the lab's proxy re-signs HTTPS with its own CA, so
+// Chrome loads a public page only where the lab made its browser trust that CA. `el lab check` loads one to find out.
+describe("el lab check on a browser in an internet sandbox", () => {
+	const net = { trusted: true, made: [] as unknown[], deleted: [] as string[], asked: [] as string[] };
+	const stub = Bun.serve<undefined, never>({
+		port: 0,
+		hostname: "127.0.0.1",
+		async fetch(request, server) {
+			const url = new URL(request.url);
+			if (request.headers.get("authorization") !== "Bearer test") return new Response("", { status: 401 });
+			if (url.pathname === "/.well-known/enrichedlab-lab") {
+				return Response.json({
+					contract: "2026-11",
+					name: "netlab",
+					title: "Net Lab",
+					endpoints: { containers: true, ports: true },
+					sign_in: { kind: "oauth" },
+					browser: { ...browserInfo, image: "browser" },
+					sandbox_images: [{ name: "browser", title: "Browser", browser: browserInfo }],
+					sandbox_networks: [{ name: "none", title: "No network" }, { name: "internet", title: "The public web" }],
+				});
+			}
+			if (url.pathname === "/v1/models") return Response.json({ data: [] });
+			if (url.pathname === "/v1/me") return Response.json({ subject: "u_2", handle: "sam", memberships: [], sandbox_networks: ["none", "internet"] });
+			if (url.pathname === "/v1/containers" && request.method === "POST") {
+				const body = (await request.json()) as { image?: string; network?: string };
+				net.made.push(body);
+				const id = body.network === "internet" ? (body.image ? "w1" : "n1") : body.image ? "b1" : "c1";
+				return Response.json({ id, status: "running", image: body.image ?? null, network: body.network ?? "none" });
+			}
+			const box = /^\/v1\/containers\/(\w+)$/.exec(url.pathname)?.[1];
+			if (box && request.method === "DELETE") return net.deleted.push(box), Response.json({ id: box, deleted: true });
+			// The internet sandbox's image has no python3, so its fetch rows skip.
+			if (url.pathname.endsWith("/exec")) return Response.json({ exit_code: 127, stdout: "", stderr: "python3: not found" });
+			const port = /^\/v1\/containers\/(w1|b1)\/ports\/9222\/(.*)$/.exec(url.pathname);
+			if (port?.[2] === "json/version") return Response.json({ webSocketDebuggerUrl: "ws://127.0.0.1:9222/devtools/browser/x" });
+			if (port && server.upgrade(request)) return undefined;
+			return new Response("", { status: 404 });
+		},
+		websocket: {
+			message(ws, raw) {
+				const { id, method, params } = JSON.parse(String(raw)) as { id: number; method: string; params: { url?: string } };
+				net.asked.push(method);
+				const reply = (result: unknown) => void ws.send(JSON.stringify({ id, result }));
+				if (method === "Browser.getVersion") return reply({ product: "Chrome/157.0.0.0" });
+				if (method === "Target.createTarget") return reply({ targetId: "t1" });
+				if (method === "Target.attachToTarget") return reply({ sessionId: "s1" });
+				// Untrusted, Chrome commits its certificate warning page and the navigation carries the error.
+				if (method === "Page.navigate") return reply(net.trusted && params.url === "https://example.com/" ? { frameId: "f1" } : { frameId: "f1", errorText: "net::ERR_CERT_AUTHORITY_INVALID" });
+				if (method === "Runtime.evaluate") return reply({ result: { type: "string", value: net.trusted ? "Example Domain" : "Privacy error" } });
+				ws.send(JSON.stringify({ id, error: { code: -32601, message: `${method} wasn't found` } }));
+			},
+		},
+	});
+	const netBase = `http://127.0.0.1:${stub.port}`;
+	const netGate = () => new GateSite({ name: "netlab", url: netBase, kind: "gate" }, { base: netBase, via: "key", headers: async () => ({ authorization: "Bearer test" }) }, "c1");
+	afterAll(() => stub.stop(true));
+
+	test("Chrome loading the public page through the lab's proxy passes, and the sandbox is removed again", async () => {
+		const gate = netGate();
+		await gate.connect();
+		const rows = await gate.check();
+		expect(rows.find((r) => r.row === "browser in an internet sandbox")).toMatchObject({ status: "pass", detail: "Chrome loaded https://example.com/ through the lab's proxy" });
+		expect(net.made).toContainEqual({ name: "el-lab-check-internet-browser", image: "browser", network: "internet" });
+		expect(net.asked).toContain("Page.navigate");
+		expect(net.deleted).toContain("w1");
+		await gate.close();
+	}, 30_000);
+
+	test("a browser that doesn't trust the proxy's CA fails the row and says why", async () => {
+		net.trusted = false;
+		try {
+			const gate = netGate();
+			await gate.connect();
+			const row = (await gate.check()).find((r) => r.row === "browser in an internet sandbox");
+			expect(row?.status).toBe("fail");
+			expect(row?.detail).toBe("Chrome couldn't load https://example.com/: net::ERR_CERT_AUTHORITY_INVALID. The browser doesn't trust the certificate it got; a proxy that re-signs HTTPS needs its CA trusted by the browser");
+			await gate.close();
+		} finally {
+			net.trusted = true;
+		}
+	}, 30_000);
+});
