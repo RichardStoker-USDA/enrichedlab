@@ -6,8 +6,8 @@
 //   /v1/containers      their sandbox: run, background jobs, copy files in and out
 
 import { hostname } from "node:os";
-import { createReadStream, createWriteStream, realpathSync } from "node:fs";
-import { mkdir, rename, rm, stat } from "node:fs/promises";
+import { createReadStream, realpathSync } from "node:fs";
+import { mkdir, open, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { Readable } from "node:stream";
@@ -1390,19 +1390,31 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		const cut = (why: string) => Object.assign(new ToolError(`${wanted} ${why}, so it wasn't saved. Try again.`), { cut: true });
 		let bytes = 0;
 		const hash = createHash("sha256");
-		const out = createWriteStream(temp, { mode: 0o600 });
+		// Awaited writes to a file handle, not a write stream: Bun's stream, destroyed with a write in flight (as a cut
+		// download leaves it), throws that write's error with nobody listening and never emits "close".
+		const out = await open(temp, "w", 0o600);
+		let writing = true;
+		let writeFailed: unknown;
 		try {
 			try {
 				for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
 					bytes += chunk.length;
 					hash.update(chunk);
-					if (!out.write(chunk)) await new Promise((r) => out.once("drain", r));
+					try {
+						for (let at = 0; at < chunk.length; ) at += (await out.write(chunk, at)).bytesWritten;
+					} catch (error) {
+						writeFailed = error;
+						throw error;
+					}
 				}
 			} catch (error) {
 				if (signal?.aborted) throw error;
+				// A disk that can't take the file isn't the lab cutting the download: trying again wouldn't help.
+				if (writeFailed) throw new ToolError(`${wanted} couldn't be saved to ${dirname(target)}: ${errorText(writeFailed)}`);
 				throw cut(`stopped partway (${errorText(error)})`);
 			}
-			await new Promise<void>((resolve, reject) => out.end((error?: Error | null) => (error ? reject(error) : resolve())));
+			writing = false;
+			await out.close();
 			const length = Number(response.headers.get("content-length") ?? Number.NaN);
 			const encoded = (response.headers.get("content-encoding") ?? "identity") !== "identity";
 			if (!encoded && Number.isFinite(length) && bytes !== length) throw cut(`stopped partway (${bytes} of ${length} bytes)`);
@@ -1411,7 +1423,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			if (said && said !== hash.copy().digest("hex")) throw cut(`arrived different from what ${this.title}'s scanner passed`);
 			await rename(temp, target);
 		} catch (error) {
-			if (!out.closed) await new Promise((r) => out.destroy().once("close", r));
+			if (writing) await out.close().catch(() => undefined);
 			await rm(temp, { force: true });
 			throw error;
 		}
