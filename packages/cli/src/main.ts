@@ -429,7 +429,7 @@ async function main(): Promise<void> {
 				if (boxes.some((b) => b.stoppable)) out(`\nStop a running one to free a place, keeping its files: el sandbox stop ${lab} <id>`);
 				if (boxes.length) out(`${boxes.some((b) => b.stoppable) ? "" : "\n"}Delete one you no longer need, with its files: el sandbox delete ${lab} <id>`);
 				if (ended.length) out(`\nEnded by ${lab}, with nothing kept; these don't count toward your limits:`);
-				for (const b of ended) out(`${b.id}  ${b.name ?? ""}\n  ${b.reason ?? `${lab} didn't say why`}; made ${at(b.created)}, last used ${at(b.last_active)}`);
+				for (const b of ended) out(`${b.id}  ${b.name ?? ""}\n  ${b.reason ?? `${lab} didn't say why.`}\n  made ${at(b.created)}, last used ${at(b.last_active)}`);
 			} else if (action === "delete" && lab && id) {
 				const { status } = await client.call("lab.sandbox.delete", { name: lab, id });
 				out(status === "deleting" ? `Deleting ${id}; ${lab} finishes clearing its files.` : `Deleted ${id} and its files.`);
