@@ -53,6 +53,8 @@ const HELP = `EnrichedLab ${VERSION}
   el lab check <lab> [--json]     check a lab against the lab contract (for people who run labs)
   el devices <lab>                your computers at a lab; el device approve|revoke <lab> <id>
   el sandboxes <lab>              your sandboxes at a lab; el sandbox stop|delete <lab> <id>
+  el sandbox create <lab> [--image browser]
+                                  a new sandbox to work in, from one of the lab's images
   el usage <lab> [--window 7d|30d]
                                   your use of a lab: tokens, GPU and sandbox hours
 
@@ -163,7 +165,7 @@ interface Flags {
 }
 
 /** Flags that take the next word as their value; every other flag is a switch. */
-const VALUE_FLAGS = new Set(["address", "name", "model", "effort", "port", "lan", "key", "ca", "cwd", "session", "site", "title", "template", "out", "window"]);
+const VALUE_FLAGS = new Set(["address", "name", "model", "effort", "port", "lan", "key", "ca", "cwd", "session", "site", "title", "template", "out", "window", "image"]);
 
 function parse(argv: string[]): { args: string[]; flags: Flags } {
 	const args: string[] = [];
@@ -433,10 +435,14 @@ async function main(): Promise<void> {
 			} else if (action === "delete" && lab && id) {
 				const { status } = await client.call("lab.sandbox.delete", { name: lab, id });
 				out(status === "deleting" ? `Deleting ${id}; ${lab} finishes clearing its files.` : `Deleted ${id} and its files.`);
+			} else if (action === "create" && lab) {
+				const image = typeof flags.image === "string" ? flags.image : undefined;
+				const made = await client.call("lab.sandbox.create", { name: lab, ...(image ? { image } : {}) });
+				out(`Made ${made.id}${made.image ? ` from the ${made.image} image` : ""}; sessions at ${lab} work in it now.${made.previous ? ` ${made.previous} keeps its files; el sandbox stop ${lab} ${made.previous} stops it, el sandbox delete ${lab} ${made.previous} removes it.` : ""}`);
 			} else if (action === "stop" && lab && id) {
 				const { status } = await client.call("lab.sandbox.stop", { name: lab, id });
 				out(status === "archived" ? `${id} is archived already; its files are kept.` : `${status === "stopping" ? "Stopping" : "Stopped"} ${id}. Its files stay, and it no longer counts toward how many run at once; using it starts it again.`);
-			} else fail("el sandboxes <lab> | el sandbox stop <lab> <id> | el sandbox delete <lab> <id>");
+			} else fail("el sandboxes <lab> | el sandbox create <lab> [--image <name>] | el sandbox stop <lab> <id> | el sandbox delete <lab> <id>");
 			client.close();
 			return;
 		}

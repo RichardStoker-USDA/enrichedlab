@@ -23,6 +23,8 @@ export interface SiteAdapter {
 	deleteSandbox?(id: string): Promise<"deleted" | "deleting">;
 	/** Stop a running one, keeping its files; "stopping" while the lab still stops it. */
 	stopSandbox?(id: string): Promise<"stopped" | "stopping" | "archived">;
+	/** Make a new one from one of the lab's images and work in it from now on; the one before keeps its files. */
+	createSandbox?(image?: string): Promise<{ id: string; image?: string; previous?: string }>;
 	/** Apps the lab offers this person, withdrawn versions included (GET /v1/apps). */
 	labApps?(): Promise<LabAppEntry[]>;
 	/** Signers the lab vouches for, revoked ones included (GET /v1/signers). */

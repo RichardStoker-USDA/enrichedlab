@@ -87,9 +87,8 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	private starting?: Promise<string>;
 	/** A sandbox of the person's the lab is still deleting: it counts toward their limits until the lab confirms. */
 	private leaving?: string;
-	/** The sandbox made from the lab's browser image, when it has one, and its creation while under way. */
-	private browserBox?: string;
-	private browserStarting?: Promise<string>;
+	/** The image each sandbox here was made from, as the lab says (undefined: the lab's default image). */
+	private imageOf = new Map<string, string | undefined>();
 	/** Background jobs started in the sandbox, so shutdown never deletes a sandbox while one runs. */
 	private jobs = new Set<string>();
 	/** Repositories sent to the sandbox from this engine: sandbox folder → local repository and the commit sent. */
@@ -274,7 +273,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			if (after) query.set("after", after);
 			const list = await this.json<{ data?: Listed[]; has_more?: boolean }>("GET", `/v1/containers?${query}`, { signal: AbortSignal.timeout(15_000) });
 			// One the lab ended itself stays listed, as deleted, so the person sees why; it holds nothing and counts toward no limit.
-			for (const c of list.data ?? []) found.push({ id: c.id, name: c.name, status: c.status, reason: c.reason || undefined, image: c.image || undefined, created: when(c.created_at), last_active: when(c.last_active_at), memory: c.memory_limit, profile: c.profile, current: c.id === this.container || c.id === this.browserBox, stoppable: stops && (c.status ?? "running") === "running" });
+			for (const c of list.data ?? []) found.push({ id: c.id, name: c.name, status: c.status, reason: c.reason || undefined, image: c.image || undefined, created: when(c.created_at), last_active: when(c.last_active_at), memory: c.memory_limit, profile: c.profile, current: c.id === this.container, stoppable: stops && (c.status ?? "running") === "running" });
 			if (!list.has_more || !list.data?.length) break;
 			after = list.data[list.data.length - 1]!.id;
 		}
@@ -286,7 +285,6 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		const response = await this.call("DELETE", `/v1/containers/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(200_000) });
 		const body = (await response.json().catch(() => ({}))) as { deleted?: boolean };
 		const status = response.status === 202 || body.deleted === false ? "deleting" : "deleted";
-		if (id === this.browserBox) this.browserBox = undefined;
 		// The engine's own one: the next command starts a new sandbox, after this one is gone if the lab needs that.
 		if (id === this.container) {
 			this.container = undefined;
@@ -450,7 +448,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				this.awaitApproval(this.device);
 			}
 			const error = new Error(response.status === 401 ? `${message.replace(/\.$/, "")}. Run el login ${this.config.name}.` : message);
-			throw Object.assign(error, { status: response.status, ...(refused ? { dpop: refused } : {}), ...(detail.error?.code ? { code: detail.error.code } : {}) });
+			throw Object.assign(error, { status: response.status, ...(refused ? { dpop: refused } : {}), ...(detail.error?.code ? { code: detail.error.code } : {}), ...(detail.error?.limit ? { limit: detail.error.limit } : {}) });
 		}
 		return response;
 	}
@@ -1002,6 +1000,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	// ── Sandbox ────────────────────────────────────────────────────────────────────────────────────────────────────
 
 	private async sandbox(signal?: AbortSignal): Promise<string> {
+		const previous = this.container;
 		if (this.container) {
 			const id = this.container;
 			const status = await this.containerStatus(id, signal, true);
@@ -1013,9 +1012,12 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			if (status === "deleting") this.leaving = id;
 			this.onNotice?.(`Your ${this.title} sandbox was deleted, with its files. A new one starts now.`);
 		}
-		this.starting ??= this.create(signal)
+		// A replacement comes from the image the person chose for the one before (such as the browser image).
+		const image = previous ? this.imageOf.get(previous) : undefined;
+		this.starting ??= this.create(signal, { name: "EnrichedLab", ...(image ? { image } : {}) })
 			.then((made) => {
 				this.container = made.id;
+				if (image) this.imageOf.set(made.id, image);
 				return made.id;
 			})
 			.finally(() => {
@@ -1025,30 +1027,54 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	}
 
 	/**
-	 * The sandbox the browser runs in. A lab that names a browser image (descriptor `browser.image`) runs it in a sandbox
-	 * of its own made from that image, apart from the person's files; otherwise it runs in the person's sandbox.
+	 * The sandbox the browser runs in: the person's own, so it reaches the apps they run there (sandboxes can't reach
+	 * each other). A lab that names a browser image (descriptor `browser.image`, its default image plus the browser)
+	 * runs the browser only in a sandbox made from it: one is made from that image when none exists yet, and a sandbox
+	 * from another image gets a plain answer on how to switch.
 	 */
 	private async browserSandbox(signal?: AbortSignal): Promise<string> {
 		const image = this.descriptor?.browser?.image;
 		if (!image) return this.sandbox(signal);
-		if (this.browserBox) {
-			const id = this.browserBox;
-			const status = await this.containerStatus(id, signal);
-			if (status !== "deleted") {
-				await this.wake(id, status, signal);
-				return id;
-			}
-			this.browserBox = undefined;
+		if (!this.container && !this.starting) {
+			this.starting = this.create(signal, { name: "EnrichedLab", image })
+				.then((made) => {
+					this.container = made.id;
+					this.imageOf.set(made.id, image);
+					return made.id;
+				})
+				.finally(() => {
+					this.starting = undefined;
+				});
 		}
-		this.browserStarting ??= this.create(signal, { name: "EnrichedLab browser", image })
-			.then((made) => {
-				this.browserBox = made.id;
-				return made.id;
-			})
-			.finally(() => {
-				this.browserStarting = undefined;
-			});
-		return this.browserStarting;
+		const id = await this.sandbox(signal);
+		if (!this.imageOf.has(id)) this.imageOf.set(id, (await this.json<{ image?: string | null }>("GET", `/v1/containers/${encodeURIComponent(id)}`, { signal })).image || undefined);
+		if (this.imageOf.get(id) !== image) {
+			throw new ToolError(`${this.title}'s browser runs only in a sandbox made from its ${image} image, and your sandbox there (${id}) isn't one. The person can start one with el sandbox create ${this.config.name} --image ${image}; sessions there then use it, and the current sandbox keeps its files.`);
+		}
+		return id;
+	}
+
+	/**
+	 * Make a new sandbox for the person, from one of the lab's images, and work in it from now on. The one used until
+	 * now stays as it is, files and all. A lab that allows one sandbox running at once needs that one stopped first.
+	 */
+	async createSandbox(image?: string): Promise<{ id: string; image?: string; previous?: string }> {
+		if (!this.offers("containers")) throw new Error(`${this.title} has no sandboxes.`);
+		const offered = this.descriptor?.sandbox_images;
+		if (image && offered && !offered.some((i) => i.name === image)) throw new Error(`${this.title} has no sandbox image named ${image}. It offers: ${offered.map((i) => i.name).join(", ")}.`);
+		const previous = this.container;
+		try {
+			const made = await this.create(undefined, { name: "EnrichedLab", ...(image ? { image } : {}) });
+			this.container = made.id;
+			this.imageOf.set(made.id, image);
+			return { id: made.id, image, previous };
+		} catch (error) {
+			const { code, limit } = error as { code?: string; limit?: string };
+			if (code === "too_many_containers" && limit === "at_once" && previous) {
+				throw Object.assign(new Error(`${(error as Error).message.split(" el sandboxes")[0]} Stop the one you use now first (its files are kept): el sandbox stop ${this.config.name} ${previous}, then run this again.`), { code, limit });
+			}
+			throw error;
+		}
 	}
 
 	/**
@@ -1482,10 +1508,6 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		for (const opened of this.ports.values()) opened.close();
 		this.ports.clear();
 		await this.mcp?.close().catch(() => undefined);
-		// The browser's own sandbox holds no files of the person's; it goes with the session.
-		const box = this.browserBox;
-		this.browserBox = undefined;
-		if (box) await this.call("DELETE", `/v1/containers/${box}`, { signal: AbortSignal.timeout(10_000) }).catch(() => undefined);
 		const id = this.container;
 		this.container = undefined;
 		if (!id) return;

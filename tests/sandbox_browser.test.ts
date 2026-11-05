@@ -1,7 +1,7 @@
 // The browser in a lab's sandbox, end to end against a real headless Chrome: a stand-in lab lists a browser image in
-// its descriptor, makes the browser's own sandbox from it, and relays that sandbox's port path to Chrome the way Gate
-// does (Host rewritten to loopback, another site's Origin refused), and the engine drives it over the DevTools
-// protocol. Skipped where no Chrome is installed.
+// its descriptor, and relays the port path of a sandbox made from that image to Chrome the way Gate does (Host
+// rewritten to loopback, another site's Origin refused). The browser runs in the person's own sandbox, so it reaches
+// the apps they run there; the engine drives it over the DevTools protocol. Skipped where no Chrome is installed.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -46,8 +46,9 @@ const site = Bun.serve({
 	},
 });
 
-// The stand-in lab: the browser image's sandbox (b1) has its port path to 9222 go to Chrome, which starts on the first
-// contact (one 503 browser_starting first, as Gate answers).
+// The stand-in lab: a sandbox made from the browser image (b1, b2, ...) has its port path to 9222 go to Chrome, which
+// starts on the first contact (one 503 browser_starting first, as Gate answers). The person's sandbox c1 is from the
+// default image.
 let started = false;
 const seen = { auth: [] as string[], origin: [] as (string | null)[], made: [] as unknown[], deleted: [] as string[] };
 const browserInfo = { protocol: "cdp", port: 9222, version: "test" };
@@ -73,7 +74,7 @@ const lab = Bun.serve<{ upstream?: WebSocket; queue: string[] }, never>({
 			seen.deleted.push(box);
 			return Response.json({ id: box, deleted: true });
 		}
-		if (box) return Response.json({ id: box, status: "running" });
+		if (box) return Response.json({ id: box, status: "running", image: box === "c1" ? null : "browser" });
 		if (url.pathname === "/v1/containers/c1/exec") return Response.json({ exit_code: 0, stdout: "", stderr: "" });
 		// Only the browser image's sandbox has a browser; another site's page is refused, as Gate does.
 		const port = /^\/v1\/containers\/b\d+\/ports\/9222(\/.*)$/.exec(url.pathname);
@@ -153,7 +154,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
 	await browsers?.closeAll();
-	// The browser's own sandbox goes with the session.
+	// The person's sandbox goes with the session, as any does.
 	await gate?.close();
 	if (devtools) expect(seen.deleted).toContain("b1");
 	browser?.kill();
@@ -180,12 +181,27 @@ describe.skipIf(!devtools)("the browser in a lab's sandbox", () => {
 		expect(gate.browser()).toEqual({ version: "test", network: "allowlist", hosts: ["127.0.0.1"] });
 	});
 
-	test("the browser runs in a sandbox of its own made from the lab's browser image, waited for while it starts", async () => {
+	test("the browser needs the person's sandbox made from the browser image; once it is, it starts and is waited for", async () => {
+		await expect(browserOpenTool.run({ url: home, where: "sandbox" }, context("s0"))).rejects.toThrow(
+			"Dev Lab's browser runs only in a sandbox made from its browser image, and your sandbox there (c1) isn't one. The person can start one with el sandbox create devlab --image browser",
+		);
+		await expect(gate.createSandbox("nope")).rejects.toThrow("Dev Lab has no sandbox image named nope. It offers: browser.");
+		expect(await gate.createSandbox("browser")).toEqual({ id: "b1", image: "browser", previous: "c1" });
 		const opened = await browserOpenTool.run({ url: home, where: "sandbox" }, context("s0"));
 		expect(opened.content).toContain("# Field plots");
-		expect(seen.made).toEqual([{ name: "EnrichedLab browser", image: "browser" }]);
+		expect(seen.made).toEqual([{ name: "EnrichedLab", image: "browser" }]);
 		expect(started).toBe(true);
 		await browsers.close("s0");
+	}, 60_000);
+
+	test("with no sandbox yet, the first use of the browser makes the person's sandbox from the browser image", async () => {
+		const fresh = new GateSite({ name: "devlab", url: base, kind: "gate" }, { base, via: "key", headers: async () => ({ authorization: "Bearer test" }) });
+		await fresh.connect();
+		const cdp = await fresh.cdp(AbortSignal.timeout(30_000));
+		cdp.close();
+		expect(seen.made.at(-1)).toEqual({ name: "EnrichedLab", image: "browser" });
+		await fresh.close();
+		expect(seen.deleted).toEqual(["b2"]);
 	}, 60_000);
 
 	test("el lab check makes a browser-image sandbox, reaches its DevTools, and sees an unknown image refused", async () => {
@@ -193,8 +209,8 @@ describe.skipIf(!devtools)("the browser in a lab's sandbox", () => {
 		expect(rows.find((r) => r.row === "unknown image refused")).toMatchObject({ status: "pass" });
 		expect(rows.find((r) => r.row === "browser sandbox")).toMatchObject({ status: "pass" });
 		expect(rows.find((r) => r.row === "browser sandbox")?.detail).toContain("in the browser image");
-		// Its sandbox is removed again; the session's browser sandbox (b1) stays.
-		expect(seen.deleted).toEqual(["b2"]);
+		// Its sandbox is removed again; the person's (b1) stays.
+		expect(seen.deleted).toEqual(["b2", "b3"]);
 	}, 60_000);
 
 	test("the agent opens, reads, types and submits, through the lab's port path with its sign-in", async () => {

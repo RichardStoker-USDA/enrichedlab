@@ -466,6 +466,7 @@ export interface Requests {
 	/** The person's sandboxes at a lab, and deleting one (it frees the lab's limit on how many a person keeps). */
 	"lab.sandboxes": { params: { name: string }; result: LabSandbox[] };
 	"lab.sandbox.delete": { params: { name: string; id: string }; result: { status: "deleted" | "deleting" } };
+	"lab.sandbox.create": { params: { name: string; image?: string }; result: { id: string; image?: string; previous?: string } };
 	"lab.sandbox.stop": { params: { name: string; id: string }; result: { status: "stopped" | "stopping" | "archived" } };
 	/** Use by lab and group over the window (GET /v1/usage). */
 	"lab.usage": { params: { name: string; window?: "7d" | "30d" }; result: unknown };
