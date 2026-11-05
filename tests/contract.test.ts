@@ -125,6 +125,9 @@ describe("lab contract", () => {
 		expect(bad.join(" | ")).toContain("$.subject must not match");
 		expect(bad.join(" | ")).toContain("$.memberships[0].roles is missing");
 		expect(validate(SCHEMAS.me, { ...me, memberships: [{ lab: "devlab", research_group: 7, roles: [] }] })).toEqual(["$.memberships[0].research_group is integer, expected string or null"]);
+		// A sandbox's reason is null while there's nothing to say (a running one), as Gate sends it.
+		expect(validate(SCHEMAS.container, { id: "c1", status: "running", reason: null })).toEqual([]);
+		expect(validate(SCHEMAS.container, { id: "c1", status: "deleted", reason: "Unused for 90 days; its files are gone." })).toEqual([]);
 		expect(contractProblem({ ...descriptor, contract: "2026-11.2" })).toBeUndefined();
 		expect(contractProblem({ ...descriptor, contract: "2027-03" })).toContain("speaks lab contract 2027-03");
 	});

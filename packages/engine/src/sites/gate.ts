@@ -252,7 +252,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	/** The person's sandboxes here, newest first (GET /v1/containers); `current` is the one this engine works in. */
 	async sandboxes(): Promise<LabSandbox[]> {
 		if (!this.offers("containers")) throw new Error(`${this.title} has no sandboxes.`);
-		type Listed = { id: string; name?: string; status?: string; reason?: string; created_at?: number; last_active_at?: number; memory_limit?: string; profile?: string };
+		type Listed = { id: string; name?: string; status?: string; reason?: string | null; created_at?: number; last_active_at?: number; memory_limit?: string; profile?: string };
 		const when = (seconds?: number) => (typeof seconds === "number" ? new Date(seconds * 1000).toISOString() : undefined);
 		const found: LabSandbox[] = [];
 		const stops = this.offers("stop");
