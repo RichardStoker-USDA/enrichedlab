@@ -58,6 +58,15 @@ const title = (entry: LabAppEntry) => `${entry.title || entry.name} ${entry.vers
 /** Refusals (409, 429, 503) that clear on their own, and the longest Retry-After waited each time, in seconds. */
 const WAITS: Record<string, number> = { sandbox_starting: 30, sandbox_busy: 30, scanner_unavailable: 60, downloads_in_progress: 30, too_many_deletes: 15 };
 
+/**
+ * The industry's harmless antivirus test file (EICAR), each character code plus one, so neither this source nor a built
+ * binary holds it: antivirus on the computers they sit on would act on it. `el lab check` sends it where a lab offers.
+ */
+const EICAR_SHIFTED = [
+	89, 54, 80, 34, 81, 38, 65, 66, 81, 92, 53, 93, 81, 91, 89, 54, 53, 41, 81, 95, 42, 56, 68, 68, 42, 56, 126, 37, 70, 74, 68, 66, 83, 46, 84, 85, 66, 79, 69, 66, 83, 69, 46, 66, 79, 85, 74,
+	87, 74, 83, 86, 84, 46, 85, 70, 84, 85, 46, 71, 74, 77, 70, 34, 37, 73, 44, 73, 43,
+];
+
 /** The sha-256 a response's `Repr-Digest` (RFC 9530) gives, in hex; undefined when it carries none. */
 export function reprSha256(response: Response): string | undefined {
 	const match = /(?:^|,)\s*sha-256=:([A-Za-z0-9+/]+={0,2}):/.exec(response.headers.get("repr-digest") ?? "");
@@ -826,6 +835,23 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				});
 			} else add("another lab's scope", "skip", "the descriptor names no conformance.foreign_scope");
 		} else skip("GET /v1/usage");
+
+		if (has("files") && d?.conformance?.scan_test) {
+			await attempt("scanner refuses a test file", async () => {
+				// A lab that offers it refuses the EICAR test file like malware, without flagging the person to its owner.
+				const eicar = String.fromCharCode(...EICAR_SHIFTED.map((c) => c - 1));
+				const boundary = `enrichedlab-${randomBytes(12).toString("hex")}`;
+				const form = `--${boundary}\r\nContent-Disposition: form-data; name="purpose"\r\n\r\nuser_data\r\n--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="el-scan-test.txt"\r\nContent-Type: text/plain\r\n\r\n${eicar}\r\n--${boundary}--\r\n`;
+				const got = await this.call("POST", "/v1/files", { body: form, headers: { "content-type": `multipart/form-data; boundary=${boundary}` }, signal: t() }).then(
+					async (r) => ({ status: r.status, code: undefined as string | undefined, kept: ((await r.json().catch(() => ({}))) as { id?: string }).id }),
+					(e: { status?: number; code?: string }) => ({ status: e.status, code: e.code, kept: undefined as string | undefined }),
+				);
+				// A lab that kept it: remove it again.
+				if (got.kept) await this.call("DELETE", `/v1/files/${encodeURIComponent(got.kept)}`, { signal: t() }).then((r) => r.arrayBuffer(), () => undefined);
+				const refused = got.status === 422 && got.code === "file_refused";
+				add("scanner refuses a test file", refused ? "pass" : "fail", refused ? "422 file_refused" : got.kept ? "the lab kept the EICAR test file" : `answered ${got.status ?? "?"}${got.code ? ` ${got.code}` : ""}`);
+			});
+		} else add("scanner refuses a test file", "skip", has("files") ? "the descriptor doesn't offer conformance.scan_test" : "not listed in the descriptor");
 
 		if (has("containers")) {
 			await attempt("sandbox", async () => {

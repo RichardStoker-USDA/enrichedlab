@@ -13,12 +13,12 @@ const descriptor: LabDescriptor = {
 	contract: "2026-11",
 	name: "devlab",
 	title: "Dev Lab",
-	endpoints: { models: true, bundles: true, events: true, guard: true, usage: true, containers: true, attach: true },
+	endpoints: { models: true, bundles: true, events: true, guard: true, usage: true, containers: true, attach: true, files: true },
 	sign_in: { kind: "cloudflare-access-oauth" },
 	policy: { keep_data_inside: false },
 	support: { url: "https://help.example.org" },
 	sandbox_profiles: [{ name: "small", cpu: 2, memory: "4Gi" }],
-	conformance: { foreign_scope: "otherlab" },
+	conformance: { foreign_scope: "otherlab", scan_test: true },
 };
 const me = {
 	subject: "u_9f2c41aa",
@@ -29,7 +29,9 @@ const me = {
 	],
 	policy: { keep_data_inside: false },
 };
-const seen: { cursor?: string | null; deleted?: string; uploaded: string } = { uploaded: "" };
+const seen: { cursor?: string | null; deleted?: string; uploaded: string; keepsTestFile?: boolean; filesDeleted: string[] } = { uploaded: "", filesDeleted: [] };
+/** The EICAR test file's sha-256: the lab here knows it by its hash, so this file never holds it. */
+const EICAR_SHA256 = "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f";
 
 const lab = Bun.serve<{ stdin: string; started: boolean }, never>({
 	port: 0,
@@ -73,6 +75,16 @@ const lab = Bun.serve<{ stdin: string; started: boolean }, never>({
 				return new Response(seen.uploaded, { headers: { "repr-digest": `sha-256=:${createHash("sha256").update(seen.uploaded).digest("base64")}:` } });
 			case "/v1/files/f1/content":
 				return new Response("plot,yield\nP1,5.1\n");
+			case "/v1/files": {
+				// Scanned on the way in: the EICAR test file is refused, unless this lab is set to keep it.
+				const file = (await request.formData()).get("file") as File;
+				const test = createHash("sha256").update(Buffer.from(await file.arrayBuffer())).digest("hex") === EICAR_SHA256;
+				if (test && !seen.keepsTestFile) return Response.json({ error: { code: "file_refused", message: "A malware scanner refused this file." } }, { status: 422 });
+				return Response.json({ id: "f2", object: "file", bytes: file.size, filename: file.name });
+			}
+			case "/v1/files/f2":
+				seen.filesDeleted.push("f2");
+				return Response.json({ id: "f2", deleted: true });
 			case "/v1/events": {
 				seen.cursor = request.headers.get("last-event-id");
 				const body =
@@ -149,7 +161,19 @@ describe("lab contract", () => {
 		expect(rows.find((r) => r.row === "another lab's scope")?.status).toBe("pass");
 		expect(rows.find((r) => r.row === "attach")?.status).toBe("pass");
 		expect(rows.find((r) => r.row === "attach streams stdin")?.status).toBe("pass");
+		expect(rows.find((r) => r.row === "scanner refuses a test file")).toMatchObject({ status: "pass", detail: "422 file_refused" });
 		expect(seen.deleted).toBe("c1");
+	});
+
+	test("a lab whose scanner keeps the antivirus test file fails the check, and the file is removed again", async () => {
+		seen.keepsTestFile = true;
+		try {
+			const rows = await site().check();
+			expect(rows.find((r) => r.row === "scanner refuses a test file")).toMatchObject({ status: "fail", detail: "the lab kept the EICAR test file" });
+			expect(seen.filesDeleted).toContain("f2");
+		} finally {
+			seen.keepsTestFile = false;
+		}
 	});
 
 	test("the event stream keeps its cursor and resumes from it", async () => {
