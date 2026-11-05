@@ -3,10 +3,11 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "n
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-export const VERSION = "0.2.6";
+export const VERSION = "0.2.7";
 
 /** What changed in this version, one line each, newest first. Surfaces show the first lines when a session opens. */
 export const NEWS = [
+	"0.2.7: the browser in a lab sandbox runs in your own sandbox, made from the lab's browser image, so it opens the apps you run there (el sandbox create <lab> --image browser); el sandbox create makes a new sandbox to work in, with internet access where the lab allows it, and no lab files go into those; el sandboxes shows why the lab ended one.",
 	"0.2.6: el sandboxes lists your sandboxes at a lab, and el sandbox stop or delete frees a place; when a lab refuses a new sandbox for too many, it says which one helps; a busy lab sandbox, a download cut short, or a sandbox the lab is still deleting is retried instead of failing.",
 	"0.2.5: at labs that run one, the agent can browse in a browser in your lab sandbox, which has none of your sign-ins and which you watch and use live in a pane; files leaving a lab sandbox must match what the lab's malware scanner passed; a lab agent waiting for your approval links to where you approve it.",
 	"0.2.4: apps your lab offers install from the Apps menu (el app add <lab>/<name>), checked against the lab's signers; lab sandboxes stop when idle and come back on use; a new computer at a lab waits for approval from one of your others.",
