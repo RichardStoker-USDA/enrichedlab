@@ -67,6 +67,15 @@ const lab = Bun.serve({
 			c.polls = 0;
 			return Response.json({ id, status: "restoring" }, { status: 202 });
 		}
+		if (rest === "/stop") {
+			// A lab from before the route answers a bare 404.
+			if (c.files === "no-stop") return new Response("", { status: 404 });
+			if (c.files === "jobs") return Response.json({ error: { code: "sandbox_has_jobs", message: "Background jobs are still running here. Cancel them first, or let them finish." } }, { status: 409 });
+			if (c.status === "archived" || c.status === "stopped") return Response.json({ id, status: c.status });
+			if (c.status !== "running") return Response.json({ error: { code: "sandbox_not_running", message: `This sandbox is ${c.status}, so there is nothing to stop.` } }, { status: 409 });
+			c.status = "stopped";
+			return c.files === "slow-stop" ? Response.json({ id, status: "stopping" }, { status: 202 }) : Response.json({ id, status: "stopped" });
+		}
 		if (c.files === "expired") return Response.json({ error: { code: "container_expired", message: "expired" } }, { status: 410 });
 		if (c.status === "stopped" || c.status === "starting") {
 			c.status = "starting";
@@ -183,6 +192,24 @@ describe("sandbox lifecycle", () => {
 		expect((await s.sandboxes()).map((b) => b.id)).not.toContain("c-old");
 		// The engine's own one is gone: the next command starts a new sandbox.
 		expect((await s.run("echo hi", 30)).stdout).toMatch(/^ran in new\d+\n$/);
+	});
+
+	test("a running sandbox is stopped with its files kept, and its next use starts it again", async () => {
+		const { s } = await site("c-stop", { status: "running" });
+		expect(await s.stopSandbox("c-stop")).toBe("stopped");
+		expect(box.get("c-stop")!.status).toBe("stopped");
+		expect((await s.run("echo hi", 30)).stdout).toBe("ran in c-stop\n");
+		box.set("c-slow-stop", { status: "running", polls: 0, files: "slow-stop" });
+		expect(await s.stopSandbox("c-slow-stop")).toBe("stopping");
+		box.set("c-jobs", { status: "running", polls: 0, files: "jobs" });
+		await expect(s.stopSandbox("c-jobs")).rejects.toThrow("Background jobs are still running here");
+		box.set("c-restoring", { status: "restoring", polls: 0, files: "" });
+		await expect(s.stopSandbox("c-restoring")).rejects.toThrow("This sandbox is restoring, so there is nothing to stop.");
+		// A lab without the route, and an id the lab doesn't know: both 404, told apart.
+		box.set("c-no-stop", { status: "running", polls: 0, files: "no-stop" });
+		await expect(s.stopSandbox("c-no-stop")).rejects.toThrow("Dev Lab can't stop sandboxes yet. el sandbox delete devlab c-no-stop removes it");
+		await expect(s.stopSandbox("c-nobody")).rejects.toThrow("no such container");
+		for (const id of ["c-slow-stop", "c-jobs", "c-restoring", "c-no-stop"]) box.delete(id);
 	});
 
 	test("an expired sandbox (410) is forgotten so the next command starts fresh", async () => {

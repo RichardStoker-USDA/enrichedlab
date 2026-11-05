@@ -21,6 +21,8 @@ export interface SiteAdapter {
 	/** The person's sandboxes at this lab, and deleting one; "deleting" while the lab still clears its files. */
 	sandboxes?(): Promise<LabSandbox[]>;
 	deleteSandbox?(id: string): Promise<"deleted" | "deleting">;
+	/** Stop a running one, keeping its files; "stopping" while the lab still stops it. */
+	stopSandbox?(id: string): Promise<"stopped" | "stopping" | "archived">;
 	/** Apps the lab offers this person, withdrawn versions included (GET /v1/apps). */
 	labApps?(): Promise<LabAppEntry[]>;
 	/** Signers the lab vouches for, revoked ones included (GET /v1/signers). */

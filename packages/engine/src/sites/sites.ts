@@ -225,6 +225,12 @@ export class Sites {
 		return adapter.deleteSandbox(id);
 	}
 
+	async stopSandbox(name: string, id: string) {
+		const adapter = await this.adapterFor(name);
+		if (!adapter.stopSandbox) throw new Error(`${this.title(name)} doesn't stop sandboxes.`);
+		return adapter.stopSandbox(id);
+	}
+
 	/** A lab by its short name here, or by its own name (its descriptor's), as apps a lab publishes name it. */
 	resolve(name: string): string | undefined {
 		if (this.exists(name)) return name;

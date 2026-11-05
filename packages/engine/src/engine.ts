@@ -808,6 +808,8 @@ export class Engine {
 					return (await this.sites.sandboxes(need("name"))) as never;
 				case "lab.sandbox.delete":
 					return { status: await this.sites.deleteSandbox(need("name"), need("id")) } as never;
+				case "lab.sandbox.stop":
+					return { status: await this.sites.stopSandbox(need("name"), need("id")) } as never;
 				case "browser.watch": {
 					// "again": a window that already watches asks for a fresh picture (it reloaded its pane).
 					const page = await this.browsers.watch(need("sessionId"), p.on === "again" ? "again" : p.on === true);

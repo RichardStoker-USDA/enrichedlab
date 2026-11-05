@@ -280,6 +280,24 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		return status;
 	}
 
+	/**
+	 * Stop one of the person's running sandboxes (POST /v1/containers/{id}/stop): its files stay, it no longer counts
+	 * toward how many may run at once, and its next use starts it again. The lab answers 202 while it still stops it.
+	 */
+	async stopSandbox(id: string): Promise<"stopped" | "stopping" | "archived"> {
+		const path = `/v1/containers/${encodeURIComponent(id)}`;
+		try {
+			const response = await this.call("POST", `${path}/stop`, { json: {}, signal: AbortSignal.timeout(60_000) });
+			const body = (await response.json().catch(() => ({}))) as { status?: string };
+			if (response.status === 202 || body.status === "stopping") return "stopping";
+			return body.status === "archived" ? "archived" : "stopped";
+		} catch (error) {
+			// A lab without the route answers 404 too: tell that apart from an id it doesn't know.
+			if ((error as { status?: number }).status !== 404 || (await this.containerStatus(id, undefined, true)) === "deleted") throw error;
+			throw new Error(`${this.title} can't stop sandboxes yet. el sandbox delete ${this.config.name} ${id} removes it, with its files.`);
+		}
+	}
+
 	async forget(): Promise<void> {
 		const key = this.device ?? (this.deviceFile ? await DeviceKey.open(this.deviceFile, this.config.url) : undefined);
 		if (key?.id && !key.revoked) await this.call("DELETE", `/v1/devices/${encodeURIComponent(key.id)}`, { signal: AbortSignal.timeout(10_000) }).catch(() => undefined);

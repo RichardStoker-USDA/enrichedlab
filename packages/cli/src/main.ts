@@ -52,7 +52,7 @@ const HELP = `EnrichedLab ${VERSION}
   el sites                        sites, who you are on each, and what they grant
   el lab check <lab> [--json]     check a lab against the lab contract (for people who run labs)
   el devices <lab>                your computers at a lab; el device approve|revoke <lab> <id>
-  el sandboxes <lab>              your sandboxes at a lab; el sandbox delete <lab> <id>
+  el sandboxes <lab>              your sandboxes at a lab; el sandbox stop|delete <lab> <id>
   el usage <lab> [--window 7d|30d]
                                   your use of a lab: tokens, GPU and sandbox hours
 
@@ -427,7 +427,10 @@ async function main(): Promise<void> {
 			} else if (action === "delete" && lab && id) {
 				const { status } = await client.call("lab.sandbox.delete", { name: lab, id });
 				out(status === "deleting" ? `Deleting ${id}; ${lab} finishes clearing its files.` : `Deleted ${id} and its files.`);
-			} else fail("el sandboxes <lab> | el sandbox delete <lab> <id>");
+			} else if (action === "stop" && lab && id) {
+				const { status } = await client.call("lab.sandbox.stop", { name: lab, id });
+				out(status === "archived" ? `${id} is archived already; its files are kept.` : `${status === "stopping" ? "Stopping" : "Stopped"} ${id}. Its files stay, and it no longer counts toward how many run at once; using it starts it again.`);
+			} else fail("el sandboxes <lab> | el sandbox stop <lab> <id> | el sandbox delete <lab> <id>");
 			client.close();
 			return;
 		}
