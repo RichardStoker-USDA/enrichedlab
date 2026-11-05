@@ -450,7 +450,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			const atOnce = detail.error?.limit === "at_once" && this.offers("stop");
 			// Lab files go only into sandboxes without internet; work with lab data happens in one of those.
 			const offline = `Lab files go only into a sandbox without internet: el sandbox create ${name} makes one.`;
-			const after: Record<string, string> = { too_many_containers: atOnce ? freeing : cleanup, storage_full: cleanup, internet_no_files: offline, internet_holds_data: `A sandbox with internet is for work that holds no lab data. ${offline}` };
+			const after: Record<string, string> = { too_many_containers: atOnce ? freeing : cleanup, storage_full: cleanup, internet_no_files: offline, internet_identity_required: `Internet sandboxes are for sign-ins made for internet use, which hold no lab data; ask the lab's owner for one. ${offline}` };
 			const code = detail.error?.code;
 			const given = code && detail.error?.message && after[code] ? `${detail.error.message.replace(/\.?$/, ".")} ${after[code]}` : detail.error?.message;
 			const message = (code && worded[code]) || given || `${this.config.name} answered ${response.status}.`;
@@ -1527,8 +1527,10 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				found = await this.json<{ webSocketDebuggerUrl?: string }>("GET", `${path}/json/version`, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000) });
 			} catch (error) {
 				last = error;
-				const status = (error as { status?: number }).status;
+				const { status, code } = error as { status?: number; code?: string };
 				if (signal?.aborted || (status && status < 500)) throw error;
+				// The lab tried to start the browser and it failed: asking again at once won't help.
+				if (code === "browser_start_failed") throw new ToolError(`${this.title}'s sandbox browser failed to start. Try again in half a minute; if it keeps failing, tell the lab's owner.`);
 				await sleep(1_000, signal);
 			}
 		}

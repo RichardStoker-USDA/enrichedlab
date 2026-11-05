@@ -53,6 +53,8 @@ let started = false;
 const seen = { auth: [] as string[], origin: [] as (string | null)[], made: [] as unknown[], deleted: [] as string[] };
 const browserInfo = { protocol: "cdp", port: 9222, version: "test" };
 let boxes = 0;
+// A sandbox whose browser fails to start (502 browser_start_failed, as Gate answers), and how often it was asked.
+const failing = { id: "b90", asks: 0 };
 const lab = Bun.serve<{ upstream?: WebSocket; queue: string[] }, never>({
 	port: 0,
 	hostname: "127.0.0.1",
@@ -79,6 +81,10 @@ const lab = Bun.serve<{ upstream?: WebSocket; queue: string[] }, never>({
 		// Only the browser image's sandbox has a browser; another site's page is refused, as Gate does.
 		const port = /^\/v1\/containers\/b\d+\/ports\/9222(\/.*)$/.exec(url.pathname);
 		if (port) {
+			if (url.pathname.startsWith(`/v1/containers/${failing.id}/`)) {
+				failing.asks++;
+				return Response.json({ error: { code: "browser_start_failed", message: "The sandbox's browser didn't start." } }, { status: 502, headers: { "retry-after": "30" } });
+			}
 			const origin = request.headers.get("origin");
 			if (origin && origin !== base) return Response.json({ error: { code: "origin_refused", message: "A sandbox's browser takes requests only from a harness or the lab's own pages." } }, { status: 403 });
 			if (!started) {
@@ -203,6 +209,13 @@ describe.skipIf(!devtools)("the browser in a lab's sandbox", () => {
 		await fresh.close();
 		expect(seen.deleted).toEqual(["b2"]);
 	}, 60_000);
+
+	test("a browser that fails to start is reported at once, not asked for again and again", async () => {
+		const broken = new GateSite({ name: "devlab", url: base, kind: "gate" }, { base, via: "key", headers: async () => ({ authorization: "Bearer test" }) }, failing.id);
+		await broken.connect();
+		await expect(broken.cdp(AbortSignal.timeout(20_000))).rejects.toThrow("Dev Lab's sandbox browser failed to start. Try again in half a minute");
+		expect(failing.asks).toBe(1);
+	}, 30_000);
 
 	test("el lab check makes a browser-image sandbox, reaches its DevTools, and sees an unknown image refused", async () => {
 		const rows = await gate.check();
