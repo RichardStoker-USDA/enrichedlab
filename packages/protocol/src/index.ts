@@ -337,6 +337,8 @@ export interface LabSandbox {
 	profile?: string;
 	/** the one this engine works in */
 	current?: boolean;
+	/** it runs and the lab can stop it, freeing its place under the lab's limit on sandboxes running at once */
+	stoppable?: boolean;
 }
 
 /** An app version a lab offers this person (its /v1/apps), as the Apps list shows it. */

@@ -11,6 +11,8 @@ let made = 0;
 // How the next new sandbox is refused: once while Gate is busy, or because the person holds too many or storage is full.
 let refuse: "" | "busy-once" | "full" | "storage" | "one-at-once" = "";
 let deletes = 0;
+// Whether the lab says it can stop sandboxes (endpoints.stop).
+let stops = true;
 
 const lab = Bun.serve({
 	port: 0,
@@ -19,7 +21,7 @@ const lab = Bun.serve({
 		const url = new URL(request.url);
 		const { pathname } = url;
 		calls.push(`${request.method} ${pathname}`);
-		if (pathname === "/.well-known/enrichedlab-lab") return Response.json({ contract: "2026-11", name: "devlab", title: "Dev Lab", endpoints: { containers: true }, sign_in: { kind: "key" } });
+		if (pathname === "/.well-known/enrichedlab-lab") return Response.json({ contract: "2026-11", name: "devlab", title: "Dev Lab", endpoints: { containers: true, ...(stops ? { stop: true } : {}) }, sign_in: { kind: "key" } });
 		if (pathname === "/v1/me") return Response.json({ subject: "u_1", handle: "pat", memberships: [], sandboxes: { enabled: true } });
 		if (pathname === "/v1/models") return Response.json({ data: [] });
 		if (pathname === "/v1/containers" && request.method === "POST") {
@@ -27,9 +29,9 @@ const lab = Bun.serve({
 				refuse = "";
 				return Response.json({ error: { code: "sandbox_busy", message: "Gate is busy starting other sandboxes. Try again shortly." } }, { status: 503, headers: { "retry-after": "0" } });
 			}
-			if (refuse === "full") return Response.json({ error: { code: "too_many_containers", message: "You hold 20 containers, the most one person may keep. Delete one you no longer need first." } }, { status: 429 });
+			if (refuse === "full") return Response.json({ error: { code: "too_many_containers", limit: "held", message: "You hold 20 containers, the most one person may keep. Delete one you no longer need first." } }, { status: 429 });
 			// One sandbox at a time: one still being deleted counts until it's gone.
-			if (refuse === "one-at-once" && [...box.values()].some((c) => c.status === "deleting")) return Response.json({ error: { code: "too_many_containers", message: "You may run 1 container at once. Delete one first." } }, { status: 429 });
+			if (refuse === "one-at-once" && [...box.values()].some((c) => c.status === "deleting")) return Response.json({ error: { code: "too_many_containers", limit: "at_once", message: "You may run 1 sandbox at once. Stop or delete one first." } }, { status: 429 });
 			if (refuse === "storage") return Response.json({ error: { code: "storage_full", message: "Your files and resting sandboxes fill your storage. Delete some first." } }, { status: 413 });
 			const id = `new${++made}`;
 			box.set(id, { status: "running", polls: 0, files: "" });
@@ -157,7 +159,7 @@ describe("sandbox lifecycle", () => {
 		// One that stays deleting: the lab's refusal stands, with where to act on it.
 		GateSite.leavingWaitMs = 50;
 		const stuck = await site("c-stuck", { status: "deleting" });
-		await expect(stuck.s.run("echo hi", 30)).rejects.toThrow("You may run 1 container at once. Delete one first. el sandboxes devlab lists");
+		await expect(stuck.s.run("echo hi", 30)).rejects.toThrow("You may run 1 sandbox at once. Stop or delete one first. el sandboxes devlab lists your sandboxes there; el sandbox stop devlab <id> stops one and keeps its files, el sandbox delete devlab <id> removes one.");
 		box.delete("c-stuck");
 		GateSite.leavingWaitMs = 60_000;
 		refuse = "";
@@ -183,8 +185,8 @@ describe("sandbox lifecycle", () => {
 		box.set("c-old", { status: "archived", polls: 0, files: "slow-delete" });
 		await s.run("echo hi", 30);
 		const listed = await s.sandboxes();
-		expect(listed.find((b) => b.id === "c-mine")).toMatchObject({ status: "running", current: true, memory: "4g", created: "2026-10-26T07:33:20.000Z" });
-		expect(listed.find((b) => b.id === "c-old")).toMatchObject({ status: "archived", current: false });
+		expect(listed.find((b) => b.id === "c-mine")).toMatchObject({ status: "running", current: true, stoppable: true, memory: "4g", created: "2026-10-26T07:33:20.000Z" });
+		expect(listed.find((b) => b.id === "c-old")).toMatchObject({ status: "archived", current: false, stoppable: false });
 		deletes = 0;
 		expect(await s.deleteSandbox("c-old")).toBe("deleting");
 		expect(deletes).toBe(2);
@@ -205,11 +207,20 @@ describe("sandbox lifecycle", () => {
 		await expect(s.stopSandbox("c-jobs")).rejects.toThrow("Background jobs are still running here");
 		box.set("c-restoring", { status: "restoring", polls: 0, files: "" });
 		await expect(s.stopSandbox("c-restoring")).rejects.toThrow("This sandbox is restoring, so there is nothing to stop.");
-		// A lab without the route, and an id the lab doesn't know: both 404, told apart.
+		// The route missing where the descriptor says it's there, and an id the lab doesn't know: both 404, told apart.
 		box.set("c-no-stop", { status: "running", polls: 0, files: "no-stop" });
 		await expect(s.stopSandbox("c-no-stop")).rejects.toThrow("Dev Lab can't stop sandboxes yet. el sandbox delete devlab c-no-stop removes it");
 		await expect(s.stopSandbox("c-nobody")).rejects.toThrow("no such container");
 		for (const id of ["c-slow-stop", "c-jobs", "c-restoring", "c-no-stop"]) box.delete(id);
+		// A lab whose descriptor doesn't offer stop isn't asked, and its sandboxes aren't offered for stopping.
+		stops = false;
+		const older = await site("c-older", { status: "running" });
+		const before = calls.length;
+		await expect(older.s.stopSandbox("c-older")).rejects.toThrow("Dev Lab can't stop sandboxes yet.");
+		expect(calls.slice(before).some((c) => c.endsWith("/stop"))).toBe(false);
+		expect((await older.s.sandboxes()).find((b) => b.id === "c-older")).toMatchObject({ stoppable: false });
+		stops = true;
+		box.delete("c-older");
 	});
 
 	test("an expired sandbox (410) is forgotten so the next command starts fresh", async () => {

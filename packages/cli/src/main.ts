@@ -423,7 +423,8 @@ async function main(): Promise<void> {
 				const boxes = await client.call("lab.sandboxes", { name: lab });
 				if (!boxes.length) out(`You have no sandboxes at ${lab}.`);
 				for (const b of boxes) out(`${b.id}  ${b.status ?? "running"}${b.current ? "  in use here" : ""}${b.status === "deleting" ? "  (counts toward your limit until it's gone)" : ""}  ${b.name ?? ""}\n  ${b.memory ? `${b.memory}, ` : ""}made ${at(b.created)}, last used ${at(b.last_active)}`);
-				if (boxes.length) out(`\nDelete one you no longer need, with its files: el sandbox delete ${lab} <id>`);
+				if (boxes.some((b) => b.stoppable)) out(`\nStop a running one to free a place, keeping its files: el sandbox stop ${lab} <id>`);
+				if (boxes.length) out(`${boxes.some((b) => b.stoppable) ? "" : "\n"}Delete one you no longer need, with its files: el sandbox delete ${lab} <id>`);
 			} else if (action === "delete" && lab && id) {
 				const { status } = await client.call("lab.sandbox.delete", { name: lab, id });
 				out(status === "deleting" ? `Deleting ${id}; ${lab} finishes clearing its files.` : `Deleted ${id} and its files.`);

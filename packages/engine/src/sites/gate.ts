@@ -255,12 +255,13 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		type Listed = { id: string; name?: string; status?: string; created_at?: number; last_active_at?: number; memory_limit?: string; profile?: string };
 		const when = (seconds?: number) => (typeof seconds === "number" ? new Date(seconds * 1000).toISOString() : undefined);
 		const found: LabSandbox[] = [];
+		const stops = this.offers("stop");
 		let after: string | undefined;
 		for (let page = 0; page < 10; page++) {
 			const query = new URLSearchParams({ limit: "100" });
 			if (after) query.set("after", after);
 			const list = await this.json<{ data?: Listed[]; has_more?: boolean }>("GET", `/v1/containers?${query}`, { signal: AbortSignal.timeout(15_000) });
-			for (const c of list.data ?? []) found.push({ id: c.id, name: c.name, status: c.status, created: when(c.created_at), last_active: when(c.last_active_at), memory: c.memory_limit, profile: c.profile, current: c.id === this.container });
+			for (const c of list.data ?? []) found.push({ id: c.id, name: c.name, status: c.status, created: when(c.created_at), last_active: when(c.last_active_at), memory: c.memory_limit, profile: c.profile, current: c.id === this.container, stoppable: stops && (c.status ?? "running") === "running" });
 			if (!list.has_more || !list.data?.length) break;
 			after = list.data[list.data.length - 1]!.id;
 		}
@@ -286,15 +287,17 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	 */
 	async stopSandbox(id: string): Promise<"stopped" | "stopping" | "archived"> {
 		const path = `/v1/containers/${encodeURIComponent(id)}`;
+		const cannot = () => new Error(`${this.title} can't stop sandboxes yet. el sandbox delete ${this.config.name} ${id} removes it, with its files.`);
+		if (!this.offers("stop")) throw cannot();
 		try {
 			const response = await this.call("POST", `${path}/stop`, { json: {}, signal: AbortSignal.timeout(60_000) });
 			const body = (await response.json().catch(() => ({}))) as { status?: string };
 			if (response.status === 202 || body.status === "stopping") return "stopping";
 			return body.status === "archived" ? "archived" : "stopped";
 		} catch (error) {
-			// A lab without the route answers 404 too: tell that apart from an id it doesn't know.
+			// A lab with no descriptor to say so may lack the route, which answers 404 too: tell that apart from an unknown id.
 			if ((error as { status?: number }).status !== 404 || (await this.containerStatus(id, undefined, true)) === "deleted") throw error;
-			throw new Error(`${this.title} can't stop sandboxes yet. el sandbox delete ${this.config.name} ${id} removes it, with its files.`);
+			throw cannot();
 		}
 	}
 
@@ -407,7 +410,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				// gets another token Access will refuse the same way, so say what has to change instead.
 				throw new Error(`Cloudflare Access refused the sign-in token for ${this.config.name} (invalid_token). The site's Access application has to accept OAuth tokens (its binding cookie off); signing in again won't change it.`);
 			}
-			const detail = ((await response.json().catch(() => undefined)) ?? {}) as { error?: { message?: string; code?: string } };
+			const detail = ((await response.json().catch(() => undefined)) ?? {}) as { error?: { message?: string; code?: string; limit?: string } };
 			const worded: Record<string, string> = {
 				device_pending: this.pendingText,
 				approve_requires_device: `Approve from a computer that's already approved for ${this.title}.`,
@@ -417,9 +420,13 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				downloads_in_progress: `You have as many downloads from ${this.title} being scanned as it allows at once. Try again when one finishes.`,
 				device_pending_exists: `Another new computer is already waiting for approval at ${this.title}. Approve or revoke it from one of your approved devices (el devices ${this.config.name}), then try again here.`,
 			};
-			// The lab's own message gives the numbers; this adds where to act on it.
-			const cleanup = `el sandboxes ${this.config.name} lists your sandboxes there; el sandbox delete ${this.config.name} <id> removes one.`;
-			const after: Record<string, string> = { too_many_containers: cleanup, storage_full: cleanup };
+			// The lab's own message gives the numbers; this adds where to act on it. Stopping frees a place only under the
+			// limit on sandboxes running at once (error.limit "at_once"); one of the most a person may keep ("held") takes a delete.
+			const { name } = this.config;
+			const cleanup = `el sandboxes ${name} lists your sandboxes there; el sandbox delete ${name} <id> removes one.`;
+			const freeing = `el sandboxes ${name} lists your sandboxes there; el sandbox stop ${name} <id> stops one and keeps its files, el sandbox delete ${name} <id> removes one.`;
+			const atOnce = detail.error?.limit === "at_once" && this.offers("stop");
+			const after: Record<string, string> = { too_many_containers: atOnce ? freeing : cleanup, storage_full: cleanup };
 			const code = detail.error?.code;
 			const given = code && detail.error?.message && after[code] ? `${detail.error.message.replace(/\.?$/, ".")} ${after[code]}` : detail.error?.message;
 			const message = (code && worded[code]) || given || `${this.config.name} answered ${response.status}.`;

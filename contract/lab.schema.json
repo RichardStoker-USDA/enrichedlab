@@ -13,9 +13,9 @@
       "properties": {
         "models": { "type": "boolean" }, "mcp": { "type": "boolean" }, "bundles": { "type": "boolean" },
         "events": { "type": "boolean" }, "guard": { "type": "boolean" }, "devices": { "type": "boolean" },
-        "containers": { "type": "boolean" }, "ports": { "type": "boolean" }, "attach": { "type": "boolean" },
-        "files": { "type": "boolean" }, "apps": { "type": "boolean" }, "signers": { "type": "boolean" },
-        "usage": { "type": "boolean" }, "agents": { "type": "boolean" }
+        "containers": { "type": "boolean" }, "stop": { "type": "boolean" }, "ports": { "type": "boolean" },
+        "attach": { "type": "boolean" }, "files": { "type": "boolean" }, "apps": { "type": "boolean" },
+        "signers": { "type": "boolean" }, "usage": { "type": "boolean" }, "agents": { "type": "boolean" }
       }
     },
     "sign_in": { "type": "object", "required": ["kind"], "properties": { "kind": { "type": "string", "enum": ["cloudflare-access-oauth", "oauth"] } } },
