@@ -96,6 +96,24 @@ const PRIVATE_TARGETS = [
 	"[2002:a9fe:a9fe::1]:443",
 ];
 
+/** Public pages whose certificates are broken on purpose: expired, self-signed, and issued for another name. */
+const BAD_CERT_PAGES = ["https://expired.badssl.com/", "https://self-signed.badssl.com/", "https://wrong.host.badssl.com/"];
+/** The same site with a good certificate: it has to load, or a refusal says nothing. */
+const GOOD_CERT_PAGE = "https://badssl.com/";
+
+/**
+ * Fetches each URL given and prints, as JSON, "loaded <status>" or the error it got. Python trusts the sandbox's CA
+ * (SSL_CERT_FILE), so through a proxy that re-signs HTTPS a page loads only if the proxy passed its certificate on.
+ */
+const FETCH_PROBE = String.raw`import json, sys, urllib.request
+out = {}
+for url in sys.argv[1:]:
+    try:
+        out[url] = "loaded " + str(urllib.request.urlopen(url, timeout=20).status)
+    except Exception as e:
+        out[url] = type(e).__name__ + ": " + str(getattr(e, "reason", e))[:160]
+print(json.dumps(out))`;
+
 /**
  * Asks the sandbox's proxy to CONNECT to each target given and prints what it said, as JSON: "reached" (2xx),
  * "refused" (4xx), or what else happened. Fetching a URL can't tell a refusal from a proxy that tried and found nothing
@@ -1058,6 +1076,18 @@ export class GateSite implements SiteAdapter, SandboxApi {
 					if (reached.length) add("internet sandbox private addresses", "fail", `reached a private address: ${reached.join(", ")}`);
 					else if (unclear.length) add("internet sandbox private addresses", "fail", `not refused: ${unclear.map((target) => `${target} (${answers[target] ?? `no result, exit ${probe.exit_code ?? "?"}`})`).join(", ")}`);
 					else add("internet sandbox private addresses", "pass", `all ${PRIVATE_TARGETS.length} refused: the metadata address, the private, carrier NAT and loopback ranges, the cluster API, and their IPv6 forms`);
+					// A proxy that re-signs HTTPS checks each site's own certificate first, or it vouches for forgeries.
+					const certRow = "internet sandbox checks site certificates";
+					const bad = await run(`python3 -c '${FETCH_PROBE}' ${[GOOD_CERT_PAGE, ...BAD_CERT_PAGES].map((url) => `'${url}'`).join(" ")}`);
+					let got: Record<string, string> = {};
+					try {
+						got = JSON.parse(bad.stdout?.trim() || "{}") as Record<string, string>;
+					} catch {}
+					const passedOn = BAD_CERT_PAGES.filter((url) => got[url]?.startsWith("loaded"));
+					if (passedOn.length) add(certRow, "fail", `the proxy passed on a broken certificate as trusted: ${passedOn.join(", ")}`);
+					else if (!got[GOOD_CERT_PAGE] || BAD_CERT_PAGES.some((url) => !got[url])) add(certRow, "fail", `the probe printed no result (exit ${bad.exit_code ?? "?"})`);
+					else if (!got[GOOD_CERT_PAGE].startsWith("loaded")) add(certRow, "skip", `${GOOD_CERT_PAGE} itself didn't load (${got[GOOD_CERT_PAGE]}), so a refusal can't be told from an outage`);
+					else add(certRow, "pass", `${GOOD_CERT_PAGE} loaded; its expired, self-signed and wrong-name pages were refused (${got[BAD_CERT_PAGES[0]!]})`);
 					const boundary = `enrichedlab-${randomBytes(12).toString("hex")}`;
 					const form = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="el-check.txt"\r\nContent-Type: text/plain\r\n\r\nel-check\r\n--${boundary}--\r\n`;
 					const sent = await this.call("POST", `/v1/containers/${encodeURIComponent(made.id)}/files`, { body: form, headers: { "content-type": `multipart/form-data; boundary=${boundary}` }, signal: t() }).then(

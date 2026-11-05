@@ -31,7 +31,7 @@ const me = {
 	policy: { keep_data_inside: false },
 	sandbox_networks: ["none", "internet"],
 };
-const seen: { cursor?: string | null; deleted?: string; uploaded: string; keepsTestFile?: boolean; filesDeleted: string[]; internet: string[]; leaks?: boolean; tries?: boolean } = { uploaded: "", filesDeleted: [], internet: [] };
+const seen: { cursor?: string | null; deleted?: string; uploaded: string; keepsTestFile?: boolean; filesDeleted: string[]; internet: string[]; leaks?: boolean; tries?: boolean; passesBadCerts?: boolean } = { uploaded: "", filesDeleted: [], internet: [] };
 /** The EICAR test file's sha-256: the lab here knows it by its hash, so this file never holds it. */
 const EICAR_SHA256 = "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f";
 
@@ -75,6 +75,12 @@ const lab = Bun.serve<{ stdin: string; started: boolean }, never>({
 					const targets = [...command.matchAll(/'([^'\s]+:\d+)'/g)].map((m) => m[1]!);
 					const answers = Object.fromEntries(targets.map((t) => [t, seen.leaks && t === "[::ffff:a9fe:a9fe]:443" ? "reached" : seen.tries && t === "10.0.0.1:443" ? "the proxy answered 502" : "refused"]));
 					return Response.json({ exit_code: 0, stdout: `${JSON.stringify(answers)}\n`, stderr: "" });
+				}
+				// Pages with broken certificates: the proxy refuses them, unless a lab is set to pass them on re-signed.
+				if (command.includes("badssl.com")) {
+					const urls = [...command.matchAll(/'(https:[^'\s]+)'/g)].map((m) => m[1]!);
+					const got = Object.fromEntries(urls.map((u) => [u, u === "https://badssl.com/" || (seen.passesBadCerts && u.includes("expired")) ? "loaded 200" : "URLError: Tunnel connection failed: 502 Bad Gateway"]));
+					return Response.json({ exit_code: 0, stdout: `${JSON.stringify(got)}\n`, stderr: "" });
 				}
 				return command.includes("https://example.com/") ? Response.json({ exit_code: 0, stdout: "200\n", stderr: "" }) : Response.json({ exit_code: 1, stdout: "", stderr: "urllib.error.URLError" });
 			}
@@ -191,6 +197,7 @@ describe("lab contract", () => {
 			["internet sandbox", "pass"],
 			["internet sandbox only through its proxy", "pass"],
 			["internet sandbox private addresses", "pass"],
+			["internet sandbox checks site certificates", "pass"],
 			["internet sandbox takes no files", "pass"],
 		]);
 		expect(seen.internet.at(-1)).toBe("deleted");
@@ -198,6 +205,7 @@ describe("lab contract", () => {
 		const probe = seen.internet.find((c) => c.includes("CONNECT "));
 		for (const target of ["169.254.169.254:443", "10.0.0.1:443", "kubernetes.default.svc:443", "[::ffff:a9fe:a9fe]:443", "[64:ff9b::a9fe:a9fe]:443", "[2002:a9fe:a9fe::1]:443", "[fd00:ec2::254]:443"]) expect(probe).toContain(`'${target}'`);
 		expect(rows.find((r) => r.row === "internet sandbox private addresses")?.detail).toStartWith("all 13 refused");
+		expect(rows.find((r) => r.row === "internet sandbox checks site certificates")?.detail).toStartWith("https://badssl.com/ loaded; its expired, self-signed and wrong-name pages were refused");
 		expect(seen.deleted).toBe("c1");
 	});
 
@@ -219,6 +227,16 @@ describe("lab contract", () => {
 			expect(rows.find((r) => r.row === "internet sandbox private addresses")).toMatchObject({ status: "fail", detail: "reached a private address: [::ffff:a9fe:a9fe]:443" });
 		} finally {
 			seen.leaks = false;
+		}
+	});
+
+	test("a proxy that passes on a broken site certificate, re-signed, fails the check", async () => {
+		seen.passesBadCerts = true;
+		try {
+			const rows = await site().check();
+			expect(rows.find((r) => r.row === "internet sandbox checks site certificates")).toMatchObject({ status: "fail", detail: "the proxy passed on a broken certificate as trusted: https://expired.badssl.com/" });
+		} finally {
+			seen.passesBadCerts = false;
 		}
 	});
 
