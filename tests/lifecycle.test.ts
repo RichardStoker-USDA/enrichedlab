@@ -38,7 +38,8 @@ const lab = Bun.serve({
 			return Response.json({ id, status: "running" });
 		}
 		if (pathname === "/v1/containers" && request.method === "GET") {
-			const data = [...box].filter(([, c]) => c.status !== "deleted").map(([id, c]) => ({ id, object: "container", name: "EnrichedLab", status: c.status, created_at: 1_793_000_000, last_active_at: 1_793_000_600, memory_limit: "4g" }));
+			// As Gate does, ones that expired or failed still list, as deleted.
+			const data = [...box].map(([id, c]) => ({ id, object: "container", name: "EnrichedLab", status: c.status, created_at: 1_793_000_000, last_active_at: 1_793_000_600, memory_limit: "4g" }));
 			return Response.json({ object: "list", data, has_more: false });
 		}
 		const match = /^\/v1\/containers\/([^/]+)(\/.*)?$/.exec(pathname);

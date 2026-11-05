@@ -261,7 +261,8 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			const query = new URLSearchParams({ limit: "100" });
 			if (after) query.set("after", after);
 			const list = await this.json<{ data?: Listed[]; has_more?: boolean }>("GET", `/v1/containers?${query}`, { signal: AbortSignal.timeout(15_000) });
-			for (const c of list.data ?? []) found.push({ id: c.id, name: c.name, status: c.status, created: when(c.created_at), last_active: when(c.last_active_at), memory: c.memory_limit, profile: c.profile, current: c.id === this.container, stoppable: stops && (c.status ?? "running") === "running" });
+			// One the lab lists as deleted (it expired or failed) holds no files and counts toward no limit.
+			for (const c of list.data ?? []) if (c.status !== "deleted") found.push({ id: c.id, name: c.name, status: c.status, created: when(c.created_at), last_active: when(c.last_active_at), memory: c.memory_limit, profile: c.profile, current: c.id === this.container, stoppable: stops && (c.status ?? "running") === "running" });
 			if (!list.has_more || !list.data?.length) break;
 			after = list.data[list.data.length - 1]!.id;
 		}
