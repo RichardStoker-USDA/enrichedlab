@@ -339,6 +339,8 @@ export interface LabSandbox {
 	current?: boolean;
 	/** it runs and the lab can stop it, freeing its place under the lab's limit on sandboxes running at once */
 	stoppable?: boolean;
+	/** why the lab ended or stopped it, when it says: one the lab ended itself lists as deleted, with no files */
+	reason?: string;
 }
 
 /** An app version a lab offers this person (its /v1/apps), as the Apps list shows it. */

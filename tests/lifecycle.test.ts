@@ -38,8 +38,10 @@ const lab = Bun.serve({
 			return Response.json({ id, status: "running" });
 		}
 		if (pathname === "/v1/containers" && request.method === "GET") {
-			// As Gate does, ones that expired or failed still list, as deleted.
-			const data = [...box].map(([id, c]) => ({ id, object: "container", name: "EnrichedLab", status: c.status, created_at: 1_793_000_000, last_active_at: 1_793_000_600, memory_limit: "4g" }));
+			// As Gate does: one the person deleted drops out; one the lab ended itself stays, as deleted, with why.
+			const data = [...box]
+				.filter(([, c]) => c.status !== "deleted" || c.files === "ended")
+				.map(([id, c]) => ({ id, object: "container", name: "EnrichedLab", status: c.status, ...(c.files === "ended" ? { reason: "Unused for 90 days; its files are gone." } : {}), created_at: 1_793_000_000, last_active_at: 1_793_000_600, memory_limit: "4g" }));
 			return Response.json({ object: "list", data, has_more: false });
 		}
 		const match = /^\/v1\/containers\/([^/]+)(\/.*)?$/.exec(pathname);
@@ -184,10 +186,14 @@ describe("sandbox lifecycle", () => {
 	test("the person's sandboxes are listed, and deleting one waits its turn and says when the lab is still clearing it", async () => {
 		const { s } = await site("c-mine", { status: "running" });
 		box.set("c-old", { status: "archived", polls: 0, files: "slow-delete" });
+		box.set("c-ended", { status: "deleted", polls: 0, files: "ended" });
 		await s.run("echo hi", 30);
 		const listed = await s.sandboxes();
 		expect(listed.find((b) => b.id === "c-mine")).toMatchObject({ status: "running", current: true, stoppable: true, memory: "4g", created: "2026-10-26T07:33:20.000Z" });
 		expect(listed.find((b) => b.id === "c-old")).toMatchObject({ status: "archived", current: false, stoppable: false });
+		// One the lab ended itself is listed with why, and can't be stopped.
+		expect(listed.find((b) => b.id === "c-ended")).toMatchObject({ status: "deleted", reason: "Unused for 90 days; its files are gone.", stoppable: false });
+		box.delete("c-ended");
 		deletes = 0;
 		expect(await s.deleteSandbox("c-old")).toBe("deleting");
 		expect(deletes).toBe(2);

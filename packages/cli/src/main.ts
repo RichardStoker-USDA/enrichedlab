@@ -420,11 +420,16 @@ async function main(): Promise<void> {
 			const client = await connect();
 			const at = (iso?: string) => iso?.slice(0, 16).replace("T", " ") ?? "?";
 			if (action === "list" && lab) {
-				const boxes = await client.call("lab.sandboxes", { name: lab });
+				const all = await client.call("lab.sandboxes", { name: lab });
+				// Ones the lab ended itself stay listed so the person sees why; they hold nothing and count toward no limit.
+				const boxes = all.filter((b) => b.status !== "deleted");
+				const ended = all.filter((b) => b.status === "deleted");
 				if (!boxes.length) out(`You have no sandboxes at ${lab}.`);
-				for (const b of boxes) out(`${b.id}  ${b.status ?? "running"}${b.current ? "  in use here" : ""}${b.status === "deleting" ? "  (counts toward your limit until it's gone)" : ""}  ${b.name ?? ""}\n  ${b.memory ? `${b.memory}, ` : ""}made ${at(b.created)}, last used ${at(b.last_active)}`);
+				for (const b of boxes) out(`${b.id}  ${b.status ?? "running"}${b.current ? "  in use here" : ""}${b.status === "deleting" ? "  (counts toward your limit until it's gone)" : ""}  ${b.name ?? ""}\n  ${b.memory ? `${b.memory}, ` : ""}made ${at(b.created)}, last used ${at(b.last_active)}${b.reason ? `\n  ${b.reason}` : ""}`);
 				if (boxes.some((b) => b.stoppable)) out(`\nStop a running one to free a place, keeping its files: el sandbox stop ${lab} <id>`);
 				if (boxes.length) out(`${boxes.some((b) => b.stoppable) ? "" : "\n"}Delete one you no longer need, with its files: el sandbox delete ${lab} <id>`);
+				if (ended.length) out(`\nEnded by ${lab}, with nothing kept; these don't count toward your limits:`);
+				for (const b of ended) out(`${b.id}  ${b.name ?? ""}\n  ${b.reason ?? `${lab} didn't say why`}; made ${at(b.created)}, last used ${at(b.last_active)}`);
 			} else if (action === "delete" && lab && id) {
 				const { status } = await client.call("lab.sandbox.delete", { name: lab, id });
 				out(status === "deleting" ? `Deleting ${id}; ${lab} finishes clearing its files.` : `Deleted ${id} and its files.`);
