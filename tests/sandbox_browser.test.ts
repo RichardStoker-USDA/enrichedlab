@@ -139,8 +139,12 @@ if (chrome) {
 		await Bun.sleep(50);
 		const file = join(profile, "DevToolsActivePort");
 		if (existsSync(file)) {
-			const [port] = readFileSync(file, "utf8").split("\n");
-			if (port?.trim()) devtools = `http://127.0.0.1:${port.trim()}`;
+			try {
+				const [port] = readFileSync(file, "utf8").split("\n");
+				if (port?.trim()) devtools = `http://127.0.0.1:${port.trim()}`;
+			} catch {
+				// Windows locks the file while Chrome writes it (EBUSY); read it again on the next turn.
+			}
 		}
 	}
 }
