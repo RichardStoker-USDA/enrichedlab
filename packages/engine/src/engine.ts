@@ -809,7 +809,7 @@ export class Engine {
 				case "lab.sandbox.delete":
 					return { status: await this.sites.deleteSandbox(need("name"), need("id")) } as never;
 				case "lab.sandbox.create":
-					return (await this.sites.createSandbox(need("name"), typeof p.image === "string" ? p.image : undefined)) as never;
+					return (await this.sites.createSandbox(need("name"), typeof p.image === "string" ? p.image : undefined, typeof p.network === "string" ? p.network : undefined)) as never;
 				case "lab.sandbox.stop":
 					return { status: await this.sites.stopSandbox(need("name"), need("id")) } as never;
 				case "browser.watch": {

@@ -3,6 +3,9 @@
 // (410) is forgotten so the next command starts fresh.
 
 import { afterAll, describe, expect, test } from "bun:test";
+import { rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { GateSite } from "../packages/engine/src/sites/gate.ts";
 
 const box = new Map<string, { status: string; polls: number; files: string }>();
@@ -13,6 +16,10 @@ let refuse: "" | "busy-once" | "full" | "storage" | "one-at-once" = "";
 let deletes = 0;
 // Whether the lab says it can stop sandboxes (endpoints.stop).
 let stops = true;
+// Whether this person may make internet sandboxes (/v1/me sandbox_networks); what each create asked for; their networks.
+let internetAllowed = true;
+const posted: unknown[] = [];
+const nets = new Map<string, string>();
 
 const lab = Bun.serve({
 	port: 0,
@@ -21,10 +28,12 @@ const lab = Bun.serve({
 		const url = new URL(request.url);
 		const { pathname } = url;
 		calls.push(`${request.method} ${pathname}`);
-		if (pathname === "/.well-known/enrichedlab-lab") return Response.json({ contract: "2026-11", name: "devlab", title: "Dev Lab", endpoints: { containers: true, ...(stops ? { stop: true } : {}) }, sign_in: { kind: "key" } });
-		if (pathname === "/v1/me") return Response.json({ subject: "u_1", handle: "pat", memberships: [], sandboxes: { enabled: true } });
+		if (pathname === "/.well-known/enrichedlab-lab") return Response.json({ contract: "2026-11", name: "devlab", title: "Dev Lab", endpoints: { containers: true, ...(stops ? { stop: true } : {}) }, sign_in: { kind: "key" }, sandbox_networks: [{ name: "none" }, { name: "internet" }] });
+		if (pathname === "/v1/me") return Response.json({ subject: "u_1", handle: "pat", memberships: [], sandboxes: { enabled: true }, sandbox_networks: internetAllowed ? ["none", "internet"] : ["none"] });
 		if (pathname === "/v1/models") return Response.json({ data: [] });
 		if (pathname === "/v1/containers" && request.method === "POST") {
+			const body = (await request.json().catch(() => ({}))) as { network?: string };
+			posted.push(body);
 			if (refuse === "busy-once") {
 				refuse = "";
 				return Response.json({ error: { code: "sandbox_busy", message: "Gate is busy starting other sandboxes. Try again shortly." } }, { status: 503, headers: { "retry-after": "0" } });
@@ -35,13 +44,14 @@ const lab = Bun.serve({
 			if (refuse === "storage") return Response.json({ error: { code: "storage_full", message: "Your files and resting sandboxes fill your storage. Delete some first." } }, { status: 413 });
 			const id = `new${++made}`;
 			box.set(id, { status: "running", polls: 0, files: "" });
+			if (body.network) nets.set(id, body.network);
 			return Response.json({ id, status: "running" });
 		}
 		if (pathname === "/v1/containers" && request.method === "GET") {
 			// As Gate does: one the person deleted drops out; one the lab ended itself stays, as deleted, with why.
 			const data = [...box]
 				.filter(([, c]) => c.status !== "deleted" || c.files === "ended")
-				.map(([id, c]) => ({ id, object: "container", name: "EnrichedLab", status: c.status, ...(c.files === "ended" ? { reason: "Unused for 90 days; its files are gone." } : {}), created_at: 1_793_000_000, last_active_at: 1_793_000_600, memory_limit: "4g" }));
+				.map(([id, c]) => ({ id, object: "container", name: "EnrichedLab", status: c.status, network: nets.get(id) ?? null, ...(c.files === "ended" ? { reason: "Unused for 90 days; its files are gone." } : {}), created_at: 1_793_000_000, last_active_at: 1_793_000_600, memory_limit: "4g" }));
 			return Response.json({ object: "list", data, has_more: false });
 		}
 		const match = /^\/v1\/containers\/([^/]+)(\/.*)?$/.exec(pathname);
@@ -82,6 +92,7 @@ const lab = Bun.serve({
 			return c.files === "slow-stop" ? Response.json({ id, status: "stopping" }, { status: 202 }) : Response.json({ id, status: "stopped" });
 		}
 		if (c.files === "expired") return Response.json({ error: { code: "container_expired", message: "expired" } }, { status: 410 });
+		if (rest === "/files" && request.method === "POST" && nets.get(id!) === "internet") return Response.json({ error: { code: "internet_no_files", message: "A sandbox with internet access takes no files." } }, { status: 409 });
 		if (c.status === "stopped" || c.status === "starting") {
 			c.status = "starting";
 			return Response.json({ error: { code: "sandbox_starting", message: "starting" } }, { status: 409, headers: { "retry-after": "0" } });
@@ -228,6 +239,34 @@ describe("sandbox lifecycle", () => {
 		expect((await older.s.sandboxes()).find((b) => b.id === "c-older")).toMatchObject({ stoppable: false });
 		stops = true;
 		box.delete("c-older");
+	});
+
+	test("a sandbox made with internet access says so, takes no lab files, and a replacement keeps its network", async () => {
+		const { s } = await site("c-net-start", { status: "running" });
+		await expect(s.createSandbox(undefined, "satellite")).rejects.toThrow("Dev Lab has no sandbox network named satellite. It offers: none, internet.");
+		const made = await s.createSandbox(undefined, "internet");
+		expect(made).toMatchObject({ network: "internet", previous: "c-net-start" });
+		expect(posted.at(-1)).toEqual({ name: "EnrichedLab", network: "internet" });
+		expect((await s.sandboxes()).find((b) => b.id === made.id)).toMatchObject({ network: "internet", current: true });
+		// Lab files don't go into it, and the person is told where they do go.
+		const file = join(tmpdir(), "el-network-check.txt");
+		writeFileSync(file, "plot,yield\n");
+		try {
+			await expect(s.put(file)).rejects.toThrow("A sandbox with internet access takes no files. Lab files go only into a sandbox without internet: el sandbox create devlab makes one.");
+		} finally {
+			rmSync(file, { force: true });
+		}
+		// Deleted: the replacement is made with internet access too.
+		box.get(made.id)!.status = "deleted";
+		expect((await s.run("echo hi", 30)).stdout).toMatch(/^ran in new\d+\n$/);
+		expect(posted.at(-1)).toEqual({ name: "EnrichedLab", network: "internet" });
+		// A person whose policy allows no internet is told before the lab is asked.
+		internetAllowed = false;
+		const other = await site("c-net-other", { status: "running" });
+		const before = posted.length;
+		await expect(other.s.createSandbox(undefined, "internet")).rejects.toThrow("Dev Lab doesn't let you make sandboxes with internet access. You may use: none.");
+		expect(posted.length).toBe(before);
+		internetAllowed = true;
 	});
 
 	test("an expired sandbox (410) is forgotten so the next command starts fresh", async () => {

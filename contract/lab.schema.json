@@ -44,6 +44,10 @@
         "notes": { "type": "string" }
       }
     },
+    "sandbox_networks": {
+      "type": "array",
+      "items": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string", "minLength": 1 }, "title": { "type": "string" }, "description": { "type": "string" } } }
+    },
     "sandbox_images": {
       "type": "array",
       "items": {

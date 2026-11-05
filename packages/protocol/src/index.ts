@@ -343,6 +343,8 @@ export interface LabSandbox {
 	reason?: string;
 	/** the image it was made from, when not the lab's default (such as browser) */
 	image?: string;
+	/** internet when it reaches the public web; such a sandbox takes no lab files */
+	network?: string;
 }
 
 /** An app version a lab offers this person (its /v1/apps), as the Apps list shows it. */
@@ -466,7 +468,7 @@ export interface Requests {
 	/** The person's sandboxes at a lab, and deleting one (it frees the lab's limit on how many a person keeps). */
 	"lab.sandboxes": { params: { name: string }; result: LabSandbox[] };
 	"lab.sandbox.delete": { params: { name: string; id: string }; result: { status: "deleted" | "deleting" } };
-	"lab.sandbox.create": { params: { name: string; image?: string }; result: { id: string; image?: string; previous?: string } };
+	"lab.sandbox.create": { params: { name: string; image?: string; network?: string }; result: { id: string; image?: string; network?: string; previous?: string } };
 	"lab.sandbox.stop": { params: { name: string; id: string }; result: { status: "stopped" | "stopping" | "archived" } };
 	/** Use by lab and group over the window (GET /v1/usage). */
 	"lab.usage": { params: { name: string; window?: "7d" | "30d" }; result: unknown };

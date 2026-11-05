@@ -19,6 +19,7 @@
     },
     "policy": { "type": "object", "properties": { "keep_data_inside": { "type": "boolean" } } },
     "files": { "type": "object", "properties": { "enabled": { "type": "boolean" } } },
+    "sandbox_networks": { "type": "array", "items": { "type": "string", "minLength": 1 } },
     "sandboxes": {
       "type": "object",
       "properties": {

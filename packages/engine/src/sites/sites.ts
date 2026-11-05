@@ -225,10 +225,10 @@ export class Sites {
 		return adapter.deleteSandbox(id);
 	}
 
-	async createSandbox(name: string, image?: string) {
+	async createSandbox(name: string, image?: string, network?: string) {
 		const adapter = await this.adapterFor(name);
 		if (!adapter.createSandbox) throw new Error(`${this.title(name)} doesn't make sandboxes on request.`);
-		return adapter.createSandbox(image);
+		return adapter.createSandbox(image, network);
 	}
 
 	async stopSandbox(name: string, id: string) {

@@ -80,6 +80,8 @@ export interface LabDescriptor {
 	browser?: BrowserInfo;
 	/** Images a sandbox can be made from (POST /v1/containers {image}); one may carry a browser. */
 	sandbox_images?: { name: string; title?: string; description?: string; browser?: BrowserInfo }[];
+	/** Networks a sandbox can be made on (POST /v1/containers {network}): always none, and internet where offered. */
+	sandbox_networks?: { name: string; title?: string; description?: string }[];
 	conformance?: { foreign_scope?: string; scan_test?: boolean; data_tool?: { name: string; arguments?: Record<string, unknown> } };
 }
 

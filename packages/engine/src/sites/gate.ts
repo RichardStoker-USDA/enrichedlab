@@ -50,7 +50,15 @@ interface GateMe {
 	owner?: boolean;
 	files?: { enabled?: boolean };
 	sandboxes?: { enabled?: boolean; idle_minutes?: number; network?: SandboxNetwork; hosts?: string[] };
+	/** The sandbox networks this person may choose at create, such as ["none", "internet"]. */
+	sandbox_networks?: string[];
 	quotas?: unknown[];
+}
+
+/** What a sandbox was made with: its image and network (undefined: the lab's default image, or no network). */
+interface Made {
+	image?: string;
+	network?: string;
 }
 
 const title = (entry: LabAppEntry) => `${entry.title || entry.name} ${entry.version}`;
@@ -87,8 +95,10 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	private starting?: Promise<string>;
 	/** A sandbox of the person's the lab is still deleting: it counts toward their limits until the lab confirms. */
 	private leaving?: string;
-	/** The image each sandbox here was made from, as the lab says (undefined: the lab's default image). */
-	private imageOf = new Map<string, string | undefined>();
+	/** What each sandbox here was made with, as the lab says; a replacement is made the same way. */
+	private made = new Map<string, Made>();
+	/** The sandbox networks this person may choose (/v1/me), when the lab says. */
+	private networks?: string[];
 	/** Background jobs started in the sandbox, so shutdown never deletes a sandbox while one runs. */
 	private jobs = new Set<string>();
 	/** Repositories sent to the sandbox from this engine: sandbox folder → local repository and the commit sent. */
@@ -263,7 +273,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	/** The person's sandboxes here, newest first (GET /v1/containers); `current` is the one this engine works in. */
 	async sandboxes(): Promise<LabSandbox[]> {
 		if (!this.offers("containers")) throw new Error(`${this.title} has no sandboxes.`);
-		type Listed = { id: string; name?: string; status?: string; reason?: string | null; image?: string | null; created_at?: number; last_active_at?: number; memory_limit?: string; profile?: string };
+		type Listed = { id: string; name?: string; status?: string; reason?: string | null; image?: string | null; network?: string | null; created_at?: number; last_active_at?: number; memory_limit?: string; profile?: string };
 		const when = (seconds?: number) => (typeof seconds === "number" ? new Date(seconds * 1000).toISOString() : undefined);
 		const found: LabSandbox[] = [];
 		const stops = this.offers("stop");
@@ -273,7 +283,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			if (after) query.set("after", after);
 			const list = await this.json<{ data?: Listed[]; has_more?: boolean }>("GET", `/v1/containers?${query}`, { signal: AbortSignal.timeout(15_000) });
 			// One the lab ended itself stays listed, as deleted, so the person sees why; it holds nothing and counts toward no limit.
-			for (const c of list.data ?? []) found.push({ id: c.id, name: c.name, status: c.status, reason: c.reason || undefined, image: c.image || undefined, created: when(c.created_at), last_active: when(c.last_active_at), memory: c.memory_limit, profile: c.profile, current: c.id === this.container, stoppable: stops && (c.status ?? "running") === "running" });
+			for (const c of list.data ?? []) found.push({ id: c.id, name: c.name, status: c.status, reason: c.reason || undefined, image: c.image || undefined, network: c.network || undefined, created: when(c.created_at), last_active: when(c.last_active_at), memory: c.memory_limit, profile: c.profile, current: c.id === this.container, stoppable: stops && (c.status ?? "running") === "running" });
 			if (!list.has_more || !list.data?.length) break;
 			after = list.data[list.data.length - 1]!.id;
 		}
@@ -438,7 +448,9 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			const cleanup = `el sandboxes ${name} lists your sandboxes there; el sandbox delete ${name} <id> removes one.`;
 			const freeing = `el sandboxes ${name} lists your sandboxes there; el sandbox stop ${name} <id> stops one and keeps its files, el sandbox delete ${name} <id> removes one.`;
 			const atOnce = detail.error?.limit === "at_once" && this.offers("stop");
-			const after: Record<string, string> = { too_many_containers: atOnce ? freeing : cleanup, storage_full: cleanup };
+			// Lab files go only into sandboxes without internet; work with lab data happens in one of those.
+			const offline = `Lab files go only into a sandbox without internet: el sandbox create ${name} makes one.`;
+			const after: Record<string, string> = { too_many_containers: atOnce ? freeing : cleanup, storage_full: cleanup, internet_no_files: offline, internet_holds_data: `A sandbox with internet is for work that holds no lab data. ${offline}` };
 			const code = detail.error?.code;
 			const given = code && detail.error?.message && after[code] ? `${detail.error.message.replace(/\.?$/, ".")} ${after[code]}` : detail.error?.message;
 			const message = (code && worded[code]) || given || `${this.config.name} answered ${response.status}.`;
@@ -510,6 +522,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		this.owner = me.owner === true;
 		this.sandboxOn = me.sandboxes?.enabled === true;
 		this.network = { network: me.sandboxes?.network, hosts: me.sandboxes?.hosts };
+		this.networks = me.sandbox_networks;
 		const list = await this.cached<{ data?: GateModel[] }>("/v1/models", AbortSignal.timeout(10_000));
 		this.models = (list.data ?? []).filter((m) => !m.gate?.endpoints?.length || m.gate.endpoints.includes("chat")).map((m) => this.profile(m));
 		const tools: Tool[] = [];
@@ -955,6 +968,36 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				}
 			});
 		}
+		// A lab that offers internet sandboxes: one reaches the public web but no private address, and takes no lab files.
+		if (has("containers") && d?.sandbox_networks?.some((n) => n.name === "internet")) {
+			await attempt("internet sandbox", async () => {
+				const allowed = (await this.json<GateMe>("GET", "/v1/me", { signal: t() })).sandbox_networks ?? [];
+				if (!allowed.includes("internet")) return add("internet sandbox", "skip", "your policy doesn't allow internet sandboxes");
+				const made = await this.json<{ id: string; network?: string | null }>("POST", "/v1/containers", { json: { name: "el-lab-check-internet", network: "internet" }, signal: AbortSignal.timeout(300_000) });
+				try {
+					if (made.network !== "internet") return add("internet sandbox", "fail", `the lab made it with network ${made.network ?? "unset"}`);
+					const run = (command: string) => this.json<{ exit_code?: number; stdout?: string }>("POST", `/v1/containers/${encodeURIComponent(made.id)}/exec`, { json: { command, timeout_seconds: 45 }, signal: AbortSignal.timeout(120_000) });
+					// Python's urllib follows HTTPS_PROXY, the way the lab's internet is reached.
+					const fetchCommand = (url: string, seconds: number) => `python3 -c 'import urllib.request; print(urllib.request.urlopen("${url}", timeout=${seconds}).status)'`;
+					const web = await run(fetchCommand("https://example.com/", 20));
+					if (web.exit_code === 127) return add("internet sandbox", "skip", "the sandbox image has no python3 to fetch a page");
+					add("internet sandbox", web.exit_code === 0 && web.stdout?.trim() === "200" ? "pass" : "fail", web.exit_code === 0 ? `https://example.com/ answered ${web.stdout?.trim()}` : `fetching https://example.com/ failed (exit ${web.exit_code})`);
+					const reached: string[] = [];
+					for (const url of ["http://169.254.169.254/latest/meta-data/", "http://10.0.0.1/"]) if ((await run(fetchCommand(url, 8))).exit_code === 0) reached.push(url);
+					add("internet sandbox private addresses", reached.length ? "fail" : "pass", reached.length ? `it reached ${reached.join(", ")}` : "the metadata address and a private address were refused");
+					const boundary = `enrichedlab-${randomBytes(12).toString("hex")}`;
+					const form = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="el-check.txt"\r\nContent-Type: text/plain\r\n\r\nel-check\r\n--${boundary}--\r\n`;
+					const sent = await this.call("POST", `/v1/containers/${encodeURIComponent(made.id)}/files`, { body: form, headers: { "content-type": `multipart/form-data; boundary=${boundary}` }, signal: t() }).then(
+						async (r) => (await r.arrayBuffer(), { status: r.status, code: undefined as string | undefined }),
+						(e: { status?: number; code?: string }) => ({ status: e.status, code: e.code }),
+					);
+					const refused = sent.status === 409 && sent.code === "internet_no_files";
+					add("internet sandbox takes no files", refused ? "pass" : "fail", refused ? "409 internet_no_files" : `answered ${sent.status ?? "?"}${sent.code ? ` ${sent.code}` : ""}`);
+				} finally {
+					await this.call("DELETE", `/v1/containers/${encodeURIComponent(made.id)}`, { signal: t() }).then((r) => r.arrayBuffer(), () => undefined);
+				}
+			});
+		}
 		if (has("events")) {
 			await attempt("GET /v1/events", async () => {
 				const controller = new AbortController();
@@ -1012,12 +1055,12 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			if (status === "deleting") this.leaving = id;
 			this.onNotice?.(`Your ${this.title} sandbox was deleted, with its files. A new one starts now.`);
 		}
-		// A replacement comes from the image the person chose for the one before (such as the browser image).
-		const image = previous ? this.imageOf.get(previous) : undefined;
-		this.starting ??= this.create(signal, { name: "EnrichedLab", ...(image ? { image } : {}) })
+		// A replacement is made the way the person chose for the one before (the browser image, internet access).
+		const like = (previous && this.made.get(previous)) || {};
+		this.starting ??= this.create(signal, { name: "EnrichedLab", ...like })
 			.then((made) => {
 				this.container = made.id;
-				if (image) this.imageOf.set(made.id, image);
+				this.made.set(made.id, like);
 				return made.id;
 			})
 			.finally(() => {
@@ -1039,7 +1082,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			this.starting = this.create(signal, { name: "EnrichedLab", image })
 				.then((made) => {
 					this.container = made.id;
-					this.imageOf.set(made.id, image);
+					this.made.set(made.id, { image });
 					return made.id;
 				})
 				.finally(() => {
@@ -1047,27 +1090,38 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				});
 		}
 		const id = await this.sandbox(signal);
-		if (!this.imageOf.has(id)) this.imageOf.set(id, (await this.json<{ image?: string | null }>("GET", `/v1/containers/${encodeURIComponent(id)}`, { signal })).image || undefined);
-		if (this.imageOf.get(id) !== image) {
+		if (!this.made.has(id)) {
+			const read = await this.json<{ image?: string | null; network?: string | null }>("GET", `/v1/containers/${encodeURIComponent(id)}`, { signal });
+			this.made.set(id, { image: read.image || undefined, network: read.network || undefined });
+		}
+		if (this.made.get(id)?.image !== image) {
 			throw new ToolError(`${this.title}'s browser runs only in a sandbox made from its ${image} image, and your sandbox there (${id}) isn't one. The person can start one with el sandbox create ${this.config.name} --image ${image}; sessions there then use it, and the current sandbox keeps its files.`);
 		}
 		return id;
 	}
 
 	/**
-	 * Make a new sandbox for the person, from one of the lab's images, and work in it from now on. The one used until
-	 * now stays as it is, files and all. A lab that allows one sandbox running at once needs that one stopped first.
+	 * Make a new sandbox for the person, from one of the lab's images and on one of its networks, and work in it from
+	 * now on. The one used until now stays as it is, files and all. A lab that allows one sandbox running at once needs
+	 * that one stopped first. A network is fixed when the sandbox is made: internet means the public web, and no lab
+	 * files go into such a sandbox.
 	 */
-	async createSandbox(image?: string): Promise<{ id: string; image?: string; previous?: string }> {
+	async createSandbox(image?: string, network?: string): Promise<{ id: string; image?: string; network?: string; previous?: string }> {
 		if (!this.offers("containers")) throw new Error(`${this.title} has no sandboxes.`);
 		const offered = this.descriptor?.sandbox_images;
 		if (image && offered && !offered.some((i) => i.name === image)) throw new Error(`${this.title} has no sandbox image named ${image}. It offers: ${offered.map((i) => i.name).join(", ")}.`);
+		if (network && network !== "none") {
+			const nets = this.descriptor?.sandbox_networks;
+			if (nets && !nets.some((n) => n.name === network)) throw new Error(`${this.title} has no sandbox network named ${network}. It offers: ${nets.map((n) => n.name).join(", ")}.`);
+			if (this.networks && !this.networks.includes(network)) throw new Error(`${this.title} doesn't let you make sandboxes with ${network} access. You may use: ${this.networks.join(", ")}.`);
+		}
 		const previous = this.container;
+		const like: Made = { ...(image ? { image } : {}), ...(network && network !== "none" ? { network } : {}) };
 		try {
-			const made = await this.create(undefined, { name: "EnrichedLab", ...(image ? { image } : {}) });
+			const made = await this.create(undefined, { name: "EnrichedLab", ...like });
 			this.container = made.id;
-			this.imageOf.set(made.id, image);
-			return { id: made.id, image, previous };
+			this.made.set(made.id, like);
+			return { id: made.id, ...like, previous };
 		} catch (error) {
 			const { code, limit } = error as { code?: string; limit?: string };
 			if (code === "too_many_containers" && limit === "at_once" && previous) {
@@ -1446,6 +1500,9 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	browser(): SandboxBrowserLane | undefined {
 		const info = this.descriptor?.browser;
 		if (!this.sandboxOn || info?.protocol !== "cdp" || !this.offers("ports")) return undefined;
+		// A lab with a network per sandbox: what the browser reaches is what the person's current sandbox was made with.
+		const mine = this.container && this.descriptor?.sandbox_networks ? this.made.get(this.container) : undefined;
+		if (mine) return { version: info.version, network: mine.network === "internet" ? "open" : "none" };
 		return { version: info.version, ...this.network };
 	}
 

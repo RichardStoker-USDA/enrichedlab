@@ -19,6 +19,7 @@ const descriptor: LabDescriptor = {
 	support: { url: "https://help.example.org" },
 	sandbox_profiles: [{ name: "small", cpu: 2, memory: "4Gi" }],
 	conformance: { foreign_scope: "otherlab", scan_test: true },
+	sandbox_networks: [{ name: "none", title: "No network" }, { name: "internet", title: "The public web" }],
 };
 const me = {
 	subject: "u_9f2c41aa",
@@ -28,8 +29,9 @@ const me = {
 		{ lab: "devlab", research_group: null, roles: ["member"] },
 	],
 	policy: { keep_data_inside: false },
+	sandbox_networks: ["none", "internet"],
 };
-const seen: { cursor?: string | null; deleted?: string; uploaded: string; keepsTestFile?: boolean; filesDeleted: string[] } = { uploaded: "", filesDeleted: [] };
+const seen: { cursor?: string | null; deleted?: string; uploaded: string; keepsTestFile?: boolean; filesDeleted: string[]; internet: string[] } = { uploaded: "", filesDeleted: [], internet: [] };
 /** The EICAR test file's sha-256: the lab here knows it by its hash, so this file never holds it. */
 const EICAR_SHA256 = "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f";
 
@@ -58,8 +60,19 @@ const lab = Bun.serve<{ stdin: string; started: boolean }, never>({
 			case "/v1/usage":
 				if (url.searchParams.get("lab") === "otherlab") return Response.json({ error: { message: "not yours" } }, { status: 403 });
 				return Response.json({ window: "7d", rows: [{ lab: "devlab", tokens: { input: 10, output: 5 }, gpu_seconds: 0, sandbox_seconds: 30 }] });
-			case "/v1/containers":
+			case "/v1/containers": {
+				// An internet sandbox (n1) reaches the public web only, and takes no files.
+				const body = (await request.json().catch(() => ({}))) as { network?: string };
+				if (body.network === "internet") return Response.json({ id: "n1", status: "running", network: "internet" });
 				return Response.json({ id: "c1", status: "running", image_digest: `sha256:${"a".repeat(64)}` });
+			}
+			case "/v1/containers/n1/exec": {
+				const { command } = (await request.json()) as { command: string };
+				seen.internet.push(command);
+				return command.includes("https://example.com/") ? Response.json({ exit_code: 0, stdout: "200\n", stderr: "" }) : Response.json({ exit_code: 1, stdout: "", stderr: "urllib.error.URLError" });
+			}
+			case "/v1/containers/n1/files":
+				return Response.json({ error: { code: "internet_no_files", message: "A sandbox with internet access takes no files." } }, { status: 409 });
 			case "/v1/containers/c1/exec":
 				return Response.json({ exit_code: 0, stdout: "ok\n", stderr: "" });
 			case "/v1/containers/c1/attach":
@@ -93,6 +106,10 @@ const lab = Bun.serve<{ stdin: string; started: boolean }, never>({
 						: `: keepalive\n\nid: 8\nevent: job.finished\ndata: {"type":"job.finished","at":"2026-11-04T10:00:00Z","id":"8","status":"done","summary":"model fit"}\n\nid: 9\nevent: quota.warning\ndata: {"type":"quota.warning","at":"2026-11-04T10:01:00Z","id":"9","kind":"GPU hours","used":8,"limit":10}\n\n`;
 				return new Response(body, { headers: { "content-type": "text/event-stream" } });
 			}
+		}
+		if (request.method === "DELETE" && url.pathname === "/v1/containers/n1") {
+			seen.internet.push("deleted");
+			return Response.json({ ok: true });
 		}
 		if (request.method === "DELETE" && url.pathname === "/v1/containers/c1") {
 			seen.deleted = "c1";
@@ -162,6 +179,13 @@ describe("lab contract", () => {
 		expect(rows.find((r) => r.row === "attach")?.status).toBe("pass");
 		expect(rows.find((r) => r.row === "attach streams stdin")?.status).toBe("pass");
 		expect(rows.find((r) => r.row === "scanner refuses a test file")).toMatchObject({ status: "pass", detail: "422 file_refused" });
+		// An internet sandbox reaches the public web, not the metadata or a private address, and takes no files.
+		expect(rows.filter((r) => r.row.startsWith("internet sandbox")).map((r) => [r.row, r.status])).toEqual([
+			["internet sandbox", "pass"],
+			["internet sandbox private addresses", "pass"],
+			["internet sandbox takes no files", "pass"],
+		]);
+		expect(seen.internet.at(-1)).toBe("deleted");
 		expect(seen.deleted).toBe("c1");
 	});
 

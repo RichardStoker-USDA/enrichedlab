@@ -3,5 +3,5 @@
   "title": "A sandbox made by POST /v1/containers {name, profile?}",
   "type": "object",
   "required": ["id"],
-  "properties": { "id": { "type": "string", "minLength": 1 }, "status": { "type": "string" }, "reason": { "type": ["string", "null"] }, "image": { "type": ["string", "null"] }, "profile": { "type": "string" }, "image_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" } }
+  "properties": { "id": { "type": "string", "minLength": 1 }, "status": { "type": "string" }, "reason": { "type": ["string", "null"] }, "image": { "type": ["string", "null"] }, "network": { "type": ["string", "null"] }, "profile": { "type": "string" }, "image_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" } }
 }
