@@ -161,6 +161,17 @@ describe("permissions", () => {
 		expect(local.action === "ask" && local.reason).toContain("your network");
 	});
 
+	test("local addresses are named in every spelling, and public names that only look alike are not", () => {
+		const reason = (url: string) => {
+			const verdict = decide(fetchT, { url }, ws, config, new Set());
+			return verdict.action === "ask" ? verdict.reason : "";
+		};
+		const local = ["http://[::ffff:169.254.169.254]/", "http://[64:ff9b::a9fe:a9fe]/", "http://[2002:c0a8:101::1]/", "http://[fd00:ec2::254]/", "http://[fe80::1]:8080/", "http://[::1]/", "http://100.100.100.100/", "http://2852039166/", "http://printer.home.arpa/", "http://172.20.0.1/"];
+		for (const url of local) expect(reason(url)).toContain("your network");
+		const remote = ["https://fcc.gov/", "https://fdic.gov/", "https://fe80.example.com/", "https://[2606:4700:4700::1111]/", "https://[2002:808:808::1]/", "http://100.128.0.1/", "http://172.32.0.1/"];
+		for (const url of remote) expect(reason(url)).not.toContain("your network");
+	});
+
 	test.if(posix)("a read-only command outside the project says why it asks", () => {
 		const verdict = decide(shell, { command: "cat /etc/hosts" }, ws, config, new Set());
 		expect(verdict.action === "ask" && verdict.reason).toBe("It reads outside the project folder.");

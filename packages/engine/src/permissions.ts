@@ -47,10 +47,47 @@ function host(args: Record<string, unknown>): string {
 	}
 }
 
-/** Loopback, private, link-local and cloud metadata addresses get a sharper question. */
+/** An IPv4 address in loopback, private, carrier NAT (Tailscale's range too), link-local and metadata, or "this network". */
+function localV4(a: number, b: number): boolean {
+	return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+}
+
+/** An IPv6 address as eight 16-bit groups, or undefined when it isn't one. Takes a dotted IPv4 tail too. */
+function v6Groups(text: string): number[] | undefined {
+	if (!text.includes(":") || !/^[0-9a-f:.]+$/i.test(text)) return undefined;
+	let address = text;
+	const dotted = /(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(address);
+	if (dotted) {
+		const [a, b, c, d] = dotted.slice(1).map(Number) as [number, number, number, number];
+		address = `${address.slice(0, dotted.index)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+	}
+	const halves = address.split("::");
+	if (halves.length > 2) return undefined;
+	const head = halves[0] ? halves[0].split(":") : [];
+	const tail = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+	const fill = halves.length === 2 ? 8 - head.length - tail.length : 0;
+	if (fill < 0 || (halves.length === 1 && head.length !== 8)) return undefined;
+	const groups = [...head, ...Array<string>(fill).fill("0"), ...tail].map((g) => (/^[0-9a-f]{1,4}$/i.test(g) ? Number.parseInt(g, 16) : Number.NaN));
+	return groups.length === 8 && groups.every((g) => !Number.isNaN(g)) ? groups : undefined;
+}
+
+/**
+ * Loopback, private, carrier NAT, link-local and cloud metadata addresses get a sharper question, in IPv6 too: ULA,
+ * link-local, and the mapped, NAT64 and 6to4 forms that carry an IPv4 address.
+ */
 function localHost(name: string): boolean {
-	const h = name.replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
-	return /^(localhost|.*\.local|.*\.internal|.*\.lan|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|0\.|::1$|fc|fd|fe80:)/i.test(h);
+	const h = (name.startsWith("[") ? name.slice(1, name.indexOf("]")) : name.replace(/:\d+$/, "")).toLowerCase().replace(/\.$/, "");
+	if (/^(localhost|.+\.(localhost|local|internal|lan|home\.arpa))$/.test(h)) return true;
+	const v4 = /^(\d+)\.(\d+)\.\d+\.\d+$/.exec(h);
+	if (v4) return localV4(Number(v4[1]), Number(v4[2]));
+	const g = v6Groups(h);
+	if (!g) return false;
+	const embedded = (hi: number) => localV4(hi >> 8, hi & 0xff);
+	if (g.slice(0, 7).every((x) => x === 0)) return g[7]! <= 1; // :: and ::1
+	if (g.slice(0, 5).every((x) => x === 0) && g[5] === 0xffff) return embedded(g[6]!); // ::ffff:a.b.c.d
+	if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) return embedded(g[6]!); // NAT64
+	if (g[0] === 0x2002) return embedded(g[1]!); // 6to4
+	return (g[0]! & 0xfe00) === 0xfc00 || (g[0]! & 0xffc0) === 0xfe80; // ULA, link-local
 }
 
 /** The question a push asks; headless runs refuse it unless the person passed --push. */
