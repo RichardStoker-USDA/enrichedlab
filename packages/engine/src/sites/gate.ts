@@ -739,8 +739,20 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				const said = (got: { status?: number; code?: string }) => `answered ${got.status ?? "?"}${got.code ? ` ${got.code}` : ""}`;
 				const me = this.publicUrl("/v1/me");
 				await attempt("proof for another token", async () => {
-					const got = await answer(await key.proof("GET", me, "not-the-token-this-request-carries", await current()));
+					const nonce = await current();
+					const got = await answer(await key.proof("GET", me, "not-the-token-this-request-carries", nonce));
+					// Behind Cloudflare Access the lab never sees the token: Access takes it and forwards its own assertion. The
+					// proof's token hash has nothing to be compared with there; the lab's nonce has to tie proofs to the sign-in.
+					if (got.status === 200 && nonce && d?.sign_in?.kind === "cloudflare-access-oauth") {
+						return add("proof for another token", "skip", "Cloudflare Access keeps the token from the lab, so it can't compare it; the lab's nonce has to bind proofs to the sign-in (next row)");
+					}
 					add("proof for another token", refusedRight(got) ? "pass" : "fail", said(got));
+				});
+				await attempt("proof with a made-up nonce", async () => {
+					if (!(await current())) return add("proof with a made-up nonce", "skip", "the lab doesn't use DPoP nonces");
+					const made = Buffer.from(crypto.getRandomValues(new Uint8Array(24))).toString("base64");
+					const got = await answer(await key.proof("GET", me, bearer, made));
+					add("proof with a made-up nonce", got.status === 401 && got.code === "use_dpop_nonce" ? "pass" : "fail", said(got));
 				});
 				await attempt("proof for another address", async () => {
 					const got = await answer(await key.proof("GET", this.publicUrl("/v1/models"), bearer, await current()));

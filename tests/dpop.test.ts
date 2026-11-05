@@ -26,6 +26,8 @@ const lab = {
 	approval: false,
 	/** Proofs optional: a request without one is served. */
 	optional: false,
+	/** Behind Cloudflare Access, as Gate is: the token never reaches the lab, so proofs can't bind it (no `ath` check). */
+	access: false,
 };
 let next = 1;
 
@@ -44,7 +46,7 @@ async function verify(request: Request, url: URL): Promise<{ thumb: string; jwk:
 	const signed = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, Buffer.from(signature, "base64url"), new TextEncoder().encode(`${h}.${p}`));
 	const bearer = request.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
 	const fresh = typeof claims.iat === "number" && Math.abs(Date.now() / 1000 - claims.iat) < 120;
-	if (!signed || claims.htm !== request.method || claims.htu !== `${PUBLIC}${url.pathname}` || claims.ath !== tokenHash(bearer) || !fresh || !claims.jti || lab.jtis.has(claims.jti)) return { code: "invalid_dpop_proof" };
+	if (!signed || claims.htm !== request.method || claims.htu !== `${PUBLIC}${url.pathname}` || (!lab.access && claims.ath !== tokenHash(bearer)) || !fresh || !claims.jti || lab.jtis.has(claims.jti)) return { code: "invalid_dpop_proof" };
 	// As Gate does: a missing or stale nonce is refused before the jti is spent, so the retry may reuse nothing.
 	if (lab.nonce && claims.nonce !== lab.nonce) return { code: "use_dpop_nonce" };
 	lab.jtis.add(claims.jti);
@@ -67,7 +69,7 @@ async function answer(request: Request): Promise<Response> {
 		const url = new URL(request.url);
 		if (request.headers.get("authorization") !== `Bearer ${TOKEN}`) return new Response("", { status: 401 });
 		if (url.pathname === "/.well-known/enrichedlab-lab") {
-			return Response.json({ contract: "2026-11", name: "devlab", title: "Dev Lab", endpoints: { devices: true, models: true }, sign_in: { kind: "key" }, policy: { device_proof: lab.optional ? "optional" : "required" } });
+			return Response.json({ contract: "2026-11", name: "devlab", title: "Dev Lab", endpoints: { devices: true, models: true }, sign_in: { kind: lab.access ? "cloudflare-access-oauth" : "key" }, policy: { device_proof: lab.optional ? "optional" : "required" } });
 		}
 		if (url.pathname === "/v1/echo" && !request.headers.get("dpop")) return refuse("device_proof_required");
 		if (lab.optional && !request.headers.get("dpop")) {
@@ -138,6 +140,7 @@ describe("device-bound lab tokens", () => {
 		lab.nonce = undefined;
 		lab.approval = false;
 		lab.optional = false;
+		lab.access = false;
 	});
 
 	test("connect registers this computer's key, keeps it owner-only, and signs requests for the public address", async () => {
@@ -160,9 +163,24 @@ describe("device-bound lab tokens", () => {
 		expect(device.map((r) => [r.row, r.status])).toEqual([
 			["device key", "pass"],
 			["proof for another token", "pass"],
+			["proof with a made-up nonce", "skip"],
 			["proof for another address", "pass"],
 			["proof used twice", "pass"],
 		]);
+	});
+
+	test("behind Cloudflare Access, where the lab can't see the token, el lab check tries the lab's nonce instead", async () => {
+		lab.access = true;
+		lab.nonce = "n-access";
+		const rows = await site().check();
+		const device = rows.filter((r) => r.row.startsWith("proof "));
+		expect(device.map((r) => [r.row, r.status])).toEqual([
+			["proof for another token", "skip"],
+			["proof with a made-up nonce", "pass"],
+			["proof for another address", "pass"],
+			["proof used twice", "pass"],
+		]);
+		expect(device[0]!.detail).toContain("Cloudflare Access keeps the token from the lab");
 	});
 
 	test("a nonce challenge is answered once with the nonce", async () => {
