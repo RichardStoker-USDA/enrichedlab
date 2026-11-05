@@ -1,6 +1,7 @@
-// The browser in a lab's sandbox, end to end against a real headless Chrome: a stand-in lab lists the browser in its
-// descriptor and relays its port path to Chrome the way Gate does (Host rewritten to loopback, no Origin), and the
-// engine drives it over the DevTools protocol. Skipped where no Chrome is installed.
+// The browser in a lab's sandbox, end to end against a real headless Chrome: a stand-in lab lists a browser image in
+// its descriptor, makes the browser's own sandbox from it, and relays that sandbox's port path to Chrome the way Gate
+// does (Host rewritten to loopback, another site's Origin refused), and the engine drives it over the DevTools
+// protocol. Skipped where no Chrome is installed.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -45,9 +46,12 @@ const site = Bun.serve({
 	},
 });
 
-// The stand-in lab: its port path to 9222 goes to Chrome, which starts on the first connection (one 502 first).
+// The stand-in lab: the browser image's sandbox (b1) has its port path to 9222 go to Chrome, which starts on the first
+// contact (one 503 browser_starting first, as Gate answers).
 let started = false;
-const seen = { auth: [] as string[], origin: [] as (string | null)[] };
+const seen = { auth: [] as string[], origin: [] as (string | null)[], made: [] as unknown[], deleted: [] as string[] };
+const browserInfo = { protocol: "cdp", port: 9222, version: "test" };
+let boxes = 0;
 const lab = Bun.serve<{ upstream?: WebSocket; queue: string[] }, never>({
 	port: 0,
 	hostname: "127.0.0.1",
@@ -55,16 +59,30 @@ const lab = Bun.serve<{ upstream?: WebSocket; queue: string[] }, never>({
 		const url = new URL(request.url);
 		seen.auth.push(request.headers.get("authorization") ?? "");
 		if (request.headers.get("authorization") !== "Bearer test") return new Response("", { status: 401 });
-		if (url.pathname === "/.well-known/enrichedlab-lab") return Response.json({ contract: "2026-11", name: "devlab", title: "Dev Lab", endpoints: { containers: true, ports: true }, sign_in: { kind: "oauth" }, browser: { protocol: "cdp", port: 9222, version: "test" } });
+		if (url.pathname === "/.well-known/enrichedlab-lab") return Response.json({ contract: "2026-11", name: "devlab", title: "Dev Lab", endpoints: { containers: true, ports: true }, sign_in: { kind: "oauth" }, browser: { ...browserInfo, image: "browser" }, sandbox_images: [{ name: "browser", title: "Browser", browser: browserInfo }] });
 		if (url.pathname === "/v1/me") return Response.json({ subject: "u_1", handle: "pat", memberships: [], sandboxes: { enabled: true, network: "allowlist", hosts: ["127.0.0.1"] } });
 		if (url.pathname === "/v1/models") return Response.json({ data: [] });
-		if (url.pathname === "/v1/containers/c1") return Response.json({ id: "c1", status: "running" });
+		if (url.pathname === "/v1/containers" && request.method === "POST") {
+			const body = (await request.json()) as { image?: string };
+			seen.made.push(body);
+			if (body.image && body.image !== "browser") return Response.json({ error: { code: "unknown_image", message: `No sandbox image named ${body.image}.` } }, { status: 400 });
+			return Response.json({ id: body.image ? `b${++boxes}` : "c2", status: "running", image: body.image ?? null });
+		}
+		const box = /^\/v1\/containers\/(c1|b\d+)$/.exec(url.pathname)?.[1];
+		if (box && request.method === "DELETE") {
+			seen.deleted.push(box);
+			return Response.json({ id: box, deleted: true });
+		}
+		if (box) return Response.json({ id: box, status: "running" });
 		if (url.pathname === "/v1/containers/c1/exec") return Response.json({ exit_code: 0, stdout: "", stderr: "" });
-		const port = /^\/v1\/containers\/c1\/ports\/9222(\/.*)$/.exec(url.pathname);
+		// Only the browser image's sandbox has a browser; another site's page is refused, as Gate does.
+		const port = /^\/v1\/containers\/b\d+\/ports\/9222(\/.*)$/.exec(url.pathname);
 		if (port) {
+			const origin = request.headers.get("origin");
+			if (origin && origin !== base) return Response.json({ error: { code: "origin_refused", message: "A sandbox's browser takes requests only from a harness or the lab's own pages." } }, { status: 403 });
 			if (!started) {
 				started = true;
-				return new Response("", { status: 502 });
+				return Response.json({ error: { code: "browser_starting", message: "The sandbox's browser is starting." } }, { status: 503, headers: { "retry-after": "1" } });
 			}
 			const target = new URL(port[1]!, devtools);
 			if (request.headers.get("upgrade") === "websocket") {
@@ -135,6 +153,9 @@ beforeAll(async () => {
 
 afterAll(async () => {
 	await browsers?.closeAll();
+	// The browser's own sandbox goes with the session.
+	await gate?.close();
+	if (devtools) expect(seen.deleted).toContain("b1");
 	browser?.kill();
 	lab.stop(true);
 	site.stop(true);
@@ -158,6 +179,23 @@ describe.skipIf(!devtools)("the browser in a lab's sandbox", () => {
 	test("the descriptor and /v1/me say there's a browser and what it reaches", () => {
 		expect(gate.browser()).toEqual({ version: "test", network: "allowlist", hosts: ["127.0.0.1"] });
 	});
+
+	test("the browser runs in a sandbox of its own made from the lab's browser image, waited for while it starts", async () => {
+		const opened = await browserOpenTool.run({ url: home, where: "sandbox" }, context("s0"));
+		expect(opened.content).toContain("# Field plots");
+		expect(seen.made).toEqual([{ name: "EnrichedLab browser", image: "browser" }]);
+		expect(started).toBe(true);
+		await browsers.close("s0");
+	}, 60_000);
+
+	test("el lab check makes a browser-image sandbox, reaches its DevTools, and sees an unknown image refused", async () => {
+		const rows = await gate.check();
+		expect(rows.find((r) => r.row === "unknown image refused")).toMatchObject({ status: "pass" });
+		expect(rows.find((r) => r.row === "browser sandbox")).toMatchObject({ status: "pass" });
+		expect(rows.find((r) => r.row === "browser sandbox")?.detail).toContain("in the browser image");
+		// Its sandbox is removed again; the session's browser sandbox (b1) stays.
+		expect(seen.deleted).toEqual(["b2"]);
+	}, 60_000);
 
 	test("the agent opens, reads, types and submits, through the lab's port path with its sign-in", async () => {
 		const ctx = context("s1");

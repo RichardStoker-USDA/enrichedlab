@@ -78,12 +78,16 @@ export interface LabDescriptor {
 	sandbox_profiles?: SandboxProfile[];
 	/** A browser in the person's sandbox, reached through the lab's port path (the sandbox lane of the browser tools). */
 	browser?: BrowserInfo;
+	/** Images a sandbox can be made from (POST /v1/containers {image}); one may carry a browser. */
+	sandbox_images?: { name: string; title?: string; description?: string; browser?: BrowserInfo }[];
 	conformance?: { foreign_scope?: string; scan_test?: boolean; data_tool?: { name: string; arguments?: Record<string, unknown> } };
 }
 
 export interface BrowserInfo {
 	/** "cdp", the Chrome DevTools Protocol; a lab may add others later, and a client skips ones it doesn't speak. */
 	protocol: string;
+	/** The sandbox image the browser runs in (sandbox_images); without one, it runs in the person's own sandbox. */
+	image?: string;
 	port: number;
 	version?: string;
 	notes?: string;

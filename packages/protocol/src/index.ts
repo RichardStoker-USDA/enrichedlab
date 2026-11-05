@@ -341,6 +341,8 @@ export interface LabSandbox {
 	stoppable?: boolean;
 	/** why the lab ended or stopped it, when it says: one the lab ended itself lists as deleted, with no files */
 	reason?: string;
+	/** the image it was made from, when not the lab's default (such as browser) */
+	image?: string;
 }
 
 /** An app version a lab offers this person (its /v1/apps), as the Apps list shows it. */

@@ -38,9 +38,25 @@
       "required": ["protocol", "port"],
       "properties": {
         "protocol": { "type": "string", "minLength": 1 },
+        "image": { "type": "string", "minLength": 1 },
         "port": { "type": "integer", "minimum": 1 },
         "version": { "type": "string" },
         "notes": { "type": "string" }
+      }
+    },
+    "sandbox_images": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 }, "title": { "type": "string" }, "description": { "type": "string" },
+          "browser": {
+            "type": "object",
+            "required": ["protocol", "port"],
+            "properties": { "protocol": { "type": "string" }, "port": { "type": "integer", "minimum": 1 }, "version": { "type": "string" } }
+          }
+        }
       }
     },
     "conformance": {

@@ -425,7 +425,7 @@ async function main(): Promise<void> {
 				const boxes = all.filter((b) => b.status !== "deleted");
 				const ended = all.filter((b) => b.status === "deleted");
 				if (!boxes.length) out(`You have no sandboxes at ${lab}.`);
-				for (const b of boxes) out(`${b.id}  ${b.status ?? "running"}${b.current ? "  in use here" : ""}${b.status === "deleting" ? "  (counts toward your limit until it's gone)" : ""}  ${b.name ?? ""}\n  ${b.memory ? `${b.memory}, ` : ""}made ${at(b.created)}, last used ${at(b.last_active)}${b.reason ? `\n  ${b.reason}` : ""}`);
+				for (const b of boxes) out(`${b.id}  ${b.status ?? "running"}${b.image ? `  (${b.image} image)` : ""}${b.current ? "  in use here" : ""}${b.status === "deleting" ? "  (counts toward your limit until it's gone)" : ""}  ${b.name ?? ""}\n  ${b.memory ? `${b.memory}, ` : ""}made ${at(b.created)}, last used ${at(b.last_active)}${b.reason ? `\n  ${b.reason}` : ""}`);
 				if (boxes.some((b) => b.stoppable)) out(`\nStop a running one to free a place, keeping its files: el sandbox stop ${lab} <id>`);
 				if (boxes.length) out(`${boxes.some((b) => b.stoppable) ? "" : "\n"}Delete one you no longer need, with its files: el sandbox delete ${lab} <id>`);
 				if (ended.length) out(`\nEnded by ${lab}, with nothing kept; these don't count toward your limits:`);

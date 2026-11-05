@@ -56,7 +56,7 @@ interface GateMe {
 const title = (entry: LabAppEntry) => `${entry.title || entry.name} ${entry.version}`;
 
 /** Refusals (409, 429, 503) that clear on their own, and the longest Retry-After waited each time, in seconds. */
-const WAITS: Record<string, number> = { sandbox_starting: 30, sandbox_busy: 30, scanner_unavailable: 60, downloads_in_progress: 30, too_many_deletes: 15 };
+const WAITS: Record<string, number> = { sandbox_starting: 30, sandbox_busy: 30, browser_starting: 5, scanner_unavailable: 60, downloads_in_progress: 30, too_many_deletes: 15 };
 
 /**
  * The industry's harmless antivirus test file (EICAR), each character code plus one, so neither this source nor a built
@@ -87,6 +87,9 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	private starting?: Promise<string>;
 	/** A sandbox of the person's the lab is still deleting: it counts toward their limits until the lab confirms. */
 	private leaving?: string;
+	/** The sandbox made from the lab's browser image, when it has one, and its creation while under way. */
+	private browserBox?: string;
+	private browserStarting?: Promise<string>;
 	/** Background jobs started in the sandbox, so shutdown never deletes a sandbox while one runs. */
 	private jobs = new Set<string>();
 	/** Repositories sent to the sandbox from this engine: sandbox folder → local repository and the commit sent. */
@@ -261,7 +264,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	/** The person's sandboxes here, newest first (GET /v1/containers); `current` is the one this engine works in. */
 	async sandboxes(): Promise<LabSandbox[]> {
 		if (!this.offers("containers")) throw new Error(`${this.title} has no sandboxes.`);
-		type Listed = { id: string; name?: string; status?: string; reason?: string | null; created_at?: number; last_active_at?: number; memory_limit?: string; profile?: string };
+		type Listed = { id: string; name?: string; status?: string; reason?: string | null; image?: string | null; created_at?: number; last_active_at?: number; memory_limit?: string; profile?: string };
 		const when = (seconds?: number) => (typeof seconds === "number" ? new Date(seconds * 1000).toISOString() : undefined);
 		const found: LabSandbox[] = [];
 		const stops = this.offers("stop");
@@ -271,7 +274,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			if (after) query.set("after", after);
 			const list = await this.json<{ data?: Listed[]; has_more?: boolean }>("GET", `/v1/containers?${query}`, { signal: AbortSignal.timeout(15_000) });
 			// One the lab ended itself stays listed, as deleted, so the person sees why; it holds nothing and counts toward no limit.
-			for (const c of list.data ?? []) found.push({ id: c.id, name: c.name, status: c.status, reason: c.reason || undefined, created: when(c.created_at), last_active: when(c.last_active_at), memory: c.memory_limit, profile: c.profile, current: c.id === this.container, stoppable: stops && (c.status ?? "running") === "running" });
+			for (const c of list.data ?? []) found.push({ id: c.id, name: c.name, status: c.status, reason: c.reason || undefined, image: c.image || undefined, created: when(c.created_at), last_active: when(c.last_active_at), memory: c.memory_limit, profile: c.profile, current: c.id === this.container || c.id === this.browserBox, stoppable: stops && (c.status ?? "running") === "running" });
 			if (!list.has_more || !list.data?.length) break;
 			after = list.data[list.data.length - 1]!.id;
 		}
@@ -283,6 +286,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		const response = await this.call("DELETE", `/v1/containers/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(200_000) });
 		const body = (await response.json().catch(() => ({}))) as { deleted?: boolean };
 		const status = response.status === 202 || body.deleted === false ? "deleting" : "deleted";
+		if (id === this.browserBox) this.browserBox = undefined;
 		// The engine's own one: the next command starts a new sandbox, after this one is gone if the lab needs that.
 		if (id === this.container) {
 			this.container = undefined;
@@ -919,6 +923,40 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				}
 			});
 		} else skip("sandbox");
+		// A lab with sandbox images: one it doesn't offer is refused, and its browser image's DevTools answer through the
+		// port path (the browser starts on first contact), with the WebSocket address Chrome gives rewritten to that path.
+		if (has("containers") && d?.sandbox_images) {
+			await attempt("unknown image refused", async () => {
+				const got = await this.call("POST", "/v1/containers", { json: { name: "el-lab-check", image: "el-check-no-such-image" }, signal: t() }).then(
+					async (r) => ({ status: r.status, code: undefined as string | undefined, id: ((await r.json().catch(() => ({}))) as { id?: string }).id }),
+					(e: { status?: number; code?: string }) => ({ status: e.status, code: e.code, id: undefined as string | undefined }),
+				);
+				if (got.id) await this.call("DELETE", `/v1/containers/${encodeURIComponent(got.id)}`, { signal: t() }).then((r) => r.arrayBuffer(), () => undefined);
+				add("unknown image refused", got.status === 400 && got.code === "unknown_image" ? "pass" : "fail", got.id ? "the lab made a sandbox from an image it doesn't list" : `answered ${got.status ?? "?"}${got.code ? ` ${got.code}` : ""}`);
+			});
+		}
+		const browserInfo = d?.browser;
+		if (has("containers") && has("ports") && browserInfo?.protocol === "cdp" && browserInfo.image) {
+			await attempt("browser sandbox", async () => {
+				const made = await this.json<{ id: string }>("POST", "/v1/containers", { json: { name: "el-lab-check-browser", image: browserInfo.image }, signal: AbortSignal.timeout(300_000) });
+				try {
+					const path = `/v1/containers/${encodeURIComponent(made.id)}/ports/${browserInfo.port}`;
+					const version = await this.json<{ webSocketDebuggerUrl?: string }>("GET", `${path}/json/version`, { signal: AbortSignal.timeout(120_000) });
+					if (!version.webSocketDebuggerUrl) return add("browser sandbox", "fail", "json/version gave no webSocketDebuggerUrl");
+					const url = `${this.route.base}${path}${new URL(version.webSocketDebuggerUrl).pathname}`;
+					await this.freshNonce();
+					const cdp = await Cdp.open(url.replace(/^http/, "ws"), await this.authHeaders("GET", url), this.route.ca);
+					try {
+						const got = await cdp.send<{ product?: string }>("Browser.getVersion");
+						add("browser sandbox", got.product ? "pass" : "fail", got.product ? `${got.product} in the ${browserInfo.image} image` : "Browser.getVersion gave no product");
+					} finally {
+						cdp.close();
+					}
+				} finally {
+					await this.call("DELETE", `/v1/containers/${encodeURIComponent(made.id)}`, { signal: t() }).then((r) => r.arrayBuffer(), () => undefined);
+				}
+			});
+		}
 		if (has("events")) {
 			await attempt("GET /v1/events", async () => {
 				const controller = new AbortController();
@@ -987,12 +1025,39 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	}
 
 	/**
+	 * The sandbox the browser runs in. A lab that names a browser image (descriptor `browser.image`) runs it in a sandbox
+	 * of its own made from that image, apart from the person's files; otherwise it runs in the person's sandbox.
+	 */
+	private async browserSandbox(signal?: AbortSignal): Promise<string> {
+		const image = this.descriptor?.browser?.image;
+		if (!image) return this.sandbox(signal);
+		if (this.browserBox) {
+			const id = this.browserBox;
+			const status = await this.containerStatus(id, signal);
+			if (status !== "deleted") {
+				await this.wake(id, status, signal);
+				return id;
+			}
+			this.browserBox = undefined;
+		}
+		this.browserStarting ??= this.create(signal, { name: "EnrichedLab browser", image })
+			.then((made) => {
+				this.browserBox = made.id;
+				return made.id;
+			})
+			.finally(() => {
+				this.browserStarting = undefined;
+			});
+		return this.browserStarting;
+	}
+
+	/**
 	 * POST /v1/containers. A sandbox the lab is still deleting counts toward the person's limits until it's gone
 	 * (usually seconds), so a refusal for too many is met by waiting for that one, then asking once more; the
 	 * refusal stands if it's still there after a minute.
 	 */
-	private async create(signal?: AbortSignal): Promise<{ id: string }> {
-		const post = () => this.json<{ id: string }>("POST", "/v1/containers", { json: { name: "EnrichedLab" }, signal: AbortSignal.timeout(300_000) });
+	private async create(signal?: AbortSignal, body: Record<string, unknown> = { name: "EnrichedLab" }): Promise<{ id: string }> {
+		const post = () => this.json<{ id: string }>("POST", "/v1/containers", { json: body, signal: AbortSignal.timeout(300_000) });
 		try {
 			const made = await post();
 			this.leaving = undefined;
@@ -1365,13 +1430,14 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	async cdp(signal?: AbortSignal): Promise<Cdp> {
 		const info = this.descriptor?.browser;
 		if (!this.browser() || !info) throw Object.assign(new Error(`${this.title}'s sandbox has no browser.`), { unsupported: true });
-		const id = await this.sandbox(signal);
+		const id = await this.browserSandbox(signal);
 		const path = `/v1/containers/${encodeURIComponent(id)}/ports/${info.port}`;
 		let found: { webSocketDebuggerUrl?: string } | undefined;
 		let last: unknown;
-		for (const until = Date.now() + 20_000; !found && Date.now() < until; ) {
+		// A lab answers 503 browser_starting with Retry-After while the browser starts (call() waits that out).
+		for (const until = Date.now() + 60_000; !found && Date.now() < until; ) {
 			try {
-				found = await this.json<{ webSocketDebuggerUrl?: string }>("GET", `${path}/json/version`, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000) });
+				found = await this.json<{ webSocketDebuggerUrl?: string }>("GET", `${path}/json/version`, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000) });
 			} catch (error) {
 				last = error;
 				const status = (error as { status?: number }).status;
@@ -1416,6 +1482,10 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		for (const opened of this.ports.values()) opened.close();
 		this.ports.clear();
 		await this.mcp?.close().catch(() => undefined);
+		// The browser's own sandbox holds no files of the person's; it goes with the session.
+		const box = this.browserBox;
+		this.browserBox = undefined;
+		if (box) await this.call("DELETE", `/v1/containers/${box}`, { signal: AbortSignal.timeout(10_000) }).catch(() => undefined);
 		const id = this.container;
 		this.container = undefined;
 		if (!id) return;
