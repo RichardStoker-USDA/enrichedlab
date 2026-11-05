@@ -31,7 +31,7 @@ const me = {
 	policy: { keep_data_inside: false },
 	sandbox_networks: ["none", "internet"],
 };
-const seen: { cursor?: string | null; deleted?: string; uploaded: string; keepsTestFile?: boolean; filesDeleted: string[]; internet: string[]; leaks?: boolean } = { uploaded: "", filesDeleted: [], internet: [] };
+const seen: { cursor?: string | null; deleted?: string; uploaded: string; keepsTestFile?: boolean; filesDeleted: string[]; internet: string[]; leaks?: boolean; tries?: boolean } = { uploaded: "", filesDeleted: [], internet: [] };
 /** The EICAR test file's sha-256: the lab here knows it by its hash, so this file never holds it. */
 const EICAR_SHA256 = "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f";
 
@@ -69,8 +69,14 @@ const lab = Bun.serve<{ stdin: string; started: boolean }, never>({
 			case "/v1/containers/n1/exec": {
 				const { command } = (await request.json()) as { command: string };
 				seen.internet.push(command);
-				// A lab set to leak lets one private address answer.
-				return command.includes("https://example.com/") || (seen.leaks && command.includes("http://192.168.0.1/")) ? Response.json({ exit_code: 0, stdout: "200\n", stderr: "" }) : Response.json({ exit_code: 1, stdout: "", stderr: "urllib.error.URLError" });
+				// The private-address probe: the proxy refuses every target, except where a lab is set to leak one
+				// (it connects to the metadata address spelled as IPv4-mapped IPv6) or to try one (it connects and fails).
+				if (command.includes("CONNECT ")) {
+					const targets = [...command.matchAll(/'([^'\s]+:\d+)'/g)].map((m) => m[1]!);
+					const answers = Object.fromEntries(targets.map((t) => [t, seen.leaks && t === "[::ffff:a9fe:a9fe]:443" ? "reached" : seen.tries && t === "10.0.0.1:443" ? "the proxy answered 502" : "refused"]));
+					return Response.json({ exit_code: 0, stdout: `${JSON.stringify(answers)}\n`, stderr: "" });
+				}
+				return command.includes("https://example.com/") ? Response.json({ exit_code: 0, stdout: "200\n", stderr: "" }) : Response.json({ exit_code: 1, stdout: "", stderr: "urllib.error.URLError" });
 			}
 			case "/v1/containers/n1/files":
 				return Response.json({ error: { code: "internet_no_files", message: "A sandbox with internet access takes no files." } }, { status: 409 });
@@ -188,7 +194,10 @@ describe("lab contract", () => {
 			["internet sandbox takes no files", "pass"],
 		]);
 		expect(seen.internet.at(-1)).toBe("deleted");
-		expect(seen.internet.filter((c) => /169\.254|10\.0\.0\.1|192\.168\.0\.1|100\.64\.0\.1/.test(c))).toHaveLength(4);
+		// One probe asks the proxy about every private target, the IPv6 spellings of the metadata address included.
+		const probe = seen.internet.find((c) => c.includes("CONNECT "));
+		for (const target of ["169.254.169.254:443", "10.0.0.1:443", "kubernetes.default.svc:443", "[::ffff:a9fe:a9fe]:443", "[64:ff9b::a9fe:a9fe]:443", "[2002:a9fe:a9fe::1]:443", "[fd00:ec2::254]:443"]) expect(probe).toContain(`'${target}'`);
+		expect(rows.find((r) => r.row === "internet sandbox private addresses")?.detail).toStartWith("all 13 refused");
 		expect(seen.deleted).toBe("c1");
 	});
 
@@ -207,9 +216,19 @@ describe("lab contract", () => {
 		seen.leaks = true;
 		try {
 			const rows = await site().check();
-			expect(rows.find((r) => r.row === "internet sandbox private addresses")).toMatchObject({ status: "fail", detail: "reached a private address: http://192.168.0.1/" });
+			expect(rows.find((r) => r.row === "internet sandbox private addresses")).toMatchObject({ status: "fail", detail: "reached a private address: [::ffff:a9fe:a9fe]:443" });
 		} finally {
 			seen.leaks = false;
+		}
+	});
+
+	test("a proxy that tries a private address, rather than refusing it, fails the check", async () => {
+		seen.tries = true;
+		try {
+			const rows = await site().check();
+			expect(rows.find((r) => r.row === "internet sandbox private addresses")).toMatchObject({ status: "fail", detail: "not refused: 10.0.0.1:443 (the proxy answered 502)" });
+		} finally {
+			seen.tries = false;
 		}
 	});
 

@@ -75,6 +75,62 @@ const EICAR_SHIFTED = [
 	87, 74, 83, 86, 84, 46, 85, 70, 84, 85, 46, 71, 74, 77, 70, 34, 37, 73, 44, 73, 43,
 ];
 
+/**
+ * Private destinations an internet sandbox must never reach, all on port 443 so a refusal is about the address and
+ * not the port: the metadata address, each private and carrier NAT range, loopback, the cluster API, and the IPv6
+ * spellings that carry a private IPv4 address (mapped, NAT64, 6to4) or are private themselves (ULA, link-local).
+ */
+const PRIVATE_TARGETS = [
+	"169.254.169.254:443",
+	"10.0.0.1:443",
+	"172.16.0.1:443",
+	"192.168.0.1:443",
+	"100.64.0.1:443",
+	"127.0.0.1:443",
+	"kubernetes.default.svc:443",
+	"[::1]:443",
+	"[fd00:ec2::254]:443",
+	"[fe80::1]:443",
+	"[::ffff:a9fe:a9fe]:443",
+	"[64:ff9b::a9fe:a9fe]:443",
+	"[2002:a9fe:a9fe::1]:443",
+];
+
+/**
+ * Asks the sandbox's proxy to CONNECT to each target given and prints what it said, as JSON: "reached" (2xx),
+ * "refused" (4xx), or what else happened. Fetching a URL can't tell a refusal from a proxy that tried and found nothing
+ * listening, and a plain-http fetch may skip the proxy altogether. With no proxy set, it tries each target directly.
+ * No single quotes, so it rides in a shell's single-quoted argument.
+ */
+const PRIVATE_PROBE = String.raw`import base64, json, os, socket, ssl, sys, urllib.parse
+proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
+p = urllib.parse.urlsplit(proxy) if proxy else None
+out = {}
+for target in sys.argv[1:]:
+    host, port = target.rsplit(":", 1)
+    try:
+        if p is None:
+            socket.create_connection((host.strip("[]"), int(port)), timeout=8).close()
+            out[target] = "reached"
+            continue
+        s = socket.create_connection((p.hostname, p.port or (443 if p.scheme == "https" else 80)), timeout=8)
+        if p.scheme == "https":
+            s = ssl.create_default_context().wrap_socket(s, server_hostname=p.hostname)
+        auth = ""
+        if p.username:
+            pair = urllib.parse.unquote(p.username) + ":" + urllib.parse.unquote(p.password or "")
+            auth = "Proxy-Authorization: Basic " + base64.b64encode(pair.encode()).decode() + "\r\n"
+        s.sendall(("CONNECT " + target + " HTTP/1.1\r\nHost: " + target + "\r\n" + auth + "\r\n").encode())
+        line = s.makefile("rb").readline().decode("latin-1").split()
+        s.close()
+        code = int(line[1]) if len(line) > 1 and line[1].isdigit() else 0
+        out[target] = "reached" if 200 <= code < 300 else "refused" if 400 <= code < 500 and code != 407 else ("the proxy answered " + str(code) if code else "the proxy closed without an answer")
+    except socket.timeout:
+        out[target] = "refused" if p is None else "the proxy gave no answer in 8 s"
+    except OSError:
+        out[target] = "refused" if p is None else "the proxy could not be reached"
+print(json.dumps(out))`;
+
 /** The sha-256 a response's `Repr-Digest` (RFC 9530) gives, in hex; undefined when it carries none. */
 export function reprSha256(response: Response): string | undefined {
 	const match = /(?:^|,)\s*sha-256=:([A-Za-z0-9+/]+={0,2}):/.exec(response.headers.get("repr-digest") ?? "");
@@ -985,10 +1041,17 @@ export class GateSite implements SiteAdapter, SandboxApi {
 					// The proxy is the only way out: a direct connection, with no proxy set, fails.
 					const direct = await run(`env -u HTTPS_PROXY -u https_proxy -u HTTP_PROXY -u http_proxy python3 -c 'import socket; socket.create_connection(("example.com", 443), timeout=8)'`);
 					add("internet sandbox only through its proxy", direct.exit_code === 0 ? "fail" : "pass", direct.exit_code === 0 ? "a direct connection to example.com:443 got through without the proxy" : "a direct connection without the proxy failed");
-					// The metadata address and one address in each private and carrier NAT range: every one is refused.
-					const reached: string[] = [];
-					for (const url of ["http://169.254.169.254/latest/meta-data/", "http://10.0.0.1/", "http://192.168.0.1/", "http://100.64.0.1/"]) if ((await run(fetchCommand(url, 8))).exit_code === 0) reached.push(url);
-					add("internet sandbox private addresses", reached.length ? "fail" : "pass", reached.length ? `reached a private address: ${reached.join(", ")}` : "the metadata address and 10/8, 192.168/16 and 100.64/10 addresses were refused");
+					// The proxy refuses every private destination, IPv6 spellings of private IPv4 addresses included.
+					const probe = await run(`python3 -c '${PRIVATE_PROBE}' ${PRIVATE_TARGETS.map((target) => `'${target}'`).join(" ")}`);
+					let answers: Record<string, string> = {};
+					try {
+						answers = JSON.parse(probe.stdout?.trim() || "{}") as Record<string, string>;
+					} catch {}
+					const reached = PRIVATE_TARGETS.filter((target) => answers[target] === "reached");
+					const unclear = PRIVATE_TARGETS.filter((target) => answers[target] !== "reached" && answers[target] !== "refused");
+					if (reached.length) add("internet sandbox private addresses", "fail", `reached a private address: ${reached.join(", ")}`);
+					else if (unclear.length) add("internet sandbox private addresses", "fail", `not refused: ${unclear.map((target) => `${target} (${answers[target] ?? `no result, exit ${probe.exit_code ?? "?"}`})`).join(", ")}`);
+					else add("internet sandbox private addresses", "pass", `all ${PRIVATE_TARGETS.length} refused: the metadata address, the private, carrier NAT and loopback ranges, the cluster API, and their IPv6 forms`);
 					const boundary = `enrichedlab-${randomBytes(12).toString("hex")}`;
 					const form = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="el-check.txt"\r\nContent-Type: text/plain\r\n\r\nel-check\r\n--${boundary}--\r\n`;
 					const sent = await this.call("POST", `/v1/containers/${encodeURIComponent(made.id)}/files`, { body: form, headers: { "content-type": `multipart/form-data; boundary=${boundary}` }, signal: t() }).then(
