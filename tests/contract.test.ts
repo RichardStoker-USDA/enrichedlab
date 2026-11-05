@@ -31,7 +31,7 @@ const me = {
 	policy: { keep_data_inside: false },
 	sandbox_networks: ["none", "internet"],
 };
-const seen: { cursor?: string | null; deleted?: string; uploaded: string; keepsTestFile?: boolean; filesDeleted: string[]; internet: string[] } = { uploaded: "", filesDeleted: [], internet: [] };
+const seen: { cursor?: string | null; deleted?: string; uploaded: string; keepsTestFile?: boolean; filesDeleted: string[]; internet: string[]; leaks?: boolean } = { uploaded: "", filesDeleted: [], internet: [] };
 /** The EICAR test file's sha-256: the lab here knows it by its hash, so this file never holds it. */
 const EICAR_SHA256 = "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f";
 
@@ -69,7 +69,8 @@ const lab = Bun.serve<{ stdin: string; started: boolean }, never>({
 			case "/v1/containers/n1/exec": {
 				const { command } = (await request.json()) as { command: string };
 				seen.internet.push(command);
-				return command.includes("https://example.com/") ? Response.json({ exit_code: 0, stdout: "200\n", stderr: "" }) : Response.json({ exit_code: 1, stdout: "", stderr: "urllib.error.URLError" });
+				// A lab set to leak lets one private address answer.
+				return command.includes("https://example.com/") || (seen.leaks && command.includes("http://192.168.0.1/")) ? Response.json({ exit_code: 0, stdout: "200\n", stderr: "" }) : Response.json({ exit_code: 1, stdout: "", stderr: "urllib.error.URLError" });
 			}
 			case "/v1/containers/n1/files":
 				return Response.json({ error: { code: "internet_no_files", message: "A sandbox with internet access takes no files." } }, { status: 409 });
@@ -182,10 +183,12 @@ describe("lab contract", () => {
 		// An internet sandbox reaches the public web, not the metadata or a private address, and takes no files.
 		expect(rows.filter((r) => r.row.startsWith("internet sandbox")).map((r) => [r.row, r.status])).toEqual([
 			["internet sandbox", "pass"],
+			["internet sandbox only through its proxy", "pass"],
 			["internet sandbox private addresses", "pass"],
 			["internet sandbox takes no files", "pass"],
 		]);
 		expect(seen.internet.at(-1)).toBe("deleted");
+		expect(seen.internet.filter((c) => /169\.254|10\.0\.0\.1|192\.168\.0\.1|100\.64\.0\.1/.test(c))).toHaveLength(4);
 		expect(seen.deleted).toBe("c1");
 	});
 
@@ -197,6 +200,16 @@ describe("lab contract", () => {
 			expect(seen.filesDeleted).toContain("f2");
 		} finally {
 			seen.keepsTestFile = false;
+		}
+	});
+
+	test("an internet sandbox that reaches a private address fails the check as a leak", async () => {
+		seen.leaks = true;
+		try {
+			const rows = await site().check();
+			expect(rows.find((r) => r.row === "internet sandbox private addresses")).toMatchObject({ status: "fail", detail: "reached a private address: http://192.168.0.1/" });
+		} finally {
+			seen.leaks = false;
 		}
 	});
 

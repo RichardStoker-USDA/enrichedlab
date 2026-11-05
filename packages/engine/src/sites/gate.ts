@@ -982,9 +982,13 @@ export class GateSite implements SiteAdapter, SandboxApi {
 					const web = await run(fetchCommand("https://example.com/", 20));
 					if (web.exit_code === 127) return add("internet sandbox", "skip", "the sandbox image has no python3 to fetch a page");
 					add("internet sandbox", web.exit_code === 0 && web.stdout?.trim() === "200" ? "pass" : "fail", web.exit_code === 0 ? `https://example.com/ answered ${web.stdout?.trim()}` : `fetching https://example.com/ failed (exit ${web.exit_code})`);
+					// The proxy is the only way out: a direct connection, with no proxy set, fails.
+					const direct = await run(`env -u HTTPS_PROXY -u https_proxy -u HTTP_PROXY -u http_proxy python3 -c 'import socket; socket.create_connection(("example.com", 443), timeout=8)'`);
+					add("internet sandbox only through its proxy", direct.exit_code === 0 ? "fail" : "pass", direct.exit_code === 0 ? "a direct connection to example.com:443 got through without the proxy" : "a direct connection without the proxy failed");
+					// The metadata address and one address in each private and carrier NAT range: every one is refused.
 					const reached: string[] = [];
-					for (const url of ["http://169.254.169.254/latest/meta-data/", "http://10.0.0.1/"]) if ((await run(fetchCommand(url, 8))).exit_code === 0) reached.push(url);
-					add("internet sandbox private addresses", reached.length ? "fail" : "pass", reached.length ? `it reached ${reached.join(", ")}` : "the metadata address and a private address were refused");
+					for (const url of ["http://169.254.169.254/latest/meta-data/", "http://10.0.0.1/", "http://192.168.0.1/", "http://100.64.0.1/"]) if ((await run(fetchCommand(url, 8))).exit_code === 0) reached.push(url);
+					add("internet sandbox private addresses", reached.length ? "fail" : "pass", reached.length ? `reached a private address: ${reached.join(", ")}` : "the metadata address and 10/8, 192.168/16 and 100.64/10 addresses were refused");
 					const boundary = `enrichedlab-${randomBytes(12).toString("hex")}`;
 					const form = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="el-check.txt"\r\nContent-Type: text/plain\r\n\r\nel-check\r\n--${boundary}--\r\n`;
 					const sent = await this.call("POST", `/v1/containers/${encodeURIComponent(made.id)}/files`, { body: form, headers: { "content-type": `multipart/form-data; boundary=${boundary}` }, signal: t() }).then(
