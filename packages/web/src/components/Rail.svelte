@@ -57,7 +57,13 @@
 	}
 
 	function placeActions(place: Place): MenuAction[] {
-		const name = place.id === "local" ? place.title : place.title;
+		const name = place.title;
+		const waiting = lab.deferredDevices.some((r) => r.site === place.id);
+		if (waiting) return [{ label: "Review Device Requests…", run: () => lab.reviewDevices(place.id) }, separator, ...placeMenu(place, name)];
+		return placeMenu(place, name);
+	}
+
+	function placeMenu(place: Place, name: string): MenuAction[] {
 		if (place.id === "local") {
 			return [
 				{ label: `New Session on ${name}`, run: () => fresh("local") },
@@ -185,6 +191,7 @@
 			{#each lab.places as place (place.id)}
 				{@const here = Boolean(lab.current) && lab.place.id === place.id}
 				{@const needsSignIn = Boolean(place.site && !place.site.signedIn)}
+				{@const waiting = lab.deferredDevices.filter((r) => r.site === place.id).length}
 				<div class="place" class:here use:contextMenu={() => placeActions(place)}>
 					<button class="place-main" onclick={(e) => (needsSignIn ? lab.login(place.id) : showMenu(placeActions(place), e.currentTarget as HTMLElement))} aria-haspopup={needsSignIn ? undefined : "menu"}>
 						<span class="place-dot" class:local={place.id === "local"} style:--dot={`var(${place.color})`}></span>
@@ -198,6 +205,9 @@
 							<span class="here-mark">This session</span>
 						{/if}
 					</button>
+					{#if waiting}
+						<button class="devices" onclick={() => lab.reviewDevices(place.id)}>{waiting} {waiting === 1 ? "device asks" : "devices ask"} to use your sign-in</button>
+					{/if}
 				</div>
 			{/each}
 		</section>
@@ -410,6 +420,20 @@
 		color: var(--primary-fg);
 		font-size: 11.5px;
 		font-weight: 600;
+	}
+	.devices {
+		display: block;
+		width: calc(100% - 16px);
+		margin: 0 8px 4px;
+		padding: 4px 10px 4px 28px;
+		border-radius: 6px;
+		text-align: left;
+		font-size: 12px;
+		font-weight: 600;
+		color: var(--text);
+	}
+	.devices:hover {
+		background: var(--hover);
 	}
 	.here-mark {
 		font-size: 11px;

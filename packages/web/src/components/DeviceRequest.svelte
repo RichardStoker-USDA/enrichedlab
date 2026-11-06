@@ -8,6 +8,15 @@
 	let busy = $state(false);
 	let message = $state("");
 	let failed = $state(false);
+	let answered = false;
+
+	/** Closed with an answer: done. Closed with "Decide later": kept on the lab's row in the sidebar. */
+	function closed() {
+		const [first, ...rest] = lab.deviceRequests;
+		lab.deviceRequests = rest;
+		if (first && !answered) lab.deferredDevices = [...lab.deferredDevices, first];
+		answered = false;
+	}
 	const request = $derived(lab.deviceRequests[0]);
 	const when = $derived.by(() => {
 		const at = request ? new Date(request.created) : undefined;
@@ -29,6 +38,7 @@
 		try {
 			await rpc.call(approve ? "lab.device.approve" : "lab.device.revoke", { name: request.site, id: request.id });
 			lab.say(approve ? `Approved ${request.name} for ${request.lab}.` : `Revoked ${request.name}; it can't use your ${request.lab} sign-in.`);
+			answered = true;
 			dialog?.close();
 		} catch (error) {
 			failed = true;
@@ -39,11 +49,11 @@
 	}
 </script>
 
-<dialog class="sheet" style:--sheet-width="440px" bind:this={dialog} onclose={() => lab.deviceRequests.length && (lab.deviceRequests = lab.deviceRequests.slice(1))} aria-labelledby="device-title">
+<dialog class="sheet" style:--sheet-width="440px" bind:this={dialog} onclose={closed} oncancel={(e) => busy && e.preventDefault()} aria-labelledby="device-title">
 	{#if request}
 		<form method="dialog" class="sheet-head">
 			<h2 id="device-title">A new device wants your {request.lab} sign-in</h2>
-			<button class="icon-btn" aria-label="Decide later"><svg viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8" /></svg></button>
+			<button class="icon-btn" aria-label="Decide later" title="Decide later: it waits on the lab in the sidebar" disabled={busy}><svg viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8" /></svg></button>
 		</form>
 		<p class="lead">
 			<strong>{request.name}</strong> signed in at {when}. Approve it only if you just signed in there. If you didn't, revoke it: someone else may

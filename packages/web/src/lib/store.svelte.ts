@@ -42,6 +42,15 @@ class Lab {
 	private frames = new Set<(frame: BrowserFrame) => void>();
 	/** Other devices asking to use the person's sign-in at a lab, oldest first; the window asks about each. */
 	deviceRequests = $state<DeviceRequest[]>([]);
+	/** Requests the person chose to decide later: kept, counted on the lab's row, and opened again from there. */
+	deferredDevices = $state<DeviceRequest[]>([]);
+
+	/** Open a lab's deferred device requests again (all labs' without a name). */
+	reviewDevices(site?: string): void {
+		const again = this.deferredDevices.filter((r) => !site || r.site === site);
+		this.deferredDevices = this.deferredDevices.filter((r) => !again.includes(r));
+		this.deviceRequests = [...this.deviceRequests, ...again];
+	}
 	/** Lab apps being installed, by "site/name". */
 	installing = $state(new Set<string>());
 	models = $state<ModelInfo[]>([]);
@@ -714,7 +723,8 @@ class Lab {
 		rpc.on("lab.notice", (notice) => this.say(notice.text, notice.url));
 		rpc.on("lab.apps.changed", () => void this.refreshApps());
 		rpc.on("lab.device.pending", (request) => {
-			if (!this.deviceRequests.some((r) => r.site === request.site && r.id === request.id)) this.deviceRequests = [...this.deviceRequests, request];
+			const same = (r: DeviceRequest) => r.site === request.site && r.id === request.id;
+			if (!this.deviceRequests.some(same) && !this.deferredDevices.some(same)) this.deviceRequests = [...this.deviceRequests, request];
 		});
 		rpc.on("provider.auth", (auth) => {
 			window.open(auth.url, "_blank", "noopener");
