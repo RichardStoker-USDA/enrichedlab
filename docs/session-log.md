@@ -51,7 +51,20 @@ Engine decisions map to `decision` events: `auto` is allow by rule, `allowed` an
 is the event just before it. `tests/session_log_v1.test.ts` checks that a log exported and imported rebuilds the same
 model context.
 
+## Rein side
+
+Rein (Gate's web harness) serves v1 as files rather than through its event stream, since `/events` is SSE:
+
+- `GET /rein/api/sessions/{id}/export` answers `application/jsonl`, one `{v, seq, time, kind, data}` per line.
+  Rein's own decision bases map to v1 (`owner_earlier` and `owner_lease` become `owner` with a basis); kinds v1
+  lacks go out as `x-rein-<kind>`.
+- `POST /rein/api/sessions/import?title=&model=` takes a v1 JSONL body (an `x-rein` header line, up to 16 MiB and
+  20,000 events) and answers `{session, events, skipped}`. It renumbers from 1 and remaps `compaction.through`,
+  skips `x-*` and unknown kinds, drops hold ids and keeps images by reference. Imported decisions allow nothing.
+- Rein rebuilds the context with the engine's summary prefix as the first user turn.
+
 ## Status
 
-Format agreed; the engine side is built. Rein's side (`v`, reading `compaction`, `?format=v1`, image references) is
-the Gate session's, through its review.
+Format agreed; the engine side is built (`el session export` and `el session import`). Rein's side is built and in
+review as Gate publication 60. Once it is live, one engine export goes through Rein's import and export and back
+into the engine to confirm the round trip.
