@@ -78,3 +78,24 @@ app icon use a lowercase "e" in Aggie Gold on Aggie Blue, nothing more.
 Chat bubbles, avatars, a hero greeting, cards of suggested prompts, gradient or sparkle marks, glowing borders,
 tinted status badges, floating desktop-style windows, a dashboard of tiles, spinners and blinking dots, neon
 palettes, decorative WebGPU effects, and any upstream harness's layout, names or assets.
+
+## Rebuild, November 2026
+
+Rich's verdict on 0.2.10: the window feels clunky and nothing like a native Mac app; menus aren't polished; there's
+no visible place to drag the window; light mode's contrast makes it hard to tell what is what; there is no right-click
+anywhere; and moving between this computer and the clusters "makes 0 sense". The rebuild keeps the three regions and
+the session logic, and changes how they look and behave:
+
+- **Window.** A real title-bar strip on every region header (drag anywhere that isn't a control, double-click to
+  zoom, as macOS does), traffic lights given their own space, and the sidebar on the system's sidebar material.
+- **Menus.** A native application menu (File, Edit, View, Session, Window, Help) carrying every command with its
+  shortcut, and native context menus: text fields (cut, copy, paste, look up, spelling), sessions (rename, move,
+  reveal folder, delete), files, tabs and messages.
+- **Contrast.** Light mode rebuilt for WCAG AA on every text and control role; borders and fills strong enough to
+  separate surfaces; one accent per state.
+- **Places.** One place control, at the top of the rail, the way a Mac app switches accounts: this computer and each
+  lab, with sign-in state and what each grants. A session shows where it runs in its header; moving it is one
+  action with a clear before and after, not a menu hunt.
+- **Every screen.** New session, run sheet, composer, model menu, Model services, Add a lab, workbench panes (files,
+  terminal, browser, tables, plots, apps, views), palette, settings and every dialog, each in all nine states, light
+  and dark, at phone and desktop widths; then an independent review by GPT-6 Astra.
