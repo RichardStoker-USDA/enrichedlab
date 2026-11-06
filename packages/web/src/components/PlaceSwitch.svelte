@@ -1,6 +1,9 @@
 <script lang="ts">
+	// Where this session's files and commands act: this computer, or a lab's sandbox. It sits beside the model in
+	// the composer because the two together answer "how will the next thing be done". A move carries the session's
+	// repository and happens between turns.
 	import { lab } from "../lib/store.svelte.ts";
-	import { runsOn, SANDBOX_NOTE } from "../lib/places.ts";
+	import { SANDBOX_NOTE } from "../lib/places.ts";
 
 	let open = $state(false);
 	let root: HTMLDivElement | undefined = $state();
@@ -15,48 +18,49 @@
 	}
 
 	const site = $derived(lab.summary?.site ? lab.sites.find((s) => s.name === lab.summary!.site) : undefined);
+	const movingTo = $derived(lab.moving ? (lab.places.find((p) => p.id === lab.moving)?.title ?? lab.moving) : "");
 </script>
 
 <svelte:window onpointerdown={outside} onkeydown={(e) => e.key === "Escape" && (open = false)} />
 
 <div class="switch" bind:this={root}>
-	<button class="pill" onclick={() => (open = !open)} aria-haspopup="menu" aria-expanded={open} disabled={Boolean(lab.moving) || lab.busy} title={lab.busy ? "Moves happen between turns" : "Where this session's files and commands act"}>
+	<button type="button" class="chip" onclick={() => (open = !open)} aria-haspopup="menu" aria-expanded={open} disabled={Boolean(lab.moving)} title="Where this session's files and commands run">
 		<span class="place-dot" class:local={lab.place.id === "local"} style:--dot={`var(${lab.place.color})`}></span>
-		{#if lab.moving}
-			<span class="label">Moving to {lab.places.find((p) => p.id === lab.moving)?.title ?? lab.moving}…</span>
-		{:else}
-			<!-- Narrow windows show the place's name alone; the full phrase stays for screen readers. -->
-			<span class="label full">{runsOn(lab.place)}</span>
-			<span class="label short" aria-hidden="true">{lab.place.title}</span>
-		{/if}
-		<svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4.5 3 3 3-3" /></svg>
+		<span class="label">{lab.moving ? `Moving to ${movingTo}…` : lab.place.id === "local" ? lab.place.title : `${lab.place.title} sandbox`}</span>
+		<svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 7.5 3-3 3 3" /></svg>
 	</button>
 	{#if open}
-		<div class="menu" role="menu">
+		<div class="menu" role="menu" aria-label="Run on">
 			{#if lab.pinned}
-				<p class="note">{site?.title ?? "This lab"} keeps its sessions' code and data in its sandbox, so this session stays there.</p>
+				<p class="note">{site?.title ?? "This lab"} keeps its sessions' code and data inside the lab, so this session stays in its sandbox.</p>
 			{:else}
-				<p class="menu-label">Run this session's files and commands on</p>
+				<p class="menu-label">Run files and commands on</p>
 				{#each lab.places as place (place.id)}
-					<button class="menu-item" class:on={place.id === lab.place.id} role="menuitemradio" aria-checked={place.id === lab.place.id} disabled={!place.ready || Boolean(place.site?.isolated)} onclick={() => choose(place.id)}>
-						<span class="place-dot" class:local={place.id === "local"} style:--dot={`var(${place.color})`}></span>
+					{@const unavailable = !place.ready || Boolean(place.site?.isolated) || lab.busy}
+					<button type="button" class="menu-item" role="menuitemradio" aria-checked={place.id === lab.place.id} disabled={unavailable && place.id !== lab.place.id} onclick={() => choose(place.id)}>
+						<span class="check" aria-hidden="true">{place.id === lab.place.id ? "✓" : ""}</span>
 						<span>
-							{place.id === "local" ? place.title : `${place.title} sandbox`}
+							<span class="line"><span class="place-dot" class:local={place.id === "local"} style:--dot={`var(${place.color})`}></span>{place.id === "local" ? place.title : `${place.title} sandbox`}</span>
 							<small>
 								{#if place.id === "local"}
-									Your files, contained by the operating system
+									Your files, with the operating system's containment
 								{:else if place.site?.isolated}
 									Start a new {place.title} session to work there
+								{:else if !place.site?.signedIn}
+									Sign in to {place.title} first
 								{:else if !place.ready}
-									{place.site?.signedIn ? "No sandbox for you yet" : "Sign in first"}
+									{place.title} has no sandbox for you yet
+								{:else if lab.busy}
+									Moves happen between turns
 								{:else}
 									{SANDBOX_NOTE}
 								{/if}
 							</small>
 						</span>
-						<span class="check" aria-hidden="true">{place.id === lab.place.id ? "✓" : ""}</span>
+						<span></span>
 					</button>
 				{/each}
+				<p class="foot">The model is a separate choice: any of your models can work in any place.</p>
 			{/if}
 		</div>
 	{/if}
@@ -65,69 +69,65 @@
 <style>
 	.switch {
 		position: relative;
+		min-width: 0;
 	}
-	.pill {
-		display: inline-flex;
+	.chip {
+		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: 7px;
 		height: 30px;
-		padding: 0 10px 0 12px;
-		border-radius: 15px;
-		border: 1px solid var(--rule-strong);
+		max-width: 240px;
+		padding: 0 9px 0 10px;
+		border-radius: 999px;
 		font-size: 12.5px;
 		font-weight: 500;
+		color: var(--text-muted);
+		transition: background-color 120ms ease-out, color 120ms ease-out;
+	}
+	.chip:hover:not(:disabled),
+	.chip[aria-expanded="true"] {
+		background: var(--hover);
+		color: var(--text);
+	}
+	.label {
+		overflow: hidden;
+		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
-	.pill:hover:not(:disabled) {
-		background: var(--hover);
-	}
-	.pill:disabled {
-		color: var(--text-muted);
-	}
-	.pill svg {
-		width: 12px;
-		height: 12px;
+	.chip svg {
+		width: 11px;
+		height: 11px;
+		flex: none;
 		fill: none;
 		stroke: currentColor;
 		stroke-width: 1.5;
-		color: var(--text-faint);
 	}
 	.menu {
-		right: 0;
-		top: calc(100% + 6px);
-		width: 320px;
+		left: -4px;
+		bottom: calc(100% + 10px);
+		width: min(340px, 86vw);
+		transform-origin: bottom left;
 	}
-	.note {
-		margin: 6px 10px;
-		font-size: 13px;
+	.line {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.note,
+	.foot {
+		margin: 6px 9px;
+		font-size: 12px;
+		line-height: 1.45;
 		color: var(--text-muted);
 	}
-	.check {
-		color: var(--accent-text);
-	}
-	.short {
-		display: none;
+	.foot {
+		margin-top: 6px;
+		padding-top: 8px;
+		border-top: 1px solid var(--rule);
 	}
 	@media (max-width: 560px) {
-		.pill {
-			gap: 6px;
-			padding: 0 8px 0 10px;
-		}
-		.full {
-			position: absolute;
-			width: 1px;
-			height: 1px;
-			overflow: hidden;
-			clip-path: inset(50%);
-		}
-		.short {
-			display: inline;
-			max-width: 96px;
-			overflow: hidden;
-			text-overflow: ellipsis;
-		}
-		.menu {
-			width: min(320px, calc(100vw - 32px));
+		.chip {
+			max-width: 140px;
 		}
 	}
 </style>

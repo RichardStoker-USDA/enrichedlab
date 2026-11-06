@@ -8,7 +8,8 @@
 	import Activity from "./Activity.svelte";
 	import Approval from "./Approval.svelte";
 	import Composer from "./Composer.svelte";
-	import PlaceSwitch from "./PlaceSwitch.svelte";
+	import { mac } from "../lib/places.ts";
+	import { separator, showMenu, type MenuAction } from "../lib/menu.svelte.ts";
 	import Step from "./Step.svelte";
 
 	let { onMenu }: { onMenu: () => void } = $props();
@@ -60,15 +61,35 @@
 		void toBottom();
 	});
 
-	let editingTitle = $state(false);
+	const editingTitle = $derived(Boolean(lab.current) && lab.renaming === lab.current);
 	let titleDraft = $state("");
 	function startRename() {
 		titleDraft = lab.summary?.title ?? "";
-		editingTitle = true;
+		lab.renaming = lab.current;
 	}
-	async function finishRename() {
-		editingTitle = false;
-		if (titleDraft.trim() && titleDraft !== lab.summary?.title) await lab.rename(titleDraft);
+	$effect(() => {
+		if (editingTitle) titleDraft = lab.summary?.title ?? "";
+	});
+	async function finishRename(keep = true) {
+		if (!editingTitle) return;
+		lab.renaming = undefined;
+		if (keep && titleDraft.trim() && titleDraft !== lab.summary?.title) await lab.rename(titleDraft);
+	}
+	const desktop = typeof window !== "undefined" && Boolean(window.labDesktop);
+	function sessionMenu(): MenuAction[] {
+		const s = lab.summary;
+		if (!s) return [];
+		return [
+			{ label: "Rename", run: startRename },
+			{ label: lab.workbench ? "Hide Workbench" : "Show Workbench", run: () => lab.toggleWorkbench() },
+			{ label: "Open Terminal", run: () => lab.openPane("terminal") },
+			separator,
+			{ label: "Summarize Older Turns", disabled: lab.busy, run: () => lab.compact() },
+			...(desktop ? [{ label: mac ? "Show in Finder" : "Show in Folder", run: () => lab.reveal(s.cwd) }] : []),
+			{ label: "Copy Folder Path", run: () => lab.copy(s.cwd, "the folder path") },
+			separator,
+			{ label: "Delete…", disabled: lab.busy, run: () => lab.deleteSession(s.id) },
+		];
 	}
 
 	const thinkingTail = $derived(lab.partial.reasoning.trimEnd().split("\n").slice(-3).join("\n"));
@@ -80,28 +101,38 @@
 	let thinkingOpen = $state<Record<string, boolean>>({});
 </script>
 
-<header class="head" style:--marker={`var(${lab.place.color})`} class:moving={lab.moving}>
-	<button class="icon-btn menu-toggle" onclick={onMenu} aria-label="Places and sessions">
+<header class="head toolbar" style:--marker={`var(${lab.place.color})`} class:moving={lab.moving} class:inset={!lab.sidebar}>
+	<button class="icon-btn menu-toggle" onclick={onMenu} aria-label="Show places and sessions">
 		<svg viewBox="0 0 16 16"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" /></svg>
 	</button>
+	{#if !lab.sidebar}
+		<button class="icon-btn show-rail" onclick={() => (lab.sidebar = true)} title={`Show the sidebar (${mac ? "⌃⌘S" : "Ctrl+Shift+S"})`} aria-label="Show the sidebar">
+			<svg viewBox="0 0 16 16"><rect x="2" y="2.5" width="12" height="11" rx="2" /><path d="M6 2.5v11" /></svg>
+		</button>
+	{/if}
 	<div class="heading">
 		{#if editingTitle}
 			<!-- svelte-ignore a11y_autofocus -->
-			<input class="title-input" bind:value={titleDraft} onblur={finishRename} onkeydown={(e) => e.key === "Enter" && finishRename()} autofocus aria-label="Session title" />
+			<input class="title-input" bind:value={titleDraft} onblur={() => finishRename()} onkeydown={(e) => (e.key === "Enter" ? finishRename() : e.key === "Escape" && finishRename(false))} autofocus aria-label="Session title" />
 		{:else}
-			<button class="title" onclick={startRename} title="Rename">{lab.summary?.title ?? "Session"}</button>
+			<button class="title" ondblclick={startRename} onclick={startRename} title="Rename">{lab.summary?.title ?? "Session"}</button>
 		{/if}
 		<span class="crumb">
 			{#if lab.summary?.parent}
 				<button class="back" onclick={() => lab.go(lab.summary!.parent!)}>Subagent of the lead session</button>
 			{:else}
-				{project}{branch ? ` · ${branch}` : ""}
+				<span class="place-dot" class:local={lab.place.id === "local"} style:--dot={`var(${lab.place.color})`}></span>
+				<span>{lab.place.id === "local" ? lab.place.title : `${lab.place.title} sandbox`}</span>
+				<span class="sep">·</span>
+				<span class="folder" title={lab.summary?.cwd}>{project}{branch ? ` · ${branch}` : ""}</span>
 			{/if}
 		</span>
 	</div>
-	<PlaceSwitch />
-	<button class="icon-btn" class:on={lab.workbench} onclick={() => lab.toggleWorkbench()} aria-pressed={lab.workbench} title="Workbench" aria-label="Workbench">
-		<svg viewBox="0 0 16 16"><rect x="2" y="2.5" width="12" height="11" rx="2" /><path d="M9.5 2.5v11" /></svg>
+	<button class="icon-btn" onclick={(e) => showMenu(sessionMenu(), e.currentTarget as HTMLElement)} aria-haspopup="menu" title="More" aria-label="More session actions">
+		<svg viewBox="0 0 16 16"><circle cx="4" cy="8" r="0.6" /><circle cx="8" cy="8" r="0.6" /><circle cx="12" cy="8" r="0.6" /></svg>
+	</button>
+	<button class="icon-btn" class:on={lab.workbench} onclick={() => lab.toggleWorkbench()} aria-pressed={lab.workbench} title={`Workbench (${mac ? "⌘\\" : "Ctrl+\\"})`} aria-label="Workbench">
+		<svg viewBox="0 0 16 16"><rect x="2" y="2.5" width="12" height="11" rx="2" /><path d="M10 2.5v11" /></svg>
 	</button>
 </header>
 
@@ -175,17 +206,20 @@
 <style>
 	.head {
 		position: relative;
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		min-height: 52px;
-		padding: 8px 12px 8px 20px;
+		gap: 6px;
+		padding: 0 10px 0 20px;
 		border-bottom: 1px solid var(--rule);
-		-webkit-app-region: drag;
 	}
-	.head :global(button),
-	.head input {
-		-webkit-app-region: no-drag;
+	/* With the sidebar hidden, the traffic lights sit in this row. */
+	:global(.shell.mac.desktop) .head.inset {
+		padding-left: 84px;
+	}
+	.head.inset {
+		padding-left: 10px;
+	}
+	.icon-btn circle {
+		fill: currentColor;
+		stroke-width: 1.2;
 	}
 	/* The place line: where this session's work runs, as a 2 px marker across the top. */
 	.head::before {
@@ -213,13 +247,23 @@
 	.heading {
 		flex: 1;
 		min-width: 0;
-		display: flex;
-		flex-direction: column;
+		display: grid;
+		gap: 1px;
+	}
+	.heading .title {
+		justify-self: start;
+		max-width: 100%;
+		border-radius: 5px;
+		padding: 0 4px;
+		margin-left: -4px;
+	}
+	.heading .title:hover {
+		background: var(--hover);
 	}
 	.title,
 	.title-input {
 		font-family: var(--font-display);
-		font-size: 15px;
+		font-size: 14px;
 		font-weight: 600;
 		letter-spacing: -0.008em;
 		text-align: left;
@@ -236,9 +280,22 @@
 		padding: 0 4px;
 	}
 	.crumb {
-		font-size: 12px;
-		color: var(--text-faint);
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		min-width: 0;
+		font-size: 11.5px;
+		color: var(--text-muted);
 		white-space: nowrap;
+	}
+	.crumb .place-dot {
+		width: 7px;
+		height: 7px;
+	}
+	.crumb .sep {
+		color: var(--text-faint);
+	}
+	.crumb .folder {
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}

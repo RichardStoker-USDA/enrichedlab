@@ -3,6 +3,7 @@
 	import { placeOf } from "../../lib/places.ts";
 	import { lab } from "../../lib/store.svelte.ts";
 	import Pane from "./Pane.svelte";
+	import { contextMenu, separator, type MenuAction } from "../../lib/menu.svelte.ts";
 
 	let { group }: { group: Group } = $props();
 
@@ -16,6 +17,18 @@
 		const id = group.active;
 		strip?.querySelector<HTMLElement>(`#tab-${CSS.escape(id ?? "")}`)?.closest(".tab")?.scrollIntoView({ block: "nearest", inline: "nearest" });
 	});
+
+	/** A tab's right-click menu: close it or its neighbours, or split it off to a side. */
+	function tabActions(tabId: string): MenuAction[] {
+		const others = group.tabs.filter((t) => t.id !== tabId);
+		return [
+			{ label: "Close", run: () => lab.closePane(tabId) },
+			{ label: "Close Others", disabled: !others.length, run: () => others.forEach((t) => lab.closePane(t.id)) },
+			separator,
+			{ label: "Split Right", disabled: group.tabs.length < 2, run: () => lab.movePane(tabId, group.id, "right") },
+			{ label: "Split Down", disabled: group.tabs.length < 2, run: () => lab.movePane(tabId, group.id, "bottom") },
+		];
+	}
 
 	function edgeAt(e: DragEvent): Edge {
 		const r = body!.getBoundingClientRect();
@@ -83,7 +96,7 @@
 			{@const place = placeFor(tab.ref, tab.kind)}
 			{@const active = tab.id === group.active}
 			{@const kind = tab.kind === "screen" ? "browser" : tab.kind}
-			<div class="tab" class:active role="presentation" draggable="true" ondragstart={(e) => e.dataTransfer?.setData(TYPE, tab.id)} onauxclick={(e) => e.button === 1 && lab.closePane(tab.id)}>
+			<div class="tab" class:active role="presentation" draggable="true" use:contextMenu={() => tabActions(tab.id)} ondragstart={(e) => e.dataTransfer?.setData(TYPE, tab.id)} onauxclick={(e) => e.button === 1 && lab.closePane(tab.id)}>
 				<button id={`tab-${tab.id}`} class="label" role="tab" aria-selected={active} aria-controls={`panel-${tab.id}`} tabindex={active ? 0 : -1}
 					title="Arrows switch, Delete closes, Alt+Shift+arrow moves the pane"
 					onclick={() => lab.focusPane(tab.id)} onkeydown={(e) => keys(e, index)}>

@@ -25,15 +25,18 @@
 
 	/* Roles */
 	--canvas: light-dark(#ffffff, #000000);
-	--surface: light-dark(#f5f7fa, var(--black-90));
-	--surface-2: light-dark(#eef1f5, #222222);
-	--raised: light-dark(#ffffff, #1f1f1f);
-	--rail: light-dark(rgb(245 247 250 / 0.84), rgb(20 20 20 / 0.8));
-	--rule: light-dark(#e1e6ed, var(--black-80));
-	--rule-strong: light-dark(var(--aggie-blue-10), var(--black-70));
+	--surface: light-dark(#f1f4f8, var(--black-90));
+	--surface-2: light-dark(#e8edf3, #222222);
+	--raised: light-dark(#ffffff, #1c1c1c);
+	--rail: light-dark(rgb(236 241 247 / 0.9), rgb(22 22 22 / 0.82));
+	/* Hairlines between regions, and the stronger edge that marks a control (3:1 against the canvas). */
+	--rule: light-dark(#d6dde6, #2b2b2b);
+	--rule-strong: light-dark(var(--aggie-blue-20), var(--black-70));
+	--edge: light-dark(#8794a6, #6b6b6b);
+	--fill: light-dark(rgb(2 40 81 / 0.05), rgb(255 255 255 / 0.07));
 	--text: light-dark(#0b1a2e, #f2f2f2);
-	--text-muted: light-dark(#4f6278, #a8a8a8);
-	--text-faint: light-dark(#7d8fa5, #767676);
+	--text-muted: light-dark(#3f5167, #b0b0b0);
+	--text-faint: light-dark(#5b6c82, #8c8c8c);
 	--prompt: light-dark(var(--aggie-blue), #ffffff);
 	--accent: light-dark(var(--aggie-blue), var(--aggie-gold));
 	--accent-text: light-dark(var(--aggie-blue-80), var(--aggie-gold-70));
@@ -52,10 +55,14 @@
 	--added-bg: light-dark(rgb(30 107 67 / 0.07), rgb(143 211 166 / 0.08));
 	--removed-bg: light-dark(rgb(179 38 30 / 0.06), rgb(255 156 147 / 0.07));
 	--code-bg: light-dark(rgb(2 40 81 / 0.04), rgb(255 255 255 / 0.05));
-	--hover: light-dark(rgb(2 40 81 / 0.055), rgb(255 255 255 / 0.07));
-	--selected: light-dark(rgb(2 40 81 / 0.09), rgb(255 255 255 / 0.11));
-	--shadow-color: light-dark(rgb(2 40 81 / 0.1), rgb(0 0 0 / 0.6));
-	--shadow: 0 1px 2px var(--shadow-color), 0 12px 32px var(--shadow-color);
+	--hover: light-dark(rgb(2 40 81 / 0.065), rgb(255 255 255 / 0.08));
+	--selected: light-dark(rgb(2 40 81 / 0.12), rgb(255 255 255 / 0.13));
+	--shadow-color: light-dark(rgb(2 40 81 / 0.14), rgb(0 0 0 / 0.6));
+	--shadow: 0 0 0 0.5px light-dark(rgb(2 40 81 / 0.12), rgb(255 255 255 / 0.1)), 0 2px 6px var(--shadow-color), 0 16px 40px var(--shadow-color);
+	/* The highlighted row of a menu, as macOS draws it: the accent filled, its text reversed. */
+	--menu-bg: light-dark(rgb(255 255 255 / 0.86), rgb(36 36 36 / 0.86));
+	--menu-hl: light-dark(var(--aggie-blue), var(--aggie-gold));
+	--menu-hl-text: light-dark(#ffffff, var(--aggie-blue));
 
 	/* Places: markers only, always beside the place's name */
 	--place-local: var(--text-faint);
@@ -68,7 +75,9 @@
 	--font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
 	--font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "Cascadia Mono", Consolas, monospace;
 	--measure: 72ch;
-	--rail-width: 260px;
+	--rail-width: 264px;
+	/* Every region's toolbar: the window's title bar, dragged to move it. */
+	--bar: 52px;
 	--radius: 10px;
 	--radius-small: 6px;
 	--ease-out: cubic-bezier(0.22, 1, 0.36, 1);
@@ -172,24 +181,29 @@ kbd {
 .btn {
 	display: inline-flex;
 	align-items: center;
+	justify-content: center;
 	gap: 6px;
 	height: 30px;
-	padding: 0 12px;
-	border-radius: var(--radius-small);
-	border: 1px solid var(--rule-strong);
+	padding: 0 13px;
+	border-radius: 7px;
+	border: 1px solid var(--edge);
 	background: var(--raised);
 	font-size: 13px;
 	font-weight: 500;
 	white-space: nowrap;
-	transition: background 120ms, border-color 120ms;
+	transition: background-color 120ms ease-out, border-color 120ms ease-out;
 }
 
 .btn:hover:not(:disabled) {
-	background: var(--hover);
+	background: color-mix(in srgb, var(--raised) 100%, var(--text) 6%);
+}
+
+.btn:active:not(:disabled) {
+	background: color-mix(in srgb, var(--raised) 100%, var(--text) 12%);
 }
 
 .btn:disabled {
-	opacity: 0.5;
+	opacity: 0.45;
 }
 
 .btn.primary {
@@ -208,19 +222,34 @@ kbd {
 	color: var(--text-muted);
 }
 
+.btn.quiet:hover:not(:disabled) {
+	background: var(--hover);
+	color: var(--text);
+}
+
 .icon-btn {
 	display: inline-grid;
 	place-items: center;
 	width: 30px;
 	height: 30px;
-	border-radius: var(--radius-small);
+	border-radius: 7px;
 	color: var(--text-muted);
-	transition: background 120ms, color 120ms;
+	transition: background-color 120ms ease-out, color 120ms ease-out;
 }
 
 .icon-btn:hover:not(:disabled) {
 	background: var(--hover);
 	color: var(--text);
+}
+
+.icon-btn:active:not(:disabled),
+.icon-btn.on {
+	background: var(--selected);
+	color: var(--text);
+}
+
+.icon-btn:disabled {
+	opacity: 0.4;
 }
 
 .icon-btn svg {
@@ -236,44 +265,67 @@ kbd {
 .field {
 	height: 32px;
 	padding: 0 10px;
-	border-radius: var(--radius-small);
-	border: 1px solid var(--rule-strong);
+	border-radius: 7px;
+	border: 1px solid var(--edge);
 	background: var(--canvas);
 	outline: none;
+	transition: border-color 120ms ease-out, box-shadow 120ms ease-out;
+}
+
+.field::placeholder,
+textarea::placeholder,
+input::placeholder {
+	color: var(--text-faint);
 }
 
 .field:focus {
-	border-color: var(--accent);
+	border-color: var(--focus-inner);
+	box-shadow: 0 0 0 3px var(--focus-outer);
 }
 
-/* A menu that floats: the only kind of thing with a shadow besides the command palette. */
+/* A menu that floats: translucent like the system's, the only thing with a shadow besides the palette and sheets. */
 .menu {
 	position: absolute;
 	z-index: 40;
 	min-width: 240px;
-	padding: 6px;
-	border-radius: var(--radius);
-	border: 1px solid var(--rule);
-	background: var(--raised);
+	padding: 5px;
+	border-radius: 11px;
+	background: var(--menu-bg);
+	backdrop-filter: blur(30px) saturate(1.6);
 	box-shadow: var(--shadow);
-	animation: menu-in 140ms var(--ease-out);
+	font-size: 13px;
+	animation: menu-in 120ms var(--ease-out);
 }
 
 .menu-item {
 	display: grid;
 	grid-template-columns: 14px 1fr auto;
 	align-items: center;
-	gap: 10px;
+	gap: 8px;
 	width: 100%;
-	min-height: 34px;
-	padding: 6px 10px;
-	border-radius: var(--radius-small);
+	min-height: 28px;
+	padding: 4px 9px 4px 7px;
+	border-radius: 6px;
 	text-align: left;
+	color: var(--text);
 }
 
 .menu-item:hover:not(:disabled),
-.menu-item.on {
-	background: var(--hover);
+.menu-item:focus-visible,
+.menu-item.active {
+	background: var(--menu-hl);
+	color: var(--menu-hl-text);
+	outline: none;
+	box-shadow: none;
+}
+
+.menu-item:hover:not(:disabled) small,
+.menu-item:focus-visible small,
+.menu-item.active small,
+.menu-item:hover:not(:disabled) .meta,
+.menu-item.active .meta {
+	color: inherit;
+	opacity: 0.85;
 }
 
 .menu-item:disabled {
@@ -282,21 +334,48 @@ kbd {
 
 .menu-item small {
 	display: block;
-	color: var(--text-faint);
-	font-size: 12px;
+	color: var(--text-muted);
+	font-size: 11.5px;
+	line-height: 1.35;
 }
 
 .menu-label {
-	padding: 8px 10px 4px;
+	margin: 0;
+	padding: 7px 9px 3px;
 	font-size: 11.5px;
-	color: var(--text-faint);
+	font-weight: 600;
+	color: var(--text-muted);
+}
+
+.menu-sep {
+	height: 1px;
+	margin: 5px 9px;
+	background: var(--rule);
+	border: 0;
 }
 
 @keyframes menu-in {
 	from {
 		opacity: 0;
-		transform: translateY(-4px) scale(0.98);
+		transform: scale(0.98);
 	}
+}
+
+/* A toolbar: each region's top row is the window's title bar. Dragging empty space moves the window; controls
+   inside opt out. */
+.toolbar {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	height: var(--bar);
+	flex: none;
+	padding: 0 12px;
+	-webkit-app-region: drag;
+	user-select: none;
+}
+
+.toolbar :is(button, input, select, textarea, a, [role="button"], [role="tab"], .no-drag) {
+	-webkit-app-region: no-drag;
 }
 
 /* A place's marker: the colored dot always sits next to the place's name. */
@@ -491,4 +570,107 @@ kbd {
 html.material,
 html.material body {
 	background: transparent;
+}
+
+/* ── Sheets: modal dialogs (settings, model services, add a lab, confirmations) ─────────────────────────────────── */
+
+dialog.sheet {
+	width: min(var(--sheet-width, 520px), calc(100vw - 32px));
+	max-height: calc(100dvh - 48px);
+	padding: 0 22px 20px;
+	border: 0;
+	border-radius: 14px;
+	background: var(--raised);
+	color: var(--text);
+	box-shadow: var(--shadow);
+	overscroll-behavior: contain;
+}
+
+dialog.sheet::backdrop {
+	background: light-dark(rgb(2 40 81 / 0.22), rgb(0 0 0 / 0.55));
+}
+
+dialog.sheet[open] {
+	animation: sheet-in 180ms var(--ease-out);
+}
+
+@keyframes sheet-in {
+	from {
+		opacity: 0;
+		transform: translateY(8px) scale(0.99);
+	}
+}
+
+.sheet-head {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin: 0 -22px 4px;
+	padding: 16px 14px 10px 22px;
+	background: var(--raised);
+}
+
+.sheet-head h2 {
+	margin: 0;
+	font-family: var(--font-display);
+	font-size: 16px;
+	font-weight: 650;
+	letter-spacing: -0.01em;
+}
+
+.sheet-foot {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 20px;
+}
+
+.sheet-section {
+	margin: 0;
+	padding: 14px 0;
+	border-top: 1px solid var(--rule);
+}
+
+.sheet-section h3 {
+	margin: 0 0 8px;
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--text-muted);
+}
+
+/* A segmented control: one choice of a few, like the system's. */
+.segmented {
+	display: inline-grid;
+	grid-auto-flow: column;
+	grid-auto-columns: 1fr;
+	gap: 2px;
+	padding: 2px;
+	border-radius: 8px;
+	background: var(--fill);
+	box-shadow: inset 0 0 0 1px var(--rule);
+}
+
+.segmented button {
+	min-width: 72px;
+	height: 26px;
+	padding: 0 12px;
+	border-radius: 6px;
+	font-size: 12.5px;
+	color: var(--text-muted);
+	transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+
+.segmented button:hover:not(.on) {
+	color: var(--text);
+}
+
+.segmented button.on {
+	background: var(--raised);
+	color: var(--text);
+	font-weight: 500;
+	box-shadow: 0 0 0 0.5px var(--rule-strong), 0 1px 3px var(--shadow-color);
 }

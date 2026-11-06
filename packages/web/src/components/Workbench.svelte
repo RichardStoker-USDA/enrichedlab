@@ -32,7 +32,7 @@
 </script>
 
 <aside class="workbench" aria-label="Workbench">
-	<div class="bar">
+	<div class="bar toolbar">
 		<span class="label">Workbench</span>
 		<div class="actions">
 			<button class="btn quiet" onclick={() => lab.openPane("files")} title="The session's folder">Files</button>
@@ -158,17 +158,10 @@
 		}
 	}
 	.bar {
-		display: flex;
-		align-items: center;
 		justify-content: space-between;
-		min-height: 52px;
-		padding: 8px 8px 8px 16px;
+		padding: 0 8px 0 16px;
 		border-bottom: 1px solid var(--rule);
 		background: var(--canvas);
-		-webkit-app-region: drag;
-	}
-	.bar button {
-		-webkit-app-region: no-drag;
 	}
 	.label {
 		font-family: var(--font-display);

@@ -2,6 +2,7 @@
 	import type { Part } from "@enrichedlab/protocol";
 	import { lab, USAGE_URL } from "../lib/store.svelte.ts";
 	import { tokens } from "../lib/format.ts";
+	import PlaceSwitch from "./PlaceSwitch.svelte";
 
 	let text = $state("");
 	let images = $state<{ name: string; part: Extract<Part, { type: "image" }>; url: string }[]>([]);
@@ -23,8 +24,10 @@
 
 	const groups = $derived.by(() => {
 		const plan = (m: { provider: string }) => m.provider === "chatgpt";
+		const labTitle = (provider: string) => lab.sites.find((s) => s.name === provider)?.title ?? provider;
+		const labs = [...new Set(lab.models.filter((m) => m.source === "site").map((m) => m.provider))];
 		return [
-			{ label: "From your labs", models: lab.models.filter((m) => m.source === "site") },
+			...labs.map((provider) => ({ label: `From ${labTitle(provider)}`, models: lab.models.filter((m) => m.source === "site" && m.provider === provider) })),
 			{ label: "Your ChatGPT plan", models: lab.models.filter((m) => m.source === "config" && plan(m)) },
 			{ label: "Your keys", models: lab.models.filter((m) => m.source === "config" && !plan(m)) },
 			{ label: "On this computer", models: lab.models.filter((m) => m.source === "local") },
@@ -34,6 +37,14 @@
 	const onPlan = $derived(lab.model?.provider === "chatgpt");
 	/** A model's name as its service gives it ("GPT-6.1 Sol · ChatGPT" shows as "GPT-6.1 Sol"). */
 	const named = (m: { id: string; label: string }) => m.label.split(" · ")[0] || m.id;
+	/** Where a model comes from, in a word: the lab's name, "ChatGPT", the key's service, or "this computer". */
+	function origin(m: { provider: string; source: string; label: string }): string {
+		if (m.source === "site") return lab.sites.find((s) => s.name === m.provider)?.title ?? m.provider;
+		if (m.source === "local") return "this computer";
+		return m.label.split(" · ")[1] ?? m.provider;
+	}
+	/** The session names a model that isn't offered now (its server stopped, or access changed). */
+	const missing = $derived(!lab.model && Boolean(lab.status?.model));
 
 	function resize() {
 		if (!field) return;
@@ -141,17 +152,24 @@
 			placeholder={lab.busy ? "Add to the current turn" : "Ask for anything"}
 		></textarea>
 		<div class="row">
+			<PlaceSwitch />
+			<span class="divider" aria-hidden="true"></span>
 			<div class="model" bind:this={menu}>
-				<button type="button" class="chip" onclick={() => (menuOpen = !menuOpen)} aria-expanded={menuOpen} aria-haspopup="menu" title={gauge ? `${leftPct}% of context left before older turns are summarized (${tokens(gauge.used)} of ${tokens(gauge.threshold)})` : ""}>
+				<button type="button" class="chip" class:missing onclick={() => (menuOpen = !menuOpen)} aria-expanded={menuOpen} aria-haspopup="menu" title={missing ? `${lab.status?.model} isn't offered now. Choose another model.` : gauge ? `${leftPct}% of context left before older turns are summarized (${tokens(gauge.used)} of ${tokens(gauge.threshold)})` : "Choose the model"}>
 					<svg class="ring" class:sweeping viewBox="0 0 22 22" aria-hidden="true">
 						<circle cx="11" cy="11" r="9" class="track" />
 						<circle cx="11" cy="11" r="9" class="arc" class:low={leftPct < 15} stroke-dasharray={CIRC} stroke-dashoffset={CIRC * (1 - left)} />
 					</svg>
-					<span class="model-name">{lab.model ? named(lab.model) : lab.status?.model || "Choose a model"}</span>
-					{#if lab.status?.effort}<span class="effort">{lab.status.effort}</span>{/if}
+					<span class="model-name">{lab.model ? named(lab.model) : missing ? "Model unavailable: choose one" : "Choose a model"}</span>
+					{#if lab.model}<span class="origin">{origin(lab.model)}</span>{/if}
+					{#if lab.status?.effort && lab.model}<span class="effort">{lab.status.effort}</span>{/if}
+					<svg class="caret" viewBox="0 0 12 12" aria-hidden="true"><path d="m3 7.5 3-3 3 3" /></svg>
 				</button>
 				{#if menuOpen}
 					<div class="menu" role="menu">
+						{#if missing}
+							<p class="menu-missing">{lab.status?.model} isn't offered now: its server may have stopped, or your access changed.</p>
+						{/if}
 						{#each groups as group (group.label)}
 							<p class="menu-label">{group.label}</p>
 							{#each group.models as m (m.ref)}
@@ -167,11 +185,11 @@
 								>
 									<span class="check" aria-hidden="true">{m.ref === lab.status?.model ? "✓" : ""}</span>
 									<span class="menu-name">{named(m)}</span>
-									<span class="menu-meta">{m.provider === "chatgpt" ? "plan" : m.provider} · {tokens(m.context)}{m.vision ? " · vision" : ""}</span>
+									<span class="menu-meta meta">{tokens(m.context)} context{m.vision ? " · sees images" : ""}{m.efforts.length ? " · reasons" : ""}</span>
 								</button>
 							{/each}
 						{:else}
-							<p class="menu-empty">No models yet. Sign in to your lab, start Ollama or LM Studio, or add a service.</p>
+							<p class="menu-empty">No models yet. Sign in to a lab, use your ChatGPT plan or a key, or run an open model on this computer.</p>
 						{/each}
 						{#if lab.model?.efforts.length}
 							<p class="menu-label">Reasoning</p>
@@ -220,11 +238,11 @@
 	.composer {
 		max-width: calc(var(--measure) - 16px);
 		margin: 0 auto;
-		border: 1px solid var(--rule-strong);
-		border-radius: 14px;
+		border: 1px solid var(--edge);
+		border-radius: 16px;
 		background: var(--raised);
-		box-shadow: var(--shadow);
-		padding: 10px 10px 8px 14px;
+		box-shadow: 0 1px 2px var(--shadow-color), 0 8px 24px var(--shadow-color);
+		padding: 12px 10px 8px 14px;
 		transition: border-color 150ms;
 	}
 	.composer:focus-within {
@@ -264,7 +282,8 @@
 		display: flex;
 		align-items: center;
 		gap: 7px;
-		padding: 4px 9px 4px 5px;
+		height: 30px;
+		padding: 0 9px 0 5px;
 		border-radius: 999px;
 		font-size: 12.5px;
 		color: var(--text-muted);
@@ -306,8 +325,29 @@
 		white-space: nowrap;
 		font-weight: 500;
 	}
-	.effort {
+	.effort,
+	.origin {
 		color: var(--text-faint);
+		white-space: nowrap;
+	}
+	.origin::before {
+		content: "· ";
+	}
+	.chip.missing {
+		color: var(--bad);
+	}
+	.caret {
+		width: 11px;
+		height: 11px;
+		flex: none;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.5;
+	}
+	.divider {
+		width: 1px;
+		height: 16px;
+		background: var(--rule-strong);
 	}
 	.rate {
 		font-size: 12px;
@@ -357,42 +397,30 @@
 		stroke: none;
 	}
 	.menu {
-		position: absolute;
 		bottom: calc(100% + 10px);
 		left: -6px;
 		width: min(420px, 86vw);
 		max-height: 60vh;
 		overflow-y: auto;
-		background: var(--raised);
-		border: 1px solid var(--rule-strong);
-		border-radius: 12px;
-		box-shadow: var(--shadow);
-		padding: 6px;
 		z-index: 20;
-		animation: pop 140ms var(--ease-out);
 		transform-origin: bottom left;
 	}
-	.menu-label {
-		margin: 8px 10px 4px;
-		font-size: 11.5px;
-		font-weight: 600;
-		color: var(--text-faint);
-	}
 	.menu-item {
-		width: 100%;
-		display: grid;
-		grid-template-columns: 16px minmax(0, 1fr);
-		gap: 2px 8px;
-		padding: 7px 10px;
-		border-radius: 8px;
-		text-align: left;
-	}
-	.menu-item:hover {
-		background: var(--hover);
+		grid-template-columns: 14px minmax(0, 1fr);
+		gap: 0 8px;
+		min-height: 40px;
 	}
 	.check {
-		color: var(--live);
 		grid-row: span 2;
+		font-size: 12px;
+	}
+	.menu-missing {
+		margin: 4px 9px 6px;
+		padding-bottom: 8px;
+		border-bottom: 1px solid var(--rule);
+		font-size: 12px;
+		line-height: 1.45;
+		color: var(--bad);
 	}
 	.menu-name {
 		font-size: 13.5px;
@@ -401,8 +429,8 @@
 		white-space: nowrap;
 	}
 	.menu-meta {
-		font-size: 12px;
-		color: var(--text-faint);
+		font-size: 11.5px;
+		color: var(--text-muted);
 	}
 	.menu-empty {
 		padding: 10px;
@@ -506,7 +534,10 @@
 			display: none;
 		}
 		.chip {
-			max-width: 220px;
+			max-width: 200px;
+		}
+		.origin {
+			display: none;
 		}
 	}
 </style>

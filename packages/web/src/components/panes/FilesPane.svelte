@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { lab } from "../../lib/store.svelte.ts";
+	import { contextMenu, separator, type MenuAction } from "../../lib/menu.svelte.ts";
+	import { mac } from "../../lib/places.ts";
 	import { rpc } from "../../lib/rpc.ts";
 	import { highlight, languageOf } from "../../lib/highlight.ts";
 
@@ -31,6 +33,18 @@
 		preview = undefined;
 		void load(".");
 	});
+
+	/** A file's or folder's right-click menu. Paths outside this computer can be copied but not shown in Finder. */
+	function fileActions(path: string, dir: boolean): MenuAction[] {
+		const full = `${root.replace(/[\\/]$/, "")}/${path}`;
+		return [
+			dir ? { label: openDirs[path] ? "Collapse" : "Expand", run: () => toggle(path) } : { label: "Open", run: () => openFile(path) },
+			separator,
+			{ label: "Copy Path", run: () => lab.copy(full, "the path") },
+			{ label: "Copy Relative Path", run: () => lab.copy(path, "the relative path") },
+			...(lab.place.id === "local" && window.labDesktop ? [separator, { label: mac ? "Show in Finder" : "Show in Folder", run: () => lab.reveal(full) }] : []),
+		];
+	}
 
 	function join(dir: string, name: string) {
 		return dir === "." ? name : `${dir}/${name}`;
@@ -64,12 +78,12 @@
 	{#each listings[dir] ?? [] as entry (entry.name)}
 		{@const path = join(dir, entry.name)}
 		{#if entry.type === "dir"}
-			<button class="row" style:padding-left={`${12 + depth * 14}px`} onclick={() => toggle(path)} aria-expanded={Boolean(openDirs[path])}>
+			<button class="row" style:padding-left={`${12 + depth * 14}px`} onclick={() => toggle(path)} aria-expanded={Boolean(openDirs[path])} use:contextMenu={() => fileActions(path, true)}>
 				<span class="caret" class:open={openDirs[path]}></span><span class="name dir">{entry.name}</span>
 			</button>
 			{#if openDirs[path]}{@render tree(path, depth + 1)}{/if}
 		{:else}
-			<button class="row" class:viewable={VIEWABLE.test(entry.name)} class:current={preview?.path === path} style:padding-left={`${26 + depth * 14}px`} onclick={() => openFile(path)}>
+			<button class="row" class:viewable={VIEWABLE.test(entry.name)} class:current={preview?.path === path} style:padding-left={`${26 + depth * 14}px`} onclick={() => openFile(path)} use:contextMenu={() => fileActions(path, false)}>
 				<span class="name">{entry.name}</span><span class="size">{size(entry.size)}</span>
 			</button>
 		{/if}

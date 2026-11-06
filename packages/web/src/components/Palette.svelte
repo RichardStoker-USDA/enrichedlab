@@ -38,6 +38,8 @@
 		list.push(
 			{ id: "services", label: "Model services", hint: "ChatGPT plan, keys, models on this computer", group: "Actions", run: () => (lab.services = true) },
 			{ id: "join", label: "Add a lab", group: "Actions", run: () => (lab.join = {}) },
+			{ id: "settings", label: "Settings", shortcut: mac ? "⌘," : "Ctrl ,", group: "Actions", run: () => (lab.settings = true) },
+			{ id: "sidebar", label: lab.sidebar ? "Hide the sidebar" : "Show the sidebar", shortcut: mac ? "⌃⌘S" : "Ctrl ⇧ S", group: "Actions", run: () => (lab.sidebar = !lab.sidebar) },
 		);
 		for (const theme of ["auto", "light", "dark"] as const) {
 			if (lab.ui.theme !== theme) list.push({ id: `theme-${theme}`, label: theme === "auto" ? "Match the system's light or dark mode" : `Use ${theme} mode`, group: "Appearance", run: () => void lab.setTheme(theme) });

@@ -1,13 +1,19 @@
 <script lang="ts">
+	// The sidebar: where this person can work (places), and their sessions by project. Its top row is the window's
+	// title bar beside the traffic lights. Every row acts on click, and offers its other actions on right-click and
+	// on its "More" button.
 	import type { SessionSummary } from "@enrichedlab/protocol";
 	import { lab } from "../lib/store.svelte.ts";
 	import { ago, folderName } from "../lib/format.ts";
-	import { mac, placeOf } from "../lib/places.ts";
+	import { mac, placeOf, type Place } from "../lib/places.ts";
+	import { contextMenu, separator, showMenu, type MenuAction } from "../lib/menu.svelte.ts";
 
 	let { open = $bindable(false) }: { open?: boolean } = $props();
 
 	let filter = $state("");
 	let expanded = $state<Record<string, boolean>>({});
+	let draft = $state("");
+	const desktop = typeof window !== "undefined" && Boolean(window.labDesktop);
 
 	/** A session's project: its repository for worktree sessions, else its folder. */
 	function projectOf(cwd: string): string {
@@ -35,9 +41,92 @@
 		open = false;
 	}
 
-	function fresh() {
+	function fresh(place?: string) {
+		lab.newPlace = place;
 		lab.startNew();
 		open = false;
+	}
+
+	/** One line under a place's name: who and what, or what to do next. */
+	function status(place: Place): string {
+		if (place.id === "local") return "Your files, contained";
+		const site = place.site!;
+		if (!site.signedIn) return site.error ? "Can't connect" : "Not signed in";
+		const parts = [site.who, `${site.models} ${site.models === 1 ? "model" : "models"}`, site.sandbox ? "sandbox" : "no sandbox"];
+		return parts.filter(Boolean).join(" · ");
+	}
+
+	function placeActions(place: Place): MenuAction[] {
+		const name = place.id === "local" ? place.title : place.title;
+		if (place.id === "local") {
+			return [
+				{ label: `New Session on ${name}`, run: () => fresh("local") },
+				separator,
+				{ label: "Models on This Computer…", run: () => (lab.services = true) },
+			];
+		}
+		const site = place.site!;
+		if (!site.signedIn) {
+			return [
+				{ label: `Sign In to ${name}…`, run: () => lab.login(place.id) },
+				{ label: "Try Connecting Again", run: () => lab.reconnect(place.id) },
+			];
+		}
+		return [
+			{ label: `New Session in ${name}`, disabled: !place.ready && !site.isolated, run: () => fresh(place.id) },
+			separator,
+			{ label: "Reconnect", run: () => lab.reconnect(place.id) },
+			...(site.docs ? [{ label: `${name} Help`, run: () => window.open(site.docs, "_blank", "noopener") }] : []),
+			separator,
+			{ label: `Sign Out of ${name}`, run: () => lab.logout(place.id) },
+		];
+	}
+
+	function sessionActions(s: SessionSummary): MenuAction[] {
+		const here = s.id === lab.current;
+		const project = projectOf(s.cwd);
+		return [
+			{ label: "Open", disabled: here, run: () => pick(s.id) },
+			{ label: "Rename", run: () => startRename(s) },
+			...(here && !lab.pinned
+				? [
+						{
+							label: "Run On",
+							submenu: lab.places.map((p) => ({ label: p.id === "local" ? p.title : `${p.title} sandbox`, checked: p.id === lab.place.id, disabled: !p.ready || Boolean(p.site?.isolated) || lab.busy, run: () => lab.movePlace(p.id) })),
+						},
+					]
+				: []),
+			separator,
+			{ label: `New Session in ${folderName(project)}`, run: () => lab.startIn(project) },
+			...(desktop ? [{ label: mac ? "Show in Finder" : "Show in Folder", run: () => lab.reveal(s.cwd) }] : []),
+			{ label: "Copy Folder Path", run: () => lab.copy(s.cwd, "the folder path") },
+			separator,
+			{ label: "Delete…", disabled: s.running, run: () => lab.deleteSession(s.id) },
+		];
+	}
+
+	function projectActions(path: string): MenuAction[] {
+		return [
+			{ label: "New Session Here", run: () => lab.startIn(path) },
+			...(desktop ? [{ label: mac ? "Show in Finder" : "Show in Folder", run: () => lab.reveal(path) }] : []),
+			{ label: "Copy Folder Path", run: () => lab.copy(path, "the folder path") },
+		];
+	}
+
+	function startRename(s: SessionSummary) {
+		draft = s.title;
+		lab.renaming = s.id;
+	}
+
+	async function finishRename(s: SessionSummary, keep: boolean) {
+		if (lab.renaming !== s.id) return;
+		lab.renaming = undefined;
+		if (keep && draft.trim() && draft.trim() !== s.title) await lab.rename(draft, s.id);
+	}
+
+	function focusInput(node: HTMLInputElement) {
+		node.focus();
+		node.select();
 	}
 
 	let now = $state(Date.now());
@@ -48,61 +137,104 @@
 </script>
 
 {#if open}
-	<button class="scrim" aria-label="Close" onclick={() => (open = false)}></button>
+	<button class="scrim" aria-label="Close the sidebar" onclick={() => (open = false)}></button>
 {/if}
-<nav class="rail" class:open aria-label="Places and sessions">
-	<div class="top">
-		<span class="wordmark">EnrichedLab</span>
-		<button class="icon-btn" onclick={fresh} title="New session" aria-label="New session">
-			<svg viewBox="0 0 16 16"><path d="M8 3.5v9M3.5 8h9" /></svg>
+<nav class="rail" class:open class:hidden={!lab.sidebar} aria-label="Places and sessions">
+	<div class="toolbar">
+		<span class="spacer"></span>
+		<button class="icon-btn wide-only" onclick={() => (lab.sidebar = false)} title={`Hide the sidebar (${mac ? "⌃⌘S" : "Ctrl+Shift+S"})`} aria-label="Hide the sidebar">
+			<svg viewBox="0 0 16 16"><rect x="2" y="2.5" width="12" height="11" rx="2" /><path d="M6 2.5v11" /></svg>
+		</button>
+		<button class="icon-btn" onclick={() => fresh()} title={`New session (${mac ? "⌘N" : "Ctrl+N"})`} aria-label="New session">
+			<svg viewBox="0 0 16 16"><path d="M8.5 2.5H4a1.5 1.5 0 0 0-1.5 1.5v8A1.5 1.5 0 0 0 4 13.5h8a1.5 1.5 0 0 0 1.5-1.5V7.5" /><path d="m7 9 .4-1.9L12.6 2a1.1 1.1 0 0 1 1.5 1.5L9 8.6Z" /></svg>
 		</button>
 	</div>
+
 	<button class="search" onclick={() => (lab.palette = true)}>
 		<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25" /><path d="m10.2 10.2 3 3" /></svg>
-		<span>Search and commands</span>
+		<span>Search</span>
 		<kbd>{mac ? "⌘K" : "Ctrl K"}</kbd>
 	</button>
 
 	<div class="scroll">
 		<section aria-labelledby="places-label">
-			<h2 id="places-label">Places</h2>
+			<div class="section-head">
+				<h2 id="places-label">Places</h2>
+				<button class="icon-btn small" onclick={() => (lab.join = {})} title="Add a lab" aria-label="Add a lab">
+					<svg viewBox="0 0 16 16"><path d="M8 3.5v9M3.5 8h9" /></svg>
+				</button>
+			</div>
 			{#each lab.places as place (place.id)}
-				<div class="place" class:here={lab.current && lab.place.id === place.id}>
-					<span class="place-dot" class:local={place.id === "local"} style:--dot={`var(${place.color})`}></span>
-					<span class="name">{place.title}</span>
-					{#if place.site && !place.site.signedIn}
-						<button class="sign-in" onclick={() => lab.login(place.id)}>Sign in</button>
-					{:else}
-						<span class="detail" title={place.site?.warning ?? place.site?.error ?? ""}>{place.detail}</span>
-					{/if}
+				{@const here = Boolean(lab.current) && lab.place.id === place.id}
+				{@const needsSignIn = Boolean(place.site && !place.site.signedIn)}
+				<div class="place" class:here use:contextMenu={() => placeActions(place)}>
+					<button class="place-main" onclick={(e) => (needsSignIn ? lab.login(place.id) : showMenu(placeActions(place), e.currentTarget as HTMLElement))} aria-haspopup={needsSignIn ? undefined : "menu"}>
+						<span class="place-dot" class:local={place.id === "local"} style:--dot={`var(${place.color})`}></span>
+						<span class="place-text">
+							<span class="name">{place.title}</span>
+							<span class="sub" class:attention={needsSignIn || place.site?.error} title={place.site?.warning ?? place.site?.error ?? ""}>{status(place)}</span>
+						</span>
+						{#if needsSignIn}
+							<span class="sign-in">Sign In</span>
+						{:else if here}
+							<span class="here-mark">This session</span>
+						{/if}
+					</button>
 				</div>
 			{/each}
-			<button class="add-lab" onclick={() => (lab.join = {})}>Add a lab</button>
 		</section>
 
-		<section aria-labelledby="projects-label">
-			<h2 id="projects-label">Projects</h2>
-			<input class="filter" placeholder="Filter" bind:value={filter} aria-label="Filter sessions" />
+		<section aria-labelledby="sessions-label">
+			<div class="section-head">
+				<h2 id="sessions-label">Sessions</h2>
+			</div>
+			{#if lab.sessions.length > 6}
+				<input class="filter" placeholder="Filter" bind:value={filter} aria-label="Filter sessions" spellcheck="false" />
+			{/if}
 			{#each projects as project (project.path)}
 				{@const showAll = expanded[project.path] || filter}
-				{@const shown = showAll ? project.sessions : project.sessions.slice(0, project.path === currentProject ? 8 : 3)}
+				{@const shown = showAll ? project.sessions : project.sessions.slice(0, project.path === currentProject ? 8 : 4)}
 				<div class="project">
-					<div class="project-name" title={project.path}>{project.name}</div>
+					<div class="project-name" title={project.path} use:contextMenu={() => projectActions(project.path)}>
+						<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5A1.5 1.5 0 0 1 4 3h2.6l1.4 1.5h4A1.5 1.5 0 0 1 13.5 6v5.5A1.5 1.5 0 0 1 12 13H4a1.5 1.5 0 0 1-1.5-1.5Z" /></svg>
+						<span>{project.name}</span>
+					</div>
 					{#each shown as s (s.id)}
 						{@const place = s.place && s.place !== "local" ? placeOf(lab.places, s.place) : undefined}
-						<button class="session" class:current={s.id === lab.current} aria-current={s.id === lab.current ? "page" : undefined} onclick={() => pick(s.id)}>
-							<span class="title">{s.title}</span>
-							{#if s.running}
-								<span class="live" aria-label="running"></span>
-							{:else if place}
-								<span class="place-dot" style:--dot={`var(${place.color})`} title={`Works in the ${place.title} sandbox`}></span>
-							{:else}
-								<span class="when">{ago(s.updated, now)}</span>
-							{/if}
-						</button>
+						{#if lab.renaming === s.id}
+							<input
+								class="rename"
+								bind:value={draft}
+								use:focusInput
+								onblur={() => finishRename(s, true)}
+								onkeydown={(e) => {
+									if (e.key === "Enter") finishRename(s, true);
+									else if (e.key === "Escape") finishRename(s, false);
+								}}
+								aria-label="Session title"
+							/>
+						{:else}
+							<button
+								class="session"
+								class:current={s.id === lab.current}
+								aria-current={s.id === lab.current ? "page" : undefined}
+								onclick={() => pick(s.id)}
+								ondblclick={() => startRename(s)}
+								use:contextMenu={() => sessionActions(s)}
+							>
+								<span class="title">{s.title}</span>
+								{#if s.running}
+									<span class="live" aria-label="running"></span>
+								{:else if place}
+									<span class="place-dot" style:--dot={`var(${place.color})`} title={`Runs in the ${place.title} sandbox`}></span>
+								{:else}
+									<span class="when">{ago(s.updated, now)}</span>
+								{/if}
+							</button>
+						{/if}
 					{/each}
 					{#if !showAll && project.sessions.length > shown.length}
-						<button class="more" onclick={() => (expanded[project.path] = true)}>{project.sessions.length - shown.length} more</button>
+						<button class="more" onclick={() => (expanded[project.path] = true)}>Show {project.sessions.length - shown.length} more</button>
 					{/if}
 				</div>
 			{:else}
@@ -111,12 +243,15 @@
 		</section>
 	</div>
 
-	<div class="foot" role="radiogroup" aria-label="Appearance">
-		{#each ["auto", "light", "dark"] as const as option}
-			<button role="radio" aria-checked={lab.ui.theme === option} class:on={lab.ui.theme === option} onclick={() => lab.setTheme(option)}>
-				{option === "auto" ? "Auto" : option === "light" ? "Light" : "Dark"}
-			</button>
-		{/each}
+	<div class="foot">
+		<button class="foot-btn" onclick={() => (lab.settings = true)}>
+			<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2" /><path d="M8 1.8v1.6M8 12.6v1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M1.8 8h1.6M12.6 8h1.6M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1" /></svg>
+			Settings
+		</button>
+		<button class="foot-btn" onclick={() => (lab.services = true)}>
+			<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="2.5" /><path d="M6 6.5h4M6 9.5h2.5" /></svg>
+			Models
+		</button>
 	</div>
 </nav>
 
@@ -125,44 +260,41 @@
 		display: flex;
 		flex-direction: column;
 		min-height: 0;
+		min-width: 0;
 		background: var(--rail);
-		backdrop-filter: blur(24px) saturate(1.2);
-		font-size: 13.5px;
+		backdrop-filter: blur(24px) saturate(1.3);
+		font-size: 13px;
+		user-select: none;
 	}
-	:global(.shell.mac.desktop) .top {
-		padding-top: 38px;
+	.rail.hidden {
+		display: none;
 	}
-	.top {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: 14px 12px 8px 18px;
-		-webkit-app-region: drag;
+	.toolbar {
+		padding: 0 10px;
+		gap: 2px;
 	}
-	.top button {
-		-webkit-app-region: no-drag;
+	/* The traffic lights sit at the left of this row in the desktop app on macOS. */
+	:global(.shell.mac.desktop) .toolbar {
+		padding-left: 84px;
 	}
-	.wordmark {
-		font-family: var(--font-display);
-		font-weight: 650;
-		font-size: 15px;
-		letter-spacing: -0.012em;
+	.spacer {
+		flex: 1;
 	}
 	.search {
 		display: flex;
 		align-items: center;
 		gap: 8px;
-		margin: 2px 12px 10px;
-		height: 32px;
+		margin: 0 10px 6px;
+		height: 30px;
 		padding: 0 10px;
-		border-radius: var(--radius-small);
-		border: 1px solid var(--rule);
-		background: var(--canvas);
-		color: var(--text-faint);
+		border-radius: 8px;
+		background: var(--fill);
+		color: var(--text-muted);
 		text-align: left;
+		transition: background-color 120ms ease-out;
 	}
 	.search:hover {
-		border-color: var(--rule-strong);
+		background: var(--hover);
 	}
 	.search span {
 		flex: 1;
@@ -175,42 +307,89 @@
 		stroke-width: 1.6;
 		stroke-linecap: round;
 	}
+	.search kbd {
+		color: var(--text-faint);
+	}
 	.scroll {
 		flex: 1;
 		min-height: 0;
 		overflow-y: auto;
 		padding: 0 8px 12px;
 	}
+	.section-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		height: 28px;
+		margin: 10px 2px 2px 10px;
+	}
 	h2 {
-		margin: 14px 10px 6px;
+		margin: 0;
 		font-size: 11.5px;
 		font-weight: 600;
-		color: var(--text-faint);
+		color: var(--text-muted);
 	}
-	.place {
+	.icon-btn.small {
+		width: 24px;
+		height: 24px;
+	}
+	.icon-btn.small svg {
+		width: 14px;
+		height: 14px;
+	}
+	.place-main {
 		display: grid;
-		grid-template-columns: 8px 1fr auto;
+		grid-template-columns: 8px minmax(0, 1fr) auto;
 		align-items: center;
 		gap: 10px;
-		height: var(--row);
-		padding: 0 10px;
-		border-radius: var(--radius-small);
+		width: 100%;
+		min-height: 44px;
+		padding: 5px 10px;
+		border-radius: 8px;
+		text-align: left;
+		transition: background-color 120ms ease-out;
 	}
-	.place.here {
+	.place-main:hover {
+		background: var(--hover);
+	}
+	.place.here .place-main {
 		background: var(--selected);
 	}
-	.place .name {
-		font-weight: 500;
+	.place-text {
+		display: grid;
+		min-width: 0;
 	}
-	.place .detail {
-		color: var(--text-faint);
-		font-size: 12px;
+	.name {
+		font-weight: 600;
+		font-size: 13px;
 		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.sub {
+		font-size: 11.5px;
+		color: var(--text-muted);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.sub.attention {
+		color: var(--bad);
 	}
 	.sign-in {
-		font-size: 12px;
-		color: var(--accent-text);
-		font-weight: 500;
+		height: 22px;
+		padding: 0 9px;
+		display: inline-flex;
+		align-items: center;
+		border-radius: 11px;
+		background: var(--primary-bg);
+		color: var(--primary-fg);
+		font-size: 11.5px;
+		font-weight: 600;
+	}
+	.here-mark {
+		font-size: 11px;
+		color: var(--text-muted);
 	}
 	.filter {
 		width: calc(100% - 20px);
@@ -218,47 +397,77 @@
 		height: 26px;
 		padding: 0 8px;
 		border: 0;
-		border-radius: var(--radius-small);
-		background: var(--hover);
+		border-radius: 6px;
+		background: var(--fill);
 		font-size: 12.5px;
 		outline: none;
 	}
 	.filter:focus {
-		box-shadow: 0 0 0 1.5px var(--accent);
+		box-shadow: 0 0 0 2px var(--focus-inner);
 	}
 	.project + .project {
-		margin-top: 6px;
+		margin-top: 8px;
 	}
 	.project-name {
-		padding: 6px 10px 2px;
+		display: flex;
+		align-items: center;
+		gap: 7px;
+		height: 26px;
+		padding: 0 10px;
 		font-weight: 600;
-		font-size: 12.5px;
+		font-size: 12px;
 		color: var(--text-muted);
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
+	.project-name svg {
+		width: 14px;
+		height: 14px;
+		flex: none;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.4;
+		stroke-linejoin: round;
+	}
+	.project-name span {
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
 	.session {
 		display: grid;
-		grid-template-columns: 1fr auto;
+		grid-template-columns: minmax(0, 1fr) auto;
 		align-items: center;
 		gap: 8px;
 		width: 100%;
 		height: 30px;
-		padding: 0 10px 0 18px;
-		border-radius: var(--radius-small);
+		padding: 0 10px 0 31px;
+		border-radius: 7px;
 		text-align: left;
+		transition: background-color 120ms ease-out;
 	}
 	.session:hover {
 		background: var(--hover);
 	}
 	.session.current {
 		background: var(--selected);
+		font-weight: 500;
 	}
 	.session .title {
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
+	}
+	.rename {
+		width: 100%;
+		height: 30px;
+		padding: 0 10px 0 30px;
+		border: 0;
+		border-radius: 7px;
+		background: var(--canvas);
+		box-shadow: inset 0 0 0 2px var(--focus-inner);
+		font-size: 13px;
+		outline: none;
 	}
 	.when {
 		font-size: 11.5px;
@@ -272,43 +481,60 @@
 		background: var(--live);
 	}
 	.more {
-		padding: 2px 18px 4px;
+		height: 26px;
+		padding: 0 10px 0 31px;
 		font-size: 12px;
-		color: var(--text-faint);
+		color: var(--text-muted);
 	}
 	.more:hover {
 		color: var(--text);
 	}
 	.empty {
 		margin: 4px 10px;
-		color: var(--text-faint);
+		color: var(--text-muted);
 		font-size: 12.5px;
 	}
 	.foot {
-		display: grid;
-		grid-template-columns: repeat(3, 1fr);
+		display: flex;
 		gap: 2px;
-		margin: 8px 12px 12px;
-		padding: 2px;
-		border-radius: var(--radius-small);
-		background: var(--hover);
+		padding: 8px;
+		border-top: 1px solid var(--rule);
 	}
-	.foot button {
-		height: 24px;
-		border-radius: 4px;
-		font-size: 12px;
+	.foot-btn {
+		flex: 1;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
+		height: 30px;
+		border-radius: 7px;
+		font-size: 12.5px;
 		color: var(--text-muted);
+		transition: background-color 120ms ease-out, color 120ms ease-out;
 	}
-	.foot button.on {
-		background: var(--raised);
+	.foot-btn:hover {
+		background: var(--hover);
 		color: var(--text);
-		box-shadow: 0 1px 2px var(--shadow-color);
+	}
+	.foot-btn svg {
+		width: 15px;
+		height: 15px;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.5;
+		stroke-linecap: round;
+		stroke-linejoin: round;
 	}
 	.scrim {
 		display: none;
 	}
 	@media (max-width: 860px) {
-		.rail {
+		.wide-only {
+			display: none;
+		}
+		.rail,
+		.rail.hidden {
+			display: flex;
 			position: fixed;
 			inset: 0 auto 0 0;
 			z-index: 50;
@@ -326,16 +552,7 @@
 			position: fixed;
 			inset: 0;
 			z-index: 49;
-			background: rgb(0 0 0 / 0.28);
+			background: rgb(0 0 0 / 0.32);
 		}
-	}
-	.add-lab {
-		margin: 2px 0 0 8px;
-		min-height: 28px;
-		font-size: 12.5px;
-		color: var(--text-faint);
-	}
-	.add-lab:hover {
-		color: var(--link);
 	}
 </style>

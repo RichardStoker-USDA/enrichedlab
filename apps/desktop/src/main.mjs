@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, session, shell, WebContentsView } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, session, shell, WebContentsView } from "electron";
 import { centerScript, focusScript, SNAPSHOT } from "./page_script.mjs";
 
 /** The person's EnrichedLab folder. Until the engine moves an older ~/.enriched, that is where it runs. */
@@ -134,7 +134,8 @@ function inviteRoute(argv) {
 
 async function open(argv) {
 	const sessionId = sessionArg(argv);
-	const url = await pairUrl(inviteRoute(argv) ?? (sessionId ? `/#/s/${sessionId}` : "/"));
+	const shotRoute = process.env.EL_SHOT ? process.env.EL_SHOT_ROUTE : undefined;
+	const url = await pairUrl(shotRoute ?? inviteRoute(argv) ?? (sessionId ? `/#/s/${sessionId}` : "/"));
 	const origin = new URL(url).origin;
 	engineOrigin = origin;
 	if (window && !window.isDestroyed()) {
@@ -154,7 +155,8 @@ async function open(argv) {
 		title: "EnrichedLab",
 		titleBarStyle: mac ? "hiddenInset" : win11 ? "hidden" : "default",
 		titleBarOverlay: win11 ? { color: "#00000000", symbolColor: nativeTheme.shouldUseDarkColors ? "#f2f2f2" : "#022851", height: 52 } : undefined,
-		trafficLightPosition: mac ? { x: 18, y: 18 } : undefined,
+		// Centered in the 52 px toolbar the sidebar draws under them.
+		trafficLightPosition: mac ? { x: 20, y: 19 } : undefined,
 		vibrancy: mac ? "sidebar" : undefined,
 		visualEffectState: mac ? "followWindow" : undefined,
 		backgroundMaterial: win11 ? "mica" : undefined,
@@ -168,6 +170,7 @@ async function open(argv) {
 		},
 	});
 	guard(window.webContents);
+	window.webContents.on("context-menu", (_event, params) => textMenu(params));
 	// Links leave the app. A canvas opens in a plain window of its own: no preload, so model-written pages never
 	// reach the shell's bridge, and the same navigation rules.
 	window.webContents.setWindowOpenHandler(({ url: target }) => {
@@ -194,12 +197,167 @@ async function open(argv) {
 	await window.loadURL(url);
 	if (process.env.EL_SHOT) {
 		await new Promise((r) => setTimeout(r, Number(process.env.EL_SHOT_DELAY) || 2500));
+		// A screenshot run can set the scene first (open a sheet, the palette, a pane).
+		if (process.env.EL_SHOT_JS) {
+			await window.webContents.executeJavaScript(process.env.EL_SHOT_JS).catch(() => undefined);
+			await new Promise((r) => setTimeout(r, 900));
+		}
 		const image = await window.webContents.capturePage();
 		const { writeFileSync } = await import("node:fs");
 		writeFileSync(process.env.EL_SHOT, image.toPNG());
 		app.quit();
 	}
 }
+
+// ── Menus: the menu bar, right-click on text and links, and the page's own context menus ─────────────────────────
+// Commands the page carries out go to it by id; the page owns what each one does.
+const send = (command) => window?.webContents.send("command", command);
+const item = (label, command, accelerator) => ({ label, accelerator, click: () => send(command) });
+
+function appMenu() {
+	const mac = process.platform === "darwin";
+	const template = [
+		...(mac
+			? [
+					{
+						label: app.name,
+						submenu: [
+							{ role: "about" },
+							{ type: "separator" },
+							item("Settings…", "settings", "CmdOrCtrl+,"),
+							{ type: "separator" },
+							{ role: "services" },
+							{ type: "separator" },
+							{ role: "hide" },
+							{ role: "hideOthers" },
+							{ role: "unhide" },
+							{ type: "separator" },
+							{ role: "quit" },
+						],
+					},
+				]
+			: []),
+		{
+			label: "File",
+			submenu: [
+				item("New Session", "new-session", "CmdOrCtrl+N"),
+				item("New Terminal", "new-terminal", "Ctrl+`"),
+				{ type: "separator" },
+				item("Add a Lab…", "add-lab"),
+				item("Model Services…", "services"),
+				{ type: "separator" },
+				item("Close Pane", "close-pane", "CmdOrCtrl+W"),
+				...(mac ? [] : [{ type: "separator" }, item("Settings…", "settings", "CmdOrCtrl+,"), { role: "quit" }]),
+			],
+		},
+		{ role: "editMenu" },
+		{
+			label: "View",
+			submenu: [
+				item("Search and Commands…", "palette", "CmdOrCtrl+K"),
+				{ type: "separator" },
+				item("Toggle Sidebar", "toggle-sidebar", mac ? "Ctrl+Cmd+S" : "Ctrl+Shift+S"),
+				item("Toggle Workbench", "toggle-workbench", "CmdOrCtrl+\\"),
+				{ type: "separator" },
+				{
+					label: "Appearance",
+					submenu: ["auto", "light", "dark"].map((theme) => ({
+						label: theme === "auto" ? "Match System" : theme === "light" ? "Light" : "Dark",
+						type: "radio",
+						checked: currentTheme === theme,
+						click: () => send(`theme-${theme}`),
+					})),
+				},
+				{ type: "separator" },
+				{ role: "resetZoom" },
+				{ role: "zoomIn" },
+				{ role: "zoomOut" },
+				{ type: "separator" },
+				{ role: "togglefullscreen" },
+				...(app.isPackaged ? [] : [{ role: "toggleDevTools" }]),
+			],
+		},
+		{
+			label: "Session",
+			submenu: [
+				item("Rename…", "rename"),
+				item("Stop", "stop", "CmdOrCtrl+."),
+				item("Summarize Older Turns", "compact"),
+				item("Undo File Changes", "undo-files"),
+				{ type: "separator" },
+				item("Show in Finder", "reveal"),
+			],
+		},
+		{ role: "windowMenu" },
+		{
+			role: "help",
+			submenu: [
+				{ label: "EnrichedLab on GitHub", click: () => shell.openExternal("https://github.com/RichardStoker-USDA/enrichedlab-harness") },
+				{ label: "What's New", click: () => shell.openExternal("https://github.com/RichardStoker-USDA/enrichedlab-harness/releases") },
+			],
+		},
+	];
+	Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+let currentTheme = "auto";
+// The page's appearance choice drives the window material too, so a light page never sits on dark glass.
+ipcMain.on("theme", (event, theme) => {
+	if (event.sender !== window?.webContents || !["auto", "light", "dark"].includes(theme)) return;
+	currentTheme = theme;
+	nativeTheme.themeSource = theme === "auto" ? "system" : theme;
+	appMenu();
+});
+
+/** Right-click on text, a text field, a link or an image: the system's own items. The page handles its other areas. */
+function textMenu(params) {
+	const items = [];
+	const editable = params.isEditable;
+	if (editable && params.misspelledWord) {
+		for (const word of params.dictionarySuggestions.slice(0, 4)) items.push({ label: word, click: () => window.webContents.replaceMisspelling(word) });
+		if (params.dictionarySuggestions.length) items.push({ type: "separator" });
+		items.push({ label: "Learn Spelling", click: () => window.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord) }, { type: "separator" });
+	}
+	if (params.linkURL && /^https?:/.test(params.linkURL)) {
+		items.push({ label: "Open Link in Browser", click: () => shell.openExternal(params.linkURL) }, { label: "Copy Link", click: () => clipboard.writeText(params.linkURL) }, { type: "separator" });
+	}
+	if (params.mediaType === "image" && params.srcURL) items.push({ label: "Copy Image", click: () => window.webContents.copyImageAt(params.x, params.y) }, { type: "separator" });
+	if (editable) {
+		items.push({ role: "undo" }, { role: "redo" }, { type: "separator" }, { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" });
+	} else if (params.selectionText.trim()) {
+		items.push({ role: "copy" });
+		if (process.platform === "darwin") items.push({ type: "separator" }, { label: `Look Up “${params.selectionText.trim().slice(0, 24)}${params.selectionText.trim().length > 24 ? "…" : ""}”`, click: () => window.webContents.showDefinitionForSelection() });
+	}
+	while (items.at(-1)?.type === "separator") items.pop();
+	if (items.length) Menu.buildFromTemplate(items).popup({ window });
+}
+
+/** The page's own context menu (a session, a place, a tab, a file), shown natively. Resolves with the chosen id. */
+ipcMain.handle("menu:popup", (event, entries) => {
+	if (event.sender !== window?.webContents || !Array.isArray(entries)) return undefined;
+	return new Promise((resolve) => {
+		let chosen;
+		const build = (list) =>
+			list.slice(0, 40).map((e) =>
+				e?.separator
+					? { type: "separator" }
+					: {
+							label: String(e?.label ?? ""),
+							enabled: !e?.disabled,
+							type: e?.checked === undefined ? "normal" : "checkbox",
+							checked: Boolean(e?.checked),
+							...(Array.isArray(e?.submenu) ? { submenu: build(e.submenu) } : { click: () => (chosen = String(e?.id ?? "")) }),
+						},
+			);
+		Menu.buildFromTemplate(build(entries)).popup({ window, callback: () => resolve(chosen) });
+	});
+});
+
+ipcMain.handle("reveal", (event, path) => {
+	if (event.sender !== window?.webContents || typeof path !== "string" || !path.startsWith("/") && !/^[A-Za-z]:[\\/]/.test(path)) return false;
+	shell.showItemInFolder(path);
+	return true;
+});
 
 // ── The browser pane: real browser views laid over the pane's rectangle ──────────────────────────────────────────
 // Each view browses in its own session ("persist:browser"), apart from the app's storage, with permission prompts
@@ -353,6 +511,7 @@ else {
 		if (app.isReady()) void open([link]).catch((error) => dialog.showErrorBox("EnrichedLab", error.message));
 		else app.whenReady().then(() => open([link])).catch(() => undefined);
 	});
+	app.whenReady().then(() => appMenu());
 	app.whenReady().then(() => permissions()).then(() => open(process.argv).catch((error) => {
 		dialog.showErrorBox("EnrichedLab", error.message);
 		app.quit();

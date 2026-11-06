@@ -67,6 +67,16 @@ class Lab {
 	services = $state(false);
 	/** An invite being joined (from an enrichedlab://join link or "Add a lab"). */
 	join = $state<{ url?: string; name?: string; title?: string; isolated?: boolean } | undefined>();
+	/** The settings sheet: appearance, labs, models. */
+	settings = $state(false);
+	/** The sidebar, hidden with View > Toggle Sidebar on a wide window. */
+	sidebar = $state(true);
+	/** A question that needs a yes before something that can't be undone. */
+	confirming = $state<{ title: string; detail: string; action: string; run: () => unknown } | undefined>();
+	/** The place the new-session screen starts on (the rail's "New session in <place>"). */
+	newPlace = $state<string | undefined>();
+	/** A session whose title is being edited in place, from the rail or the header. */
+	renaming = $state<string | undefined>();
 	private flashTimer?: ReturnType<typeof setTimeout>;
 
 	get busy(): boolean {
@@ -412,9 +422,9 @@ class Lab {
 	}
 
 	/** Start a session; `site` binds it to one lab (an isolated lab also keeps its work there). */
-	async create(cwd: string, options: { site?: string; place?: string; worktree?: boolean } = {}): Promise<string | undefined> {
+	async create(cwd: string, options: { site?: string; place?: string; worktree?: boolean; model?: string } = {}): Promise<string | undefined> {
 		try {
-			let summary = await rpc.call("session.create", { cwd, site: options.site, worktree: options.worktree });
+			let summary = await rpc.call("session.create", { cwd, site: options.site, worktree: options.worktree, model: options.model });
 			if (options.place && options.place !== "local" && summary.place !== options.place) {
 				const moved = await rpc.call("session.place", { sessionId: summary.id, place: options.place });
 				summary = moved.summary;
@@ -458,8 +468,62 @@ class Lab {
 		this.say(result.detail);
 	}
 
-	async rename(title: string): Promise<void> {
-		if (this.current && title.trim()) await rpc.call("session.rename", { sessionId: this.current, title: title.trim() });
+	async rename(title: string, sessionId = this.current): Promise<void> {
+		if (!sessionId || !title.trim()) return;
+		await rpc.call("session.rename", { sessionId, title: title.trim() });
+		const summary = this.sessions.find((s) => s.id === sessionId);
+		if (summary) this.upsert({ ...summary, title: title.trim() });
+	}
+
+	/** Ask first, then delete a session's record from this computer. Its project folder isn't touched. */
+	deleteSession(sessionId: string): void {
+		const summary = this.sessions.find((s) => s.id === sessionId);
+		if (!summary) return;
+		this.confirming = {
+			title: `Delete “${summary.title}”?`,
+			detail: "Its conversation and outputs are removed from this computer. Files in the project folder stay as they are.",
+			action: "Delete",
+			run: async () => {
+				try {
+					await rpc.call("session.delete", { sessionId });
+					this.sessions = this.sessions.filter((s) => s.id !== sessionId);
+					if (this.current === sessionId) this.startNew();
+				} catch (error) {
+					this.say((error as Error).message);
+				}
+			},
+		};
+	}
+
+	async logout(name: string): Promise<void> {
+		try {
+			await rpc.call("site.logout", { name });
+			await this.refreshModels();
+			this.say(`Signed out of ${this.sites.find((s) => s.name === name)?.title ?? name}.`);
+		} catch (error) {
+			this.say((error as Error).message);
+		}
+	}
+
+	async reconnect(name?: string): Promise<void> {
+		try {
+			this.sites = await rpc.call("site.refresh", name ? { name } : {});
+			this.models = (await rpc.call("model.list", { refresh: true })).models;
+		} catch (error) {
+			this.say((error as Error).message);
+		}
+	}
+
+	/** Show a folder in Finder or Explorer (desktop app only). */
+	reveal(path: string): void {
+		void window.labDesktop?.reveal?.(path);
+	}
+
+	copy(text: string, what: string): void {
+		void navigator.clipboard.writeText(text).then(
+			() => this.say(`Copied ${what}.`),
+			() => this.say(`Couldn't copy ${what}.`),
+		);
 	}
 
 	async refreshModels(): Promise<void> {
@@ -479,6 +543,16 @@ class Lab {
 
 	async setTheme(theme: UiPrefs["theme"]): Promise<void> {
 		this.ui = await rpc.call("ui.set", { theme });
+	}
+
+	async setUi(prefs: Partial<UiPrefs>): Promise<void> {
+		this.ui = await rpc.call("ui.set", prefs);
+	}
+
+	/** Start a session in a folder right away, on a place (the rail's "New session here"). */
+	async startIn(cwd: string, place = "local"): Promise<void> {
+		const target = this.places.find((p) => p.id === place);
+		await this.create(cwd, target?.site?.isolated ? { site: place } : { place });
 	}
 
 	private upsert(summary: SessionSummary): void {

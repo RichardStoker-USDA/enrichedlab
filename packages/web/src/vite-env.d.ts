@@ -14,6 +14,14 @@ interface Window {
 	labDesktop?: {
 		pickFolder(): Promise<string | undefined>;
 		platform: string;
+		/** A native context menu; resolves with the chosen entry's id. */
+		menu?(entries: import("./lib/menu.svelte.ts").MenuEntry[]): Promise<string | undefined>;
+		/** Show a file or folder in Finder or Explorer. */
+		reveal?(path: string): Promise<boolean>;
+		/** The appearance choice, so the window material matches the page. */
+		setTheme?(theme: "auto" | "light" | "dark"): void;
+		/** Menu bar commands, by id. */
+		onCommand?(listener: (command: string) => void): () => void;
 		/** Real browser views laid over a pane's rectangle (Electron WebContentsView). */
 		browser?: {
 			show(id: string, url: string, bounds: { x: number; y: number; width: number; height: number }): void;
