@@ -7,6 +7,15 @@ export const PROTOCOL_VERSION = 1;
 
 export type Part = { type: "text"; text: string } | { type: "image"; mime: string; data: string };
 
+/** One event of the shared session log, v1 (docs/session-log.md). */
+export interface LogV1Event {
+	v: 1;
+	seq: number;
+	time: string;
+	kind: string;
+	data: Record<string, unknown>;
+}
+
 export interface ToolCall {
 	id: string;
 	name: string;
@@ -536,6 +545,10 @@ export interface Requests {
 	"term.close": { params: { termId: string }; result: { ok: true } };
 	/** Remove a session and its log; refused while it runs. */
 	"session.delete": { params: { sessionId: string }; result: { ok: true } };
+	/** The session in the shared log format v1 (docs/session-log.md), with the bytes of the images it refers to. */
+	"session.export": { params: { sessionId: string }; result: { events: LogV1Event[]; attachments: Record<string, { mime: string; data: string }> } };
+	/** A new session from a v1 log: its context rebuilt as the format says. `cwd` overrides the folder it names. */
+	"session.import": { params: { events: LogV1Event[]; attachments?: Record<string, { mime: string; data: string }>; cwd?: string; model?: string }; result: SessionSummary };
 	/** A surface's answer to surface.call. */
 	"surface.reply": { params: { callId: string; result?: SurfaceAnswer; error?: string }; result: { ok: true } };
 	/** A window shows (or stops showing) the session's page in a lab's sandbox browser: frames come while one does. */

@@ -18,7 +18,8 @@ import type {
 	SurfaceAnswer,
 	UiPrefs,
 } from "@enrichedlab/protocol";
-import { PROTOCOL_VERSION } from "@enrichedlab/protocol";
+import { type LogV1Event, PROTOCOL_VERSION } from "@enrichedlab/protocol";
+import { type Attachments, fromV1, toV1 } from "./session/log_v1.ts";
 import { AppHost, type AppSession } from "./apps/host.ts";
 import { CanvasStore } from "./canvas.ts";
 import { applyBundles, listBundles } from "./bundles.ts";
@@ -643,6 +644,24 @@ export class Engine {
 					const view = this.canvas.get(need("canvasId"));
 					if (!view?.source) throw new RpcError(-32602, "That view has no data file.");
 					return this.viewData(view.source);
+				}
+				case "session.export": {
+					const session = this.session(need("sessionId"));
+					return toV1(session.log.read());
+				}
+				case "session.import": {
+					if (!Array.isArray(p.events)) throw new RpcError(-32602, "events must be a list of v1 session events.");
+					const attachments = (p.attachments ?? {}) as Attachments;
+					const { events, cwd } = fromV1(p.events as LogV1Event[], attachments);
+					const folder = typeof p.cwd === "string" && p.cwd ? p.cwd : cwd;
+					if (!folder) throw new RpcError(-32602, "The log doesn't say which folder it worked in: pass cwd.");
+					const model = typeof p.model === "string" ? p.model : events.findLast((e) => e.t === "model")?.model;
+					const session = this.createSession(folder, model);
+					for (const event of events) session.append(event);
+					const title = events.findLast((e) => e.t === "title");
+					session.meta = { ...session.meta, title: title?.t === "title" ? title.title : "Imported session", turns: events.filter((e) => e.t === "user").length, updated: new Date().toISOString() };
+					session.log.writeMeta(session.meta);
+					return session.summary();
 				}
 				case "session.delete": {
 					const id = need("sessionId");

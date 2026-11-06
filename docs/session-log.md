@@ -23,8 +23,8 @@ each maps its log to v1 on export and from v1 on import.
 `ImageRef` is Gate's files-by-reference shape, `{uri, sha256, mime, bytes}`; a reader checks the bytes it fetches
 against `sha256` (and `Repr-Digest`, where the server sends one). Image bytes never go inline.
 
-Kinds starting with `x-` belong to one side and readers skip them. The engine's: `x-model`, `x-place`, `x-title`,
-`x-checkpoint`, `x-undo`, `x-app-context`, `x-elide`.
+Kinds starting with `x-` belong to one side and readers skip them. The engine's: `x-header` (the folder it worked in,
+its system prompt), `x-model`, `x-place`, `x-title`, `x-checkpoint`, `x-undo`, `x-app-context`, `x-elide`.
 
 ## Rebuilding the context
 
@@ -36,7 +36,22 @@ Kinds starting with `x-` belong to one side and readers skip them. The engine's:
    first (a user message through the next one). The latest exchange always stays. When the window starts
    mid-exchange, a user turn says "(Earlier parts of this session were left out to fit the context.)"
 
+## Engine side
+
+`packages/engine/src/session/log_v1.ts` maps both ways; the RPCs are `session.export` and `session.import`, and the
+CLI writes and reads a folder with `session.jsonl` and `images/<sha256>.<ext>`:
+
+```sh
+el session export <session id> [folder]
+el session import <folder> [--cwd <project folder>]
+```
+
+Engine decisions map to `decision` events: `auto` is allow by rule, `allowed` and `allowed_session` allow by person,
+`denied` deny by person, `refused` deny by rule. An engine compaction names the first event it keeps; v1's `through`
+is the event just before it. `tests/session_log_v1.test.ts` checks that a log exported and imported rebuilds the same
+model context.
+
 ## Status
 
-Format agreed. Engine export and import (`session.export`, `session.import`, `el session export <id>`) and Rein's
-side (`v`, reading `compaction`, `?format=v1`, image references) are still to be built.
+Format agreed; the engine side is built. Rein's side (`v`, reading `compaction`, `?format=v1`, image references) is
+the Gate session's, through its review.

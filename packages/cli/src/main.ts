@@ -2,7 +2,7 @@
 // el: the EnrichedLab command. With no arguments it opens the terminal surface for the current folder.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { PermissionRequest, SessionEvent } from "@enrichedlab/protocol";
 import {
@@ -82,6 +82,8 @@ const HELP = `EnrichedLab ${VERSION}
   el local                        model servers on this computer, and open models that fit it
   el model pull|remove <name>     download an open model through Ollama, or delete one
   el sessions                     recent sessions in this folder (--all for every folder)
+  el session export <id> [folder] a session in the shared log format (v1), to open elsewhere
+  el session import <folder>      a new session from a v1 log [--cwd <folder>]
   el service add chatgpt          use your ChatGPT plan (sign in in the browser; --new adds another account)
   el service add <service>        use your own key: openai, anthropic, gemini, openrouter, custom --address <url>
   el doctor                       check the setup
@@ -618,6 +620,39 @@ async function main(): Promise<void> {
 			if (!list.length) out("No sessions here yet.");
 			client.close();
 			return;
+		}
+		case "session": {
+			// The shared log format v1 (docs/session-log.md): a folder with session.jsonl and the images it refers to.
+			const [verb, target] = rest;
+			if (verb === "export") {
+				const id = target ?? fail("el session export <session id> [folder]");
+				const folder = resolve(rest[2] ?? `${id}-v1`);
+				const client = await connect();
+				const { events, attachments } = await client.call("session.export", { sessionId: id });
+				client.close();
+				mkdirSync(join(folder, "images"), { recursive: true });
+				writeFileSync(join(folder, "session.jsonl"), events.map((e) => JSON.stringify(e)).join("\n") + "\n");
+				for (const [sha, image] of Object.entries(attachments)) writeFileSync(join(folder, "images", `${sha}.${image.mime.split("/")[1] ?? "bin"}`), Buffer.from(image.data, "base64"));
+				return out(`Exported ${events.length} events to ${folder}`);
+			}
+			if (verb === "import") {
+				const folder = resolve(target ?? fail("el session import <folder> [--cwd <folder>]"));
+				const file = existsSync(join(folder, "session.jsonl")) ? join(folder, "session.jsonl") : folder;
+				const events = readFileSync(file, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+				const attachments: Record<string, { mime: string; data: string }> = {};
+				const images = join(dirname(file), "images");
+				if (existsSync(images)) {
+					for (const name of readdirSync(images)) {
+						const [sha, ext] = name.split(".");
+						if (sha && /^[0-9a-f]{64}$/.test(sha)) attachments[sha] = { mime: `image/${ext === "jpg" ? "jpeg" : ext}`, data: readFileSync(join(images, name)).toString("base64") };
+					}
+				}
+				const client = await connect();
+				const summary = await client.call("session.import", { events, attachments, cwd: typeof flags.cwd === "string" ? resolve(flags.cwd) : undefined });
+				client.close();
+				return out(`Imported as ${summary.id}: ${summary.title} (${summary.cwd}). Open it with el app --session ${summary.id}`);
+			}
+			return fail("el session export <session id> [folder] | el session import <folder> [--cwd <folder>]");
 		}
 		case "doctor":
 			return (await import("./doctor.ts")).doctor();
