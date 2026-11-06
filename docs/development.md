@@ -54,6 +54,24 @@ bun scripts/deps.ts audit            # known vulnerabilities in every locked pac
 
 CI runs the tests and type checks on macOS, Linux and Windows for every push (`.github/workflows/test.yml`).
 
+The desktop window has a live check of its own, run by hand or on a release tag on all three systems
+(`.github/workflows/desktop.yml`): `bun scripts/desktop_smoke.ts <folder>` starts a test engine, opens the app on a
+session, loads a page in the browser pane and saves screenshots of the window and the browser view.
+
+A development run of the desktop app (`apps/desktop`, unpackaged) takes these for screenshots and tests:
+
+| Variable | Does |
+|---|---|
+| `EL_SHOT=<file.png>` | Capture the window after load, save it, and quit; each browser view is saved beside it |
+| `EL_SHOT_DELAY`, `EL_SHOT_AFTER` | Milliseconds to wait before the scene, and after it, before the capture |
+| `EL_SHOT_JS` | Script run in the page first, to set the scene |
+| `EL_SHOT_TYPE` | Text typed as key events into what the scene focused, then Return |
+| `EL_SHOT_SIZE=1024x720` | The window's size, to check narrower layouts |
+| `EL_SHOT_ROUTE` | The page to open instead of the session |
+| `EL_BINARY` | The engine to start, such as a wrapper that runs `packages/cli/src/main.ts` from source |
+
+Pass `--use-mock-keychain` to Electron in these runs, so a test never asks for the login keychain.
+
 ## Benchmarks
 
 `bench/scenarios/*.json` are tasks with checks: a command that must pass, a file that must or mustn't change, words
