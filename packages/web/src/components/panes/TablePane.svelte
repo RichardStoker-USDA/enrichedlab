@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { lab } from "../../lib/store.svelte.ts";
 	import { rpc } from "../../lib/rpc.ts";
+	import { contextMenu, separator, type MenuAction } from "../../lib/menu.svelte.ts";
 	import { type Column, formatCell, matcher, readTable, stats, type Table, toCsv } from "../../lib/data.ts";
 
 	let { id }: { id: string } = $props();
@@ -43,6 +44,11 @@
 		filters = {};
 		sort = undefined;
 		selected = undefined;
+		// A plot starts with a number on the vertical axis and another column across.
+		const y = table.columns.findIndex((c) => c.type === "number");
+		plotY = Math.max(0, y);
+		plotX = Math.max(0, table.columns.findIndex((_, i) => i !== plotY));
+		plotColor = -1;
 	});
 
 	let debounced = $state({ filters: {} as Record<number, string>, search: "" });
@@ -103,11 +109,91 @@
 		handle.addEventListener("pointerup", () => handle.removeEventListener("pointermove", move), { once: true });
 	}
 
-	function copySelected(e: KeyboardEvent) {
-		if (!table || !selected || !((e.metaKey || e.ctrlKey) && e.key === "c")) return;
+	const cellText = (row: number, col: number) => formatCell(table!.columns[col]!.values[row] ?? null);
+
+	/** Bring a cell into view inside the scroller, below the sticky header and right of the row numbers. */
+	function reveal(index: number, col: number) {
+		if (!scroller) return;
+		const top = index * ROW;
+		const head = 58;
+		if (top < scroller.scrollTop) scroller.scrollTop = top;
+		else if (top + ROW > scroller.scrollTop + scroller.clientHeight - head) scroller.scrollTop = top + ROW - scroller.clientHeight + head;
+		const left = 56 + widths.slice(0, col).reduce((a, b) => a + b, 0);
+		const right = left + (widths[col] ?? 0);
+		if (left - 56 < scroller.scrollLeft) scroller.scrollLeft = left - 56;
+		else if (right > scroller.scrollLeft + scroller.clientWidth) scroller.scrollLeft = right - scroller.clientWidth;
+	}
+
+	/** The grid's keys: arrows, Home/End, Page Up/Down and Cmd or Ctrl with them move the selected cell; Cmd+C copies it. */
+	function gridKeys(e: KeyboardEvent) {
+		if (!table || e.target !== scroller) return;
+		const mod = e.metaKey || e.ctrlKey;
+		if (mod && e.key === "c" && selected) {
+			e.preventDefault();
+			void navigator.clipboard.writeText(cellText(selected.row, selected.col));
+			return lab.say("Copied the cell.");
+		}
+		if (!order.length) return;
+		const at = selected ? Math.max(0, order.indexOf(selected.row)) : -1;
+		const cols = table.columns.length;
+		const page = Math.max(1, Math.floor((scroller?.clientHeight ?? 400) / ROW) - 3);
+		let index = at < 0 ? 0 : at;
+		let col = selected?.col ?? 0;
+		switch (e.key) {
+			case "ArrowDown": index = at < 0 ? 0 : Math.min(order.length - 1, at + 1); break;
+			case "ArrowUp": index = Math.max(0, at - 1); break;
+			case "ArrowRight": col = Math.min(cols - 1, col + (at < 0 ? 0 : 1)); break;
+			case "ArrowLeft": col = Math.max(0, col - 1); break;
+			case "PageDown": index = Math.min(order.length - 1, index + page); break;
+			case "PageUp": index = Math.max(0, index - page); break;
+			case "Home": if (mod) index = 0; else col = 0; break;
+			case "End": if (mod) index = order.length - 1; else col = cols - 1; break;
+			default: return;
+		}
 		e.preventDefault();
-		void navigator.clipboard.writeText(formatCell(table.columns[selected.col]!.values[selected.row] ?? null));
-		lab.say("Copied the cell.");
+		selected = { row: order[index]!, col };
+		focusCol = col;
+		reveal(index, col);
+	}
+
+	/** Right-click on a cell: copy what's there, narrow the table to it, or sort by its column. */
+	function cellActions(row: number, col: number): MenuAction[] {
+		if (!table) return [];
+		selected = { row, col };
+		focusCol = col;
+		const c = table.columns[col]!;
+		const value = c.values[row] ?? null;
+		const shown = order;
+		return [
+			{ label: "Copy Value", run: () => lab.copy(cellText(row, col), "the value") },
+			{ label: "Copy Row", run: () => lab.copy(table!.columns.map((_, i) => cellText(row, i)).join("\t"), "the row") },
+			{ label: `Copy Column (${shown.length.toLocaleString()} ${shown.length === 1 ? "row" : "rows"} shown)`, run: () => lab.copy(shown.map((r) => cellText(r, col)).join("\n"), "the column") },
+			separator,
+			{ label: value === null ? "Show Only Missing Values" : `Show Only "${cellText(row, col).slice(0, 40)}"`, disabled: value === null, run: () => (filters[col] = c.type === "number" ? `= ${value}` : String(value)) },
+			...headerActions(col).slice(0, 3),
+		];
+	}
+
+	/** Right-click on a column header: sort, clear its filter, copy its name. */
+	function headerActions(col: number): MenuAction[] {
+		if (!table) return [];
+		const name = table.columns[col]!.name;
+		return [
+			{ label: "Sort Ascending", checked: sort?.col === col && sort.dir === 1, run: () => (sort = { col, dir: 1 }) },
+			{ label: "Sort Descending", checked: sort?.col === col && sort.dir === -1, run: () => (sort = { col, dir: -1 }) },
+			{ label: "Clear Sort", disabled: !sort, run: () => (sort = undefined) },
+			separator,
+			{ label: "Clear This Filter", disabled: !filters[col], run: () => (filters[col] = "") },
+			{ label: "Clear All Filters", disabled: !Object.values(filters).some(Boolean) && !search, run: () => ((filters = {}), (search = "")) },
+			{ label: "Copy Column Name", run: () => lab.copy(name, "the column name") },
+		];
+	}
+
+	/** Column edges move with the arrow keys too, 16 px a step. */
+	function resizeKeys(e: KeyboardEvent, c: number) {
+		if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+		e.preventDefault();
+		widths[c] = Math.max(48, Math.min(900, widths[c]! + (e.key === "ArrowRight" ? 16 : -16)));
 	}
 
 	function exportCsv() {
@@ -151,7 +237,7 @@
 			{/if}
 		</span>
 		<div class="plot-menu">
-			<button class="btn" onclick={() => (plotOpen = !plotOpen)} disabled={numericCols.length < 1} aria-expanded={plotOpen}>Plot</button>
+			<button class="btn" onclick={() => (plotOpen = !plotOpen)} disabled={numericCols.length < 1 || (table?.columns.length ?? 0) < 2} aria-expanded={plotOpen} title={numericCols.length < 1 ? "A plot needs a column of numbers" : "Plot two columns"}>Plot</button>
 			{#if plotOpen && table}
 				<div class="menu plot-form">
 					<label>Horizontal <select class="field" bind:value={plotX}>{#each table.columns as c, i}<option value={i}>{c.name}</option>{/each}</select></label>
@@ -171,18 +257,19 @@
 		<p class="state bad">{error}</p>
 	{:else if table}
 		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-		<div class="grid" bind:this={scroller} bind:clientHeight={height} onscroll={() => (scrollTop = scroller?.scrollTop ?? 0)} tabindex="0" role="grid" aria-rowcount={order.length} aria-colcount={table.columns.length} onkeydown={copySelected}>
+		<div class="grid" bind:this={scroller} bind:clientHeight={height} onscroll={() => (scrollTop = scroller?.scrollTop ?? 0)} tabindex="0" role="grid" aria-label={`${view?.title ?? "Table"}: arrows move between cells`} aria-rowcount={order.length} aria-colcount={table.columns.length} aria-activedescendant={selected ? `cell-${id}-${selected.row}-${selected.col}` : undefined} onkeydown={gridKeys}>
 			<div class="head" style:width={`${totalWidth}px`} role="row">
 				<div class="rownum" role="columnheader"></div>
 				{#each table.columns as col, c (c)}
-					<div class="th" style:width={`${widths[c]}px`} role="columnheader" aria-sort={sort?.col === c ? (sort.dir === 1 ? "ascending" : "descending") : "none"} class:num={col.type === "number"}>
+					<div class="th" style:width={`${widths[c]}px`} role="columnheader" use:contextMenu={() => headerActions(c)} aria-sort={sort?.col === c ? (sort.dir === 1 ? "ascending" : "descending") : "none"} class:num={col.type === "number"}>
 						<button class="th-name" onclick={() => toggleSort(c)} onfocus={() => (focusCol = c)} onmouseenter={() => (focusCol = c)} title={`Sort by ${col.name}`}>
 							<span class="type">{typeMark(col)}</span>
 							<span class="label">{col.name}</span>
 							{#if sort?.col === c}<span class="arrow">{sort.dir === 1 ? "↑" : "↓"}</span>{/if}
 						</button>
 						<input class="filter" placeholder={col.type === "number" ? "> 0" : "filter"} bind:value={filters[c]} aria-label={`Filter ${col.name}`} />
-						<span class="resize" role="separator" aria-orientation="vertical" onpointerdown={(e) => resizeCol(e, c)}></span>
+						<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+						<span class="resize" role="separator" tabindex="0" aria-orientation="vertical" aria-label={`Width of ${col.name}`} aria-valuenow={Math.round(widths[c] ?? 0)} aria-valuemin={48} aria-valuemax={900} onpointerdown={(e) => resizeCol(e, c)} onkeydown={(e) => resizeKeys(e, c)}></span>
 					</div>
 				{/each}
 			</div>
@@ -193,7 +280,7 @@
 							<div class="rownum">{r + 1}</div>
 							{#each table.columns as col, c (c)}
 								<!-- svelte-ignore a11y_click_events_have_key_events -->
-								<div class="td" class:num={col.type === "number"} class:null={col.values[r] === null} class:sel={selected?.row === r && selected.col === c} style:width={`${widths[c]}px`} role="gridcell" tabindex="-1" onclick={() => (selected = { row: r, col: c })}>
+								<div class="td" id={`cell-${id}-${r}-${c}`} class:num={col.type === "number"} class:null={col.values[r] === null} class:sel={selected?.row === r && selected.col === c} style:width={`${widths[c]}px`} role="gridcell" aria-selected={selected?.row === r && selected.col === c} tabindex="-1" onclick={() => ((selected = { row: r, col: c }), (focusCol = c), scroller?.focus({ preventScroll: true }))} use:contextMenu={() => cellActions(r, c)}>
 									{col.values[r] === null ? "—" : formatCell(col.values[r] ?? null)}
 								</div>
 							{/each}
@@ -216,7 +303,7 @@
 					<span>max {formatCell(focusStats.s.max!)}</span>
 				{/if}
 			{:else}
-				<span>Point at a column for its statistics. Click a header to sort; type in a filter (text, or &gt; &lt; = with numbers).</span>
+				<span>Point at a column, or move with the arrow keys, for its statistics. Click a header to sort; type in a filter (text, or &gt; &lt; = with numbers). Right-click for more.</span>
 			{/if}
 		</div>
 	{/if}
@@ -347,6 +434,11 @@
 	.filter:focus {
 		border-color: var(--accent);
 		background: var(--canvas);
+	}
+	.resize:focus-visible {
+		outline: none;
+		background: var(--accent);
+		border-radius: 2px;
 	}
 	.resize {
 		position: absolute;
