@@ -98,6 +98,15 @@
 		window.labDesktop?.setTheme?.(lab.ui.theme);
 	});
 
+	let toast: HTMLElement | undefined = $state();
+	$effect(() => {
+		const text = lab.lost ? "lost" : lab.flash;
+		if (!toast?.showPopover) return;
+		// Shown again on each new message, so it lands above a sheet opened after the last one.
+		if (toast.matches(":popover-open")) toast.hidePopover();
+		if (text) toast.showPopover();
+	});
+
 	// 861 to 983 px: the sidebar steps aside while the workbench is open (lab.sidebar).
 	$effect(() => {
 		const query = window.matchMedia("(min-width: 861px) and (max-width: 983px)");
@@ -143,11 +152,10 @@
 	<Settings />
 	<Confirm />
 	<ContextMenu />
-	{#if lab.lost}
-		<p class="status" role="status">Reconnecting to the engine…</p>
-	{:else if lab.flash}
-		<p class="status" role="status">{lab.flash}{#if lab.flashUrl}&nbsp;<a href={lab.flashUrl} target="_blank" rel="noopener noreferrer">Open</a>{/if}</p>
-	{/if}
+	<!-- A popover, so it shows above an open sheet (a modal dialog sits in the top layer, over any z-index). -->
+	<p class="status" role="status" popover="manual" bind:this={toast}>
+		{#if lab.lost}Reconnecting to the engine…{:else if lab.flash}{lab.flash}{#if lab.flashUrl}&nbsp;<a href={lab.flashUrl} target="_blank" rel="noopener noreferrer">Open</a>{/if}{/if}
+	</p>
 </div>
 
 <style>
@@ -195,8 +203,8 @@
 	}
 	.status {
 		position: fixed;
-		left: 50%;
-		bottom: 24px;
+		inset: auto auto 24px 50%;
+		color: var(--text);
 		z-index: 60;
 		max-width: min(560px, calc(100vw - 32px));
 		margin: 0;
