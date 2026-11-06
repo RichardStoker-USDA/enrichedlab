@@ -12,7 +12,7 @@
     },
     "packages/cli": {
       "name": "@enrichedlab/cli",
-      "version": "0.1.0",
+      "version": "0.2.9",
       "dependencies": {
         "@enrichedlab/engine": "workspace:*",
         "@enrichedlab/protocol": "workspace:*",
@@ -21,7 +21,7 @@
     },
     "packages/engine": {
       "name": "@enrichedlab/engine",
-      "version": "0.1.0",
+      "version": "0.2.9",
       "dependencies": {
         "@anthropic-ai/sdk": "1.4.0",
         "@enrichedlab/protocol": "workspace:*",
@@ -34,11 +34,11 @@
     },
     "packages/protocol": {
       "name": "@enrichedlab/protocol",
-      "version": "0.1.0",
+      "version": "0.2.9",
     },
     "packages/tui": {
       "name": "@enrichedlab/tui",
-      "version": "0.1.0",
+      "version": "0.2.9",
       "dependencies": {
         "@earendil-works/pi-tui": "1.5.0",
         "@enrichedlab/engine": "workspace:*",
@@ -48,13 +48,12 @@
     },
     "packages/web": {
       "name": "@enrichedlab/web",
-      "version": "0.1.0",
+      "version": "0.2.9",
       "dependencies": {
         "@enrichedlab/protocol": "workspace:*",
         "@modelcontextprotocol/core": "2.4.0",
         "@modelcontextprotocol/ext-apps": "2.0.4",
         "@xterm/addon-fit": "0.11.0",
-        "@xterm/addon-webgl": "0.19.0",
         "@xterm/xterm": "6.0.0",
         "dompurify": "3.4.17",
         "hyparquet": "1.32.0",
@@ -212,8 +211,6 @@
     "@webgpu/types": ["@webgpu/types@0.1.74", "", {}, "sha512-lgiI4hbuLcI9unnm2cL/tvCaQU45dp0xcLWJh5uB/9MBGvIA4F8XIk7nSiBeg+K4xWGYwgZKn80LmERI5CxoTA=="],
 
     "@xterm/addon-fit": ["@xterm/addon-fit@0.11.0", "", {}, "sha512-jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo+vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g=="],
-
-    "@xterm/addon-webgl": ["@xterm/addon-webgl@0.19.0", "", {}, "sha512-b3fMOsyLVuCeNJWxolACEUED0vm7qC0cy4wRvf3oURSzDTYVQiGPhTnhWZwIHdvC48Y+oLhvYXnY4XDXPoJo6A=="],
 
     "@xterm/xterm": ["@xterm/xterm@6.0.0", "", {}, "sha512-TQwDdQGtwwDt+2cgKDLn0IRaSxYu1tSUjgKarSDkUM0ZNiSRXFpjxEsvc/Zgc5kq5omJ+V0a8/kIM2WD3sMOYg=="],
 
