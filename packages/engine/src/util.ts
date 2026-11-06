@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "n
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-export const VERSION = "0.2.19";
+export const VERSION = "0.2.20";
 
 /**
  * How the harness names itself to a lab. Gate files every request under the User-Agent's first word, so the lab's
@@ -13,6 +13,7 @@ export const CLIENT_AGENT = `EnrichedLab/${VERSION} (${process.platform}; ${proc
 
 /** What changed in this version, one line each, newest first. Surfaces show the first lines when a session opens. */
 export const NEWS = [
+	"0.2.20: a lab can offer a desktop sandbox that you and the agent both use, in a Desktop pane; a lab can grant Discovery mode, turned on by typing /discover, where the agent works on its own inside the lab without asking; each step's reasoning gets a short summary made where its model runs, with the full text a click away, and compaction stays there too; el session package writes a session as an RO-Crate to check or rerun; a lab that says it keeps data inside stays isolated.",
 	"0.2.19: connections into a lab sandbox (a terminal, its browser, a Shiny app's live updates) no longer fail once right after your lab sign-in renews itself.",
 	"0.2.18: web apps an agent runs in a lab sandbox (Shiny, dashboards) work in the browser pane: their pages reach their own server, and the agent starts the server for you, which stops after 15 unused minutes and starts again on the next visit; commands and file edits inside a lab sandbox project no longer ask each time; your lab sandbox is paused, not deleted, when EnrichedLab quits; model menus say whether a model is private (your lab, this computer) or a cloud service; the window always fills with the page.",
 	"0.2.17: a task typed after choosing New Session in a lab runs there; a calmer light theme and darker dark theme; moves are reviewed the same way from everywhere and keep secret-looking files and their history at home; Stop, a failed send and a rename never lose what you typed; terminals keep running when panes move; tables and plots keep values exactly as the file has them; commands that run without asking get no keys or tokens; el session push and pull move a session to your lab's Rein and back.",

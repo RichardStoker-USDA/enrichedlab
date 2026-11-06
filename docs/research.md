@@ -98,9 +98,10 @@ Scientists validate everything, so every step has to be readable and repeatable.
 - **Receipts.** A lab's tools return a receipt with each result (inputs, code version, parameters, seed, image
   digest, outputs). WHNRC's evidence records chain each step's receipt and seal a finished run
   (`enrichedlab-contracts`, `enrichedlab.evidence.v1`).
-- **A run package.** `el session package <id>` writes one RO-Crate (Workflow Run Crate profile) with the session log,
-  every file the session wrote with its checksum, the models and images used, and the receipts, so a run can be
-  inspected and rerun away from the lab.
+- **A run package.** `el session package <id> [folder]` writes one RO-Crate 1.3 folder (Process Run Crate 0.6, the
+  versions WHNRC's evidence exports pin) with the shared session log and its images, the files a session on this
+  computer changed with their checksums, and every model step and tool call as an action with its tool, times,
+  outcome and reading summary. A lab session's files stay in the lab; its receipts are in the log.
 
 ## Desktops
 
@@ -158,12 +159,12 @@ lane and decided with Rich; EnrichedLab's side is ready for each piece as the co
 | # | Piece | Owner | State |
 |---|---|---|---|
 | 1 | Isolate labs that keep data inside; no lab names in EnrichedLab | EnrichedLab | done (`f7c4fc6`) |
-| 2 | Contract rows for runs, desktops, capabilities and sandbox agents | EnrichedLab, with Home Lab | drafted in [labs.md](labs.md) |
-| 3 | Discovery mode client | EnrichedLab | in build |
-| 4 | Reasoning summaries | EnrichedLab | in build |
-| 5 | Desktop pane and agent tools | EnrichedLab | in build, against Home Lab's desktop actions |
+| 2 | Contract rows for runs, desktops, capabilities and sandbox agents | EnrichedLab, with Home Lab | in [labs.md](labs.md) (`ac42ee2`); runs proposed, shape sent to Home Lab |
+| 3 | Discovery mode client | EnrichedLab | done (`d4a39dc`) |
+| 4 | Reasoning summaries | EnrichedLab | done (`398e4d6`) |
+| 5 | Desktop pane and agent tools | EnrichedLab | done against Home Lab's action shape (`4824b45`); live check when Gate offers it |
 | 6 | Runs at the lab, client | EnrichedLab | after the shape is agreed with Home Lab |
-| 7 | Run package | EnrichedLab | in build |
+| 7 | Run package | EnrichedLab | done (`700eb59`) |
 | 8 | Desktop sandboxes, `Home Lab` title | Home Lab | in build |
 | 9 | Runs on Rein and scheduled tasks | Home Lab | next |
 | 10 | Discovery grant and approval holds | Home Lab | after Rich confirms to its owner |
