@@ -18,6 +18,8 @@ import type { SandboxApi } from "./sandbox_workspace.ts";
 import { login, refresh, type SavedClient, type SiteCredentials } from "./oauth.ts";
 
 export interface SiteConfig {
+	/** Names the lab had before a rename; model references made under them still resolve. */
+	formerNames?: string[];
 	/** Short id: CLI arguments and tool name prefixes (enrichedlab_sandbox_run). */
 	name: string;
 	/** What people see: the lab's name. Defaults to the short name. */
@@ -297,7 +299,9 @@ export class Sites {
 		if (!site) throw new Error(`No site named ${from}.`);
 		if (from !== to && sites.some((s) => s.name === to)) throw new Error(`A site named ${to} already exists.`);
 		if (!/^[a-z][a-z0-9_-]{0,31}$/.test(to)) throw new Error("Site names are lowercase letters, digits, - and _, starting with a letter.");
-		const renamed = { ...site, name: to, title: title ?? site.title };
+		// Sessions started before the rename name the lab's models by the old name: keep it so they still resolve.
+		const formerNames = [...new Set([...(site.formerNames ?? []), from])].filter((n) => n !== to);
+		const renamed = { ...site, name: to, title: title ?? site.title, ...(formerNames.length ? { formerNames } : {}) };
 		if (from !== to && existsSync(this.credPath(from))) renameSync(this.credPath(from), this.credPath(to));
 		if (from !== to && existsSync(this.deviceFile(from))) renameSync(this.deviceFile(from), this.deviceFile(to));
 		this.saveConfigs(sites.map((s) => (s.name === from ? renamed : s)));
@@ -517,6 +521,11 @@ export class Sites {
 		if (model.source !== "site") return true;
 		if (site) return model.provider === site;
 		return !this.isolated(model.provider);
+	}
+
+	/** Each former lab name mapped to the lab's name now. */
+	aliases(): Record<string, string> {
+		return Object.fromEntries(this.configs().flatMap((c) => (c.formerNames ?? []).map((f) => [f, c.name])));
 	}
 
 	isolated(name: string): boolean {

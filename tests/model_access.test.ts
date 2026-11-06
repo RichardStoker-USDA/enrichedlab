@@ -95,3 +95,15 @@ describe("a session whose model goes away", () => {
 		expect(asked).toBe(1);
 	});
 });
+
+describe("a renamed lab", () => {
+	test("model references made under its old name still resolve", async () => {
+		const { ModelRegistry } = await import("../packages/engine/src/models/registry.ts");
+		const registry = new ModelRegistry(() => DEFAULT_CONFIG);
+		const model = profile("enrichedlab/qwen3.8-flash-next-nvfp4", "site");
+		registry.addSource({ name: "enrichedlab", models: () => [model] });
+		expect(registry.resolve("home/qwen3.8-flash-next-nvfp4")).toBeUndefined();
+		registry.aliases = () => ({ home: "enrichedlab" });
+		expect(registry.resolve("home/qwen3.8-flash-next-nvfp4")?.ref).toBe("enrichedlab/qwen3.8-flash-next-nvfp4");
+	});
+});

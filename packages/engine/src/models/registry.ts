@@ -183,9 +183,15 @@ export class ModelRegistry {
 		return this.all().map(toInfo);
 	}
 
-	/** Find a model by full reference, or by id when only one provider has it. */
+	/** Former provider names (a renamed lab) mapped to the names now. */
+	aliases: () => Record<string, string> = () => ({});
+
+	/** Find a model by full reference, or by id when only one provider has it. A renamed lab's old name still works. */
 	resolve(ref: string | undefined): ModelProfile | undefined {
 		if (!ref) return undefined;
+		const slash = ref.indexOf("/");
+		const renamed = slash > 0 ? this.aliases()[ref.slice(0, slash)] : undefined;
+		if (renamed) ref = `${renamed}${ref.slice(slash)}`;
 		const all = this.all();
 		return all.find((m) => m.ref === ref) ?? (all.filter((m) => m.id === ref).length === 1 ? all.find((m) => m.id === ref) : undefined);
 	}

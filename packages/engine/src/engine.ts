@@ -137,6 +137,7 @@ export class Engine {
 			this.emit("canvas.updated", summary, summary.sessionId);
 			if (summary.version === 1) this.wantWindow(summary.sessionId, `"${summary.title}"`);
 		});
+		this.registry.aliases = () => this.sites.aliases();
 		this.apps = new AppHost({
 			paths: this.paths,
 			emit: (name, params, sessionId) => {
