@@ -44,11 +44,12 @@
 		filters = {};
 		sort = undefined;
 		selected = undefined;
-		// A plot starts with a number on the vertical axis and another column across.
-		const y = table.columns.findIndex((c) => c.type === "number");
-		plotY = Math.max(0, y);
-		plotX = Math.max(0, table.columns.findIndex((_, i) => i !== plotY));
-		plotColor = -1;
+		// A plot needs numbers on both axes: the first two number columns, across and up.
+		const numbers = table.columns.flatMap((c, i) => (c.type === "number" ? [i] : []));
+		plotX = numbers[0] ?? 0;
+		plotY = numbers[1] ?? numbers[0] ?? 0;
+		// Color by the first text column, when there is one.
+		plotColor = table.columns.findIndex((c) => c.type === "text");
 	});
 
 	let debounced = $state({ filters: {} as Record<number, string>, search: "" });
@@ -237,11 +238,11 @@
 			{/if}
 		</span>
 		<div class="plot-menu">
-			<button class="btn" onclick={() => (plotOpen = !plotOpen)} disabled={numericCols.length < 1 || (table?.columns.length ?? 0) < 2} aria-expanded={plotOpen} title={numericCols.length < 1 ? "A plot needs a column of numbers" : "Plot two columns"}>Plot</button>
+			<button class="btn" onclick={() => (plotOpen = !plotOpen)} disabled={numericCols.length < 2} aria-expanded={plotOpen} title={numericCols.length < 2 ? "A plot needs two columns of numbers" : "Plot one number column against another"}>Plot</button>
 			{#if plotOpen && table}
 				<div class="menu plot-form">
-					<label>Horizontal <select class="field" bind:value={plotX}>{#each table.columns as c, i}<option value={i}>{c.name}</option>{/each}</select></label>
-					<label>Vertical <select class="field" bind:value={plotY}>{#each table.columns as c, i}<option value={i}>{c.name}</option>{/each}</select></label>
+					<label>Horizontal <select class="field" bind:value={plotX}>{#each numericCols as { c, i } (i)}<option value={i}>{c.name}</option>{/each}</select></label>
+					<label>Vertical <select class="field" bind:value={plotY}>{#each numericCols as { c, i } (i)}<option value={i}>{c.name}</option>{/each}</select></label>
 					<label>Color by <select class="field" bind:value={plotColor}><option value={-1}>Nothing</option>{#each table.columns as c, i}<option value={i}>{c.name}</option>{/each}</select></label>
 					<p class="scope">Plots every row of the table{order.length < (table?.rows ?? order.length) ? ", not only the filtered ones" : ""}.</p>
 					<button class="btn primary" onclick={makePlot}>Draw</button>

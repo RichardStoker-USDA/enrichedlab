@@ -60,6 +60,7 @@
 		const cc = spec.color ? col(spec.color) : undefined;
 		const kept: number[] = [];
 		for (let r = 0; r < t.rows; r++) if (typeof cx.values[r] === "number" && typeof cy.values[r] === "number") kept.push(r);
+		if (!kept.length) throw new Error(`No rows have numbers in both ${spec.x} and ${spec.y}, so there is nothing to draw.`);
 		if (spec.type === "line") kept.sort((a, b) => (cx.values[a] as number) - (cx.values[b] as number));
 		rows = kept;
 		xs = Float32Array.from(rows, (r) => cx.values[r] as number);
@@ -82,14 +83,24 @@
 			});
 			legend = [{ label: `${cc.name} ${formatCell(lo)}`, color: "#440154" }, { label: formatCell(hi), color: "#fde725" }];
 		} else if (cc) {
-			const cats = new Map<string, number>();
-			rows.forEach((r, i) => {
+			// Each color means one category: the most common get the palette, the rest share a gray "Other", so no two
+			// categories ever look alike.
+			const counts = new Map<string, number>();
+			for (const r of rows) {
 				const key = String(cc.values[r] ?? "missing");
-				if (!cats.has(key)) cats.set(key, cats.size);
-				const [R, G, B] = hex(CATEGORY[cats.get(key)! % CATEGORY.length]!);
+				counts.set(key, (counts.get(key) ?? 0) + 1);
+			}
+			const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([key]) => key);
+			const named = ranked.length > CATEGORY.length ? ranked.slice(0, CATEGORY.length - 1) : ranked;
+			const slot = new Map(named.map((key, i) => [key, i]));
+			const other = "#8c8c8c";
+			rows.forEach((r, i) => {
+				const at = slot.get(String(cc.values[r] ?? "missing"));
+				const [R, G, B] = hex(at === undefined ? other : CATEGORY[at]!);
 				color.set([R, G, B, alpha], i * 4);
 			});
-			legend = [...cats.keys()].slice(0, 10).map((label, i) => ({ label, color: CATEGORY[i % CATEGORY.length]! }));
+			legend = named.map((label, i) => ({ label, color: CATEGORY[i]! }));
+			if (ranked.length > named.length) legend.push({ label: `Other (${ranked.length - named.length} more)`, color: other });
 		} else {
 			for (let i = 0; i < rows.length; i++) color.set([...accent, alpha], i * 4);
 		}
