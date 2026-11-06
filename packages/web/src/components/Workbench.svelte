@@ -31,7 +31,7 @@
 	const terminalNote = $derived(lab.place.id === "local" ? "Your shell, in the project folder" : `A command console in the ${lab.place.title} sandbox`);
 </script>
 
-<aside class="workbench" aria-label="Workbench">
+<aside class="workbench" aria-label="Workbench" hidden={!lab.workbench}>
 	<div class="bar toolbar">
 		<span class="label">Workbench</span>
 		<div class="actions">
@@ -156,6 +156,9 @@
 			transform: translateX(24px);
 			opacity: 0;
 		}
+	}
+	.workbench[hidden] {
+		display: none;
 	}
 	.bar {
 		justify-content: space-between;

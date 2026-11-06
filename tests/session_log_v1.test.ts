@@ -21,7 +21,7 @@ const log: SessionEvent[] = [
 	{ t: "notice", id: "e12", at: at(11), level: "warn", text: "Older turns were summarized." },
 ];
 
-const shape = (events: SessionEvent[]) => derive(events).messages.map((m) => JSON.stringify([m.role, m.content]));
+const shape = (events: SessionEvent[]) => derive(events).messages.map((m) => JSON.stringify(m));
 
 describe("session log v1", () => {
 	test("export: gap-free seq, decisions apart from results, images by reference", () => {

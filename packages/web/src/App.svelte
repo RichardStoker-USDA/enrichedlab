@@ -117,6 +117,9 @@
 	</main>
 	{#if benchOpen}
 		<div class="gutter" role="separator" aria-orientation="vertical" aria-label="Resize the workbench" onpointerdown={dragBench}></div>
+	{/if}
+	<!-- Mounted for the whole session, hidden when closed, so its terminals and apps keep running. -->
+	{#if lab.current}
 		<Workbench />
 	{/if}
 	<Palette />

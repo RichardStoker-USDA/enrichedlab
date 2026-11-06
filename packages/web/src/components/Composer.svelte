@@ -1,11 +1,37 @@
+<script lang="ts" module>
+	import type { Part as DraftPart } from "@enrichedlab/protocol";
+	type DraftImage = { name: string; part: Extract<DraftPart, { type: "image" }>; url: string };
+	const drafts = new Map<string, { text: string; images: DraftImage[] }>();
+	function saveDraft(id: string, text: string, images: DraftImage[]) {
+		drafts.set(id, { text, images });
+		try {
+			if (text) sessionStorage.setItem(`enrichedlab.draft.${id}`, text);
+			else sessionStorage.removeItem(`enrichedlab.draft.${id}`);
+		} catch {
+			// Storage blocked: the draft lives while the window is open.
+		}
+	}
+	function loadDraft(id: string): { text: string; images: DraftImage[] } | undefined {
+		const kept = drafts.get(id);
+		if (kept) return kept;
+		try {
+			const text = sessionStorage.getItem(`enrichedlab.draft.${id}`);
+			return text ? { text, images: [] } : undefined;
+		} catch {
+			return undefined;
+		}
+	}
+</script>
+
 <script lang="ts">
 	import type { Part } from "@enrichedlab/protocol";
 	import { lab, USAGE_URL } from "../lib/store.svelte.ts";
 	import { tokens } from "../lib/format.ts";
 	import PlaceSwitch from "./PlaceSwitch.svelte";
 
+	type Image = { name: string; part: Extract<Part, { type: "image" }>; url: string };
 	let text = $state("");
-	let images = $state<{ name: string; part: Extract<Part, { type: "image" }>; url: string }[]>([]);
+	let images = $state<Image[]>([]);
 	let field: HTMLTextAreaElement | undefined = $state();
 	let menuOpen = $state(false);
 	let menu: HTMLDivElement | undefined = $state();
@@ -56,23 +82,43 @@
 		void text;
 		resize();
 	});
+	// Each session keeps its own draft: switching sessions saves this one and brings back the other's. Text also
+	// survives a reload of the window (images stay only while the window is open).
+	let shownFor: string | undefined;
 	$effect(() => {
-		void lab.current;
+		const id = lab.current;
+		if (shownFor === id) return;
+		if (shownFor) saveDraft(shownFor, text, images);
+		shownFor = id;
+		const draft = id ? loadDraft(id) : undefined;
+		text = draft?.text ?? "";
+		images = draft?.images ?? [];
 		field?.focus({ preventScroll: true });
 	});
+	$effect(() => {
+		if (shownFor) saveDraft(shownFor, text, images);
+	});
+
+	/** Why Send is off now, if it is. */
+	const blocked = $derived(lab.lost ? "Reconnecting to the engine…" : lab.moving ? "The session is moving; send when it arrives." : missing ? "Choose a model first." : "");
 
 	async function send() {
 		const value = text.trim();
-		if (!value && !images.length) return;
-		const parts = images.map((i) => i.part);
+		if ((!value && !images.length) || blocked) return;
+		const sessionId = lab.current;
+		const sent = images;
 		text = "";
-		for (const i of images) URL.revokeObjectURL(i.url);
 		images = [];
 		try {
-			await lab.send(value || "(see the attached image)", parts.length ? parts : undefined);
+			await lab.send(value || "(see the attached image)", sent.length ? sent.map((i) => i.part) : undefined, sessionId);
+			for (const i of sent) URL.revokeObjectURL(i.url);
 		} catch (error) {
 			lab.say((error as Error).message);
-			text = value;
+			// The message goes back into the session it was written for, attachments included.
+			if (sessionId === lab.current) {
+				text = value;
+				images = sent;
+			} else if (sessionId) saveDraft(sessionId, value, sent);
 		}
 	}
 
@@ -223,7 +269,7 @@
 					<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5" /></svg>
 				</button>
 			{/if}
-			<button type="submit" class="send" disabled={!text.trim() && !images.length} aria-label={lab.busy ? "Add to this turn" : "Send"}>
+			<button type="submit" class="send" disabled={(!text.trim() && !images.length) || Boolean(blocked)} aria-label={lab.busy ? "Add to this turn" : "Send"} title={blocked || (lab.busy ? "Add to this turn" : "Send")}>
 				<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" /></svg>
 			</button>
 		</div>

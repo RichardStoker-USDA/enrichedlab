@@ -1,6 +1,7 @@
 // The web surface's state. Everything comes from the engine; this file mirrors it and sends requests. The workbench
 // layout is the one piece kept here: it belongs to this person's screen, per session, in local storage.
 
+import { pageMenu } from "./menu.svelte.ts";
 import type { AppSummary, BrowserFrame, BrowserInput, BrowserPageState, CanvasSummary, DeviceRequest, LabApp, ModelInfo, Part, Partial_, PermissionDecision, PermissionRequest, SessionEvent, SessionStatus, SessionSummary, SiteSummary, UiPrefs } from "@enrichedlab/protocol";
 import { close as closeTab, emptyLayout, move, type Node, open as openTab, resize as resizeSplit, revive, sync, type Edge, type PaneKind, type Tab, uid, activate, groups } from "./layout.ts";
 import { placeOf, places, type Place } from "./places.ts";
@@ -97,6 +98,11 @@ class Lab {
 	}
 
 	/** A lab that keeps its sessions' work in its sandbox can't be left. */
+	/** A sheet, the palette or a page menu covers the window: native browser views hide, since nothing draws over them. */
+	get covered(): boolean {
+		return Boolean(this.palette || this.settings || this.services || this.join || this.confirming || this.deviceRequests.length || pageMenu.current);
+	}
+
 	get pinned(): boolean {
 		const site = this.summary?.site;
 		return Boolean(site && this.sites.find((s) => s.name === site)?.isolated);
@@ -187,11 +193,16 @@ class Lab {
 	/** When the open session loaded; steps logged before it render without the enter motion. */
 	openedAt = 0;
 
+	/** Counts opens, so a slow answer for a session the person already left never replaces the one they chose. */
+	private openGeneration = 0;
+
 	async open(id: string): Promise<void> {
 		if (this.current && this.current !== id) void rpc.call("session.close", { sessionId: this.current }).catch(() => undefined);
+		const generation = ++this.openGeneration;
 		this.opening = { id, events: [], requests: [] };
 		try {
 			const snap = await rpc.call("session.open", { sessionId: id });
+			if (generation !== this.openGeneration) return;
 			const held = this.opening;
 			this.opening = undefined;
 			if (this.current !== id) this.screen = undefined;
@@ -204,10 +215,12 @@ class Lab {
 			const asked = new Set(snap.pending.map((p) => p.requestId));
 			this.pending = [...snap.pending, ...(held?.id === id ? held.requests.filter((r) => !asked.has(r.requestId)) : [])];
 			this.partial = snap.partial ?? emptyPartial();
-			this.canvases = await rpc.call("canvas.list", { sessionId: id });
+			const canvases = await rpc.call("canvas.list", { sessionId: id });
+			if (generation !== this.openGeneration) return;
+			this.canvases = canvases;
 			this.restoreLayout(id);
 		} catch (error) {
-			this.say((error as Error).message);
+			if (generation === this.openGeneration) this.say((error as Error).message);
 		}
 	}
 
@@ -439,18 +452,25 @@ class Lab {
 		}
 	}
 
-	async send(text: string, images?: Part[]): Promise<void> {
-		if (!this.current) return;
-		await rpc.call("session.prompt", { sessionId: this.current, text, images });
+	async send(text: string, images?: Part[], sessionId = this.current): Promise<void> {
+		if (!sessionId) return;
+		await rpc.call("session.prompt", { sessionId, text, images });
 	}
 
 	cancel(): void {
 		if (this.current) void rpc.call("session.cancel", { sessionId: this.current });
 	}
 
+	/** Answer a permission request. If the answer doesn't reach the engine, the request comes back to answer again. */
 	async answer(requestId: string, decision: PermissionDecision): Promise<void> {
+		const request = this.pending.find((p) => p.requestId === requestId);
 		this.pending = this.pending.filter((p) => p.requestId !== requestId);
-		await rpc.call("permission.answer", { requestId, decision });
+		try {
+			await rpc.call("permission.answer", { requestId, decision });
+		} catch (error) {
+			if (request && !this.pending.some((p) => p.requestId === requestId)) this.pending = [request, ...this.pending];
+			this.say(`Your answer didn't reach the engine: ${(error as Error).message}`);
+		}
 	}
 
 	async setModel(model?: string, effort?: string): Promise<void> {
@@ -602,8 +622,12 @@ class Lab {
 			this.pending = this.pending.filter((p) => p.requestId !== requestId);
 		});
 		rpc.on("site.updated", (site) => {
-			const known = this.sites.some((s) => s.name === site.name);
-			this.sites = known ? this.sites.map((s) => (s.name === site.name ? site : s)) : [...this.sites, site];
+			const before = this.sites.find((s) => s.name === site.name);
+			this.sites = before ? this.sites.map((s) => (s.name === site.name ? site : s)) : [...this.sites, site];
+			// A lab that signed in, out, or changed what it grants changes which models are offered.
+			if (!before || before.signedIn !== site.signedIn || before.models !== site.models) {
+				void rpc.call("model.list", {}).then((r) => (this.models = r.models), () => undefined);
+			}
 		});
 		rpc.on("lab.notice", (notice) => this.say(notice.text, notice.url));
 		rpc.on("lab.apps.changed", () => void this.refreshApps());

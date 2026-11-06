@@ -9,7 +9,8 @@
 	const waiting = $derived(steps.some((s) => s.kind === "running" && s.waiting));
 	// Short stretches stay open; long finished ones fold to their summary until asked.
 	let opened = $state<boolean | undefined>(undefined);
-	const open = $derived(opened ?? (live || waiting || steps.length <= 3));
+	// A request waiting for the person always shows, even in a stretch they folded.
+	const open = $derived(waiting || (opened ?? (live || steps.length <= 3)));
 	const summary = $derived(summarize(steps));
 	const failed = $derived(steps.some((s) => s.kind === "done" && !s.event.ok && s.event.decision !== "denied"));
 	const lastId = $derived(steps.at(-1)?.id);

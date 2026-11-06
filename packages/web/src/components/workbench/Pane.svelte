@@ -9,7 +9,12 @@
 	import ViewPane from "../panes/ViewPane.svelte";
 	import AppPane from "../panes/AppPane.svelte";
 
-	let { tab, active }: { tab: Tab; active: boolean } = $props();
+	import { lab } from "../../lib/store.svelte.ts";
+
+	let { tab, active: front }: { tab: Tab; active: boolean } = $props();
+	// The workbench stays mounted while hidden (so terminals and apps keep running); a pane is shown only when its
+	// tab is in front, the workbench is open, and no sheet covers it.
+	const active = $derived(front && lab.workbench && !lab.covered);
 </script>
 
 {#if tab.kind === "view"}

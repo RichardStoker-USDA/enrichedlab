@@ -122,7 +122,7 @@ export function fromV1(input: LogV1Event[], attachments: Attachments = {}): { ev
 			const calls = Array.isArray(d.calls) ? (d.calls as { id: string; name: string; arguments: unknown }[]) : [];
 			for (const c of calls) open.set(String(c.id), String(c.name));
 			const stop = STOPS.has(d.stop as StopReason) ? (d.stop as StopReason) : calls.length ? "tool_use" : "end";
-			events.push({ t: "assistant", id, at, model: String(d.model ?? ""), text: String(d.text ?? ""), ...(typeof d.reasoning === "string" ? { reasoning: d.reasoning } : {}), toolCalls: calls.map((c) => ({ id: String(c.id), name: String(c.name), args: typeof c.arguments === "string" ? c.arguments : JSON.stringify(c.arguments ?? {}) })), stop });
+			events.push({ t: "assistant", id, at, model: String(d.model ?? ""), text: String(d.text ?? ""), ...(typeof d.reasoning === "string" ? { reasoning: d.reasoning } : {}), ...(calls.length ? { toolCalls: calls.map((c) => ({ id: String(c.id), name: String(c.name), args: typeof c.arguments === "string" ? c.arguments : JSON.stringify(c.arguments ?? {}) })) } : {}), stop });
 		} else if (e.kind === "decision") {
 			decisions.set(String(d.callId), { verdict: d.verdict as string, by: d.by as string });
 			continue;

@@ -13,6 +13,7 @@
 	let title = $state("");
 	let page = $state<BrowserState | undefined>();
 	let slot: HTMLDivElement | undefined = $state();
+	let addressField: HTMLInputElement | undefined = $state();
 
 	function go(e?: Event) {
 		e?.preventDefault();
@@ -39,7 +40,8 @@
 			if (which !== id) return;
 			page = s;
 			title = s.title;
-			if (document.activeElement?.className !== "address") address = s.url;
+			// The address only follows the page while the person isn't typing in it.
+			if (document.activeElement !== addressField) address = s.url;
 		});
 		return () => {
 			observer.disconnect();
@@ -65,7 +67,7 @@
 				<svg viewBox="0 0 16 16"><path d="M12.5 8a4.5 4.5 0 1 1-1.3-3.2M12.5 3v2.5H10" /></svg>
 			</button>
 		{/if}
-		<input class="field address" bind:value={address} placeholder="Address, or a local app such as localhost:3838" aria-label="Address" spellcheck="false" />
+		<input class="field address" bind:this={addressField} bind:value={address} placeholder="Address, or a local app such as localhost:3838" aria-label="Address" spellcheck="false" />
 	</form>
 	{#if !current}
 		<div class="blank">

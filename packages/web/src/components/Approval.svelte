@@ -3,28 +3,38 @@
 	import { lab } from "../lib/store.svelte.ts";
 
 	let { request }: { request: PermissionRequest } = $props();
-	let allowButton: HTMLButtonElement | undefined = $state();
-	const detail = $derived(
+	let root: HTMLElement | undefined = $state();
+	let full = $state(false);
+	const lines = $derived(
 		(request.view.diff ?? request.view.detail ?? "")
 			.replace(/\s+$/, "")
 			.split("\n")
-			.filter((l) => l && !l.startsWith("---") && !l.startsWith("+++"))
-			.slice(0, 40),
+			.filter((l) => l && !l.startsWith("---") && !l.startsWith("+++")),
 	);
+	const detail = $derived(full ? lines : lines.slice(0, 40));
+	// The oldest waiting request is the one the keys answer; the others wait their turn.
+	const first = $derived(lab.pending[0]?.requestId === request.requestId);
 	$effect(() => {
-		allowButton?.focus({ preventScroll: true });
+		// Focus comes to the request itself, never to Allow, so a stray Return can't approve anything.
+		if (first && (document.activeElement === document.body || !document.activeElement)) root?.focus({ preventScroll: true });
 	});
 	function key(e: KeyboardEvent) {
-		if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement) return;
-		if (e.key === "y") void lab.answer(request.requestId, "allow");
-		else if (e.key === "a" && !request.once) void lab.answer(request.requestId, "allow_session");
-		else if (e.key === "n" || e.key === "Escape") void lab.answer(request.requestId, "deny");
+		if (!first || e.repeat || e.metaKey || e.ctrlKey || e.altKey || lab.covered) return;
+		// Single keys answer only while focus is on the page or in this request, never while typing elsewhere.
+		const at = document.activeElement;
+		if (at && at !== document.body && !root?.contains(at)) return;
+		const k = e.key.toLowerCase();
+		if (k === "y") void lab.answer(request.requestId, "allow");
+		else if (k === "a" && !request.once) void lab.answer(request.requestId, "allow_session");
+		else if (k === "n") void lab.answer(request.requestId, "deny");
+		else return;
+		e.preventDefault();
 	}
 </script>
 
 <svelte:window onkeydown={key} />
 
-<section class="approval" aria-label={`Allow ${request.tool}?`}>
+<section class="approval" bind:this={root} tabindex="-1" aria-label={`Allow ${request.tool}?`}>
 	<p class="ask"><strong>Allow {request.tool}?</strong>{#if request.view.unreviewed}<span class="unreviewed">Unreviewed</span>{/if} <span>{request.reason}</span></p>
 	{#if request.view.target}
 		<pre class="target">{request.view.target}</pre>
@@ -32,13 +42,16 @@
 	{#if detail.length}
 		<pre class="detail">{#each detail as line}<span class:add={line.startsWith("+")} class:del={line.startsWith("-")}>{line}
 </span>{/each}</pre>
+		{#if lines.length > 40}
+			<button class="more" onclick={() => (full = !full)}>{full ? "Show less" : `Show all ${lines.length} lines`}</button>
+		{/if}
 	{/if}
 	<div class="actions">
 		<button class="secondary" onclick={() => lab.answer(request.requestId, "deny")}>Decline <kbd>N</kbd></button>
 		{#if !request.once}
 			<button class="secondary" onclick={() => lab.answer(request.requestId, "allow_session")}>Allow for this session <kbd>A</kbd></button>
 		{/if}
-		<button class="primary" bind:this={allowButton} onclick={() => lab.answer(request.requestId, "allow")}>Allow <kbd>Y</kbd></button>
+		<button class="primary" onclick={() => lab.answer(request.requestId, "allow")}>Allow <kbd>Y</kbd></button>
 	</div>
 </section>
 
@@ -52,6 +65,15 @@
 		box-shadow: var(--shadow);
 		animation: reveal 200ms var(--ease-out);
 		overflow: hidden;
+	}
+	.approval:focus-visible {
+		outline: 2px solid var(--focus-inner);
+		outline-offset: 2px;
+	}
+	.more {
+		margin: -2px 0 8px;
+		font-size: 12px;
+		color: var(--link);
 	}
 	.ask {
 		margin: 0 0 8px;
