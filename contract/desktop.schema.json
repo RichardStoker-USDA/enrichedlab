@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/RichardStoker-USDA/enrichedlab-harness/contract/desktop.schema.json",
+  "title": "Desktop sandbox: POST /v1/containers/{id}/desktop and its answer",
+  "$defs": {
+    "point": { "type": "array", "prefixItems": [{ "type": "integer", "minimum": 0 }, { "type": "integer", "minimum": 0 }], "minItems": 2, "maxItems": 2 },
+    "action": {
+      "type": "object",
+      "required": ["action"],
+      "properties": {
+        "action": {
+          "enum": [
+            "screenshot", "cursor_position", "mouse_move", "left_click", "right_click", "middle_click", "double_click",
+            "triple_click", "left_click_drag", "type", "key", "scroll", "zoom", "wait"
+          ]
+        },
+        "coordinate": { "$ref": "#/$defs/point" },
+        "start_coordinate": { "$ref": "#/$defs/point" },
+        "text": { "type": "string", "maxLength": 4000, "description": "type: the text; key: an xdotool-style key or chord such as ctrl+s" },
+        "scroll_direction": { "enum": ["up", "down", "left", "right"] },
+        "scroll_amount": { "type": "integer", "minimum": 1, "maximum": 50 },
+        "region": { "type": "array", "items": { "type": "integer", "minimum": 0 }, "minItems": 4, "maxItems": 4, "description": "zoom: x0, y0, x1, y1" },
+        "duration": { "type": "number", "minimum": 0, "maximum": 30, "description": "wait: seconds" },
+        "by": { "enum": ["agent", "person"], "description": "who the client says asked; a label beside the audited actor, never authority" }
+      }
+    },
+    "answer": {
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean" },
+        "screenshot": { "type": "object", "required": ["png"], "properties": { "png": { "type": "string", "description": "base64 PNG" }, "width": { "type": "integer" }, "height": { "type": "integer" } } },
+        "cursor": { "$ref": "#/$defs/point" }
+      }
+    },
+    "open": { "type": "object", "required": ["target"], "properties": { "target": { "type": "string", "description": "an https address or a /sandbox file path" }, "by": { "enum": ["agent", "person"] } } }
+  },
+  "$ref": "#/$defs/action"
+}

@@ -28,7 +28,7 @@ import type { SiteAdapter } from "./adapter.ts";
 import { fetchRepo, sendRepo } from "./repo_handoff.ts";
 import type { SandboxApi } from "./sandbox_workspace.ts";
 import type { SiteConfig, SiteRoute } from "./sites.ts";
-import { type CheckRow, CONTRACT, contractProblem, DESCRIPTOR_PATH, type Endpoint, type LabAppEntry, type LabDescriptor, type LabEvent, type LabSigner, SCHEMAS, validate } from "./contract.ts";
+import { type CheckRow, CONTRACT, contractProblem, DESCRIPTOR_PATH, type Endpoint, type LabAppEntry, type LabDescriptor, type LabEvent, type LabSigner, type SandboxAgents, SCHEMAS, validate } from "./contract.ts";
 
 interface GateModel {
 	id: string;
@@ -55,6 +55,9 @@ interface GateMe {
 	/** The sandbox networks this person may choose at create, such as ["none", "internet"]. */
 	sandbox_networks?: string[];
 	quotas?: unknown[];
+	/** Named grants, such as "discovery". */
+	capabilities?: string[];
+	sandbox_agents?: SandboxAgents;
 }
 
 /** What a sandbox was made with: its image and network (undefined: the lab's default image, or no network). */

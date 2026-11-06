@@ -27,6 +27,8 @@
         "network": { "enum": ["none", "allowlist", "open"] }, "hosts": { "type": "array", "items": { "type": "string" } }
       }
     },
-    "quotas": { "type": "array" }
+    "quotas": { "type": "array" },
+    "capabilities": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "named grants; discovery lets the person turn on Discovery mode in this lab's sessions" },
+    "sandbox_agents": { "enum": ["lab", "any"], "description": "whose agents may use this person's sandboxes" }
   }
 }

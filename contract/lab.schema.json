@@ -15,11 +15,29 @@
         "events": { "type": "boolean" }, "guard": { "type": "boolean" }, "devices": { "type": "boolean" },
         "containers": { "type": "boolean" }, "stop": { "type": "boolean" }, "ports": { "type": "boolean" },
         "attach": { "type": "boolean" }, "files": { "type": "boolean" }, "apps": { "type": "boolean" },
-        "signers": { "type": "boolean" }, "usage": { "type": "boolean" }, "agents": { "type": "boolean" }
+        "signers": { "type": "boolean" }, "usage": { "type": "boolean" }, "agents": { "type": "boolean" },
+        "runs": { "type": "boolean" }
       }
     },
     "sign_in": { "type": "object", "required": ["kind"], "properties": { "kind": { "type": "string", "enum": ["cloudflare-access-oauth", "oauth"] } } },
-    "policy": { "type": "object", "properties": { "keep_data_inside": { "type": "boolean" }, "device_proof": { "enum": ["off", "optional", "required"] } } },
+    "policy": {
+      "type": "object",
+      "properties": {
+        "keep_data_inside": { "type": "boolean" }, "device_proof": { "enum": ["off", "optional", "required"] },
+        "sandbox_agents": { "enum": ["lab", "any"], "description": "whose agents use sandboxes by default: lab = only this lab's models; any = a person's own agents too" }
+      }
+    },
+    "sandbox_desktop": {
+      "type": "object",
+      "required": ["image", "actions"],
+      "description": "a desktop sandbox; POST /v1/containers/{id}/desktop takes one action (desktop.schema.json)",
+      "properties": {
+        "image": { "type": "string", "minLength": 1 },
+        "screen": { "type": "object", "required": ["width", "height"], "properties": { "width": { "type": "integer", "minimum": 1 }, "height": { "type": "integer", "minimum": 1 } } },
+        "actions": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "open": { "type": "boolean", "description": "POST /v1/containers/{id}/desktop/open is served" }
+      }
+    },
     "support": { "type": "object", "required": ["url"], "properties": { "url": { "type": "string", "pattern": "^https://" } } },
     "docs": { "type": "object", "required": ["url"], "properties": { "url": { "type": "string", "pattern": "^https://" } } },
     "sandbox_profiles": {

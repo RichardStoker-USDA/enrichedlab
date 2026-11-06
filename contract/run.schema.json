@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/RichardStoker-USDA/enrichedlab-harness/contract/run.schema.json",
+  "title": "A run at the lab: /v1/runs (proposed)",
+  "$defs": {
+    "create": {
+      "type": "object",
+      "required": ["session", "model"],
+      "description": "POST /v1/runs, with an Idempotency-Key header",
+      "properties": {
+        "session": { "type": "string", "minLength": 1, "description": "the session's id; its log so far follows as log" },
+        "log": { "type": "string", "description": "the session log so far, in the format el session export writes (session-log.md)" },
+        "title": { "type": "string", "maxLength": 120 },
+        "model": { "type": "string", "minLength": 1, "description": "one of this lab's models" },
+        "effort": { "type": "string" },
+        "mode": { "enum": ["attended", "discovery"], "description": "discovery needs the discovery capability; attended runs wait for the person's decisions" },
+        "sandbox": { "type": "string", "description": "the sandbox the session already works in" }
+      }
+    },
+    "run": {
+      "type": "object",
+      "required": ["id", "session", "status"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "session": { "type": "string" },
+        "title": { "type": "string" },
+        "status": { "enum": ["queued", "running", "waiting", "paused", "finished", "failed", "stopped"] },
+        "mode": { "enum": ["attended", "discovery"] },
+        "model": { "type": "string" },
+        "created": { "type": "string", "format": "date-time" },
+        "updated": { "type": "string", "format": "date-time" },
+        "waiting": {
+          "type": "object",
+          "properties": { "kind": { "enum": ["decision", "message"] }, "call": { "type": "string" }, "text": { "type": "string" } }
+        },
+        "reason": { "type": "string", "description": "why a run failed or stopped, in words" },
+        "events": { "type": "integer", "minimum": 0, "description": "how many log events it has written" }
+      }
+    },
+    "message": { "type": "object", "required": ["text"], "properties": { "text": { "type": "string", "minLength": 1 } } },
+    "decision": { "type": "object", "required": ["call", "allow"], "properties": { "call": { "type": "string" }, "allow": { "type": "boolean" }, "note": { "type": "string" } } }
+  },
+  "$ref": "#/$defs/run"
+}

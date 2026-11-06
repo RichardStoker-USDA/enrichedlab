@@ -55,7 +55,7 @@ export interface LabSigner {
 	revoked_at?: string | null;
 }
 
-export type Endpoint = "models" | "mcp" | "bundles" | "events" | "guard" | "devices" | "containers" | "stop" | "ports" | "attach" | "files" | "apps" | "signers" | "usage" | "agents";
+export type Endpoint = "models" | "mcp" | "bundles" | "events" | "guard" | "devices" | "containers" | "stop" | "ports" | "attach" | "files" | "apps" | "signers" | "usage" | "agents" | "runs";
 
 export interface SandboxProfile {
 	name: string;
@@ -72,7 +72,7 @@ export interface LabDescriptor {
 	title: string;
 	endpoints: Partial<Record<Endpoint, boolean>>;
 	sign_in: { kind: string };
-	policy?: { keep_data_inside?: boolean; device_proof?: "off" | "optional" | "required" };
+	policy?: { keep_data_inside?: boolean; device_proof?: "off" | "optional" | "required"; sandbox_agents?: SandboxAgents };
 	support?: { url: string };
 	docs?: { url: string };
 	sandbox_profiles?: SandboxProfile[];
@@ -87,6 +87,19 @@ export interface LabDescriptor {
 	/** What one exec takes: the longest single argument (a `command` is one), and how much stdin. */
 	sandbox_exec?: { max_argument_bytes?: number; max_stdin_bytes?: number };
 	conformance?: { foreign_scope?: string; scan_test?: boolean; data_tool?: { name: string; arguments?: Record<string, unknown> } };
+	/** A desktop sandbox the person and the agent work in through checked actions (POST /v1/containers/{id}/desktop). */
+	sandbox_desktop?: DesktopInfo;
+}
+
+/** Whose agents use a lab's sandboxes: only the lab's models, or a person's own agents too. */
+export type SandboxAgents = "lab" | "any";
+
+export interface DesktopInfo {
+	image: string;
+	screen?: { width: number; height: number };
+	actions: string[];
+	/** POST /v1/containers/{id}/desktop/open is served. */
+	open?: boolean;
 }
 
 export interface BrowserInfo {
