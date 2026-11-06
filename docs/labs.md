@@ -117,7 +117,7 @@ from copying it. The lab makes a copied token worth little:
 - **Short lifetimes.** Access tokens last minutes and refresh; revoking a person ends both.
 - **Sender-bound tokens.** For a lab whose descriptor lists `devices`, EnrichedLab makes a P-256 key per lab, keeps
   its private half in the OS credential store (an owner-only file where there is none), and registers the public half
-  (`POST /v1/devices`, signed by that key). Every request, MCP included, then carries a DPoP proof (RFC 9449): `htm`,
+  (`POST /v1/devices`, signed by that key). Every request, model and MCP requests included, then carries a DPoP proof (RFC 9449): `htm`,
   `htu` (the lab's public address even over the LAN), `iat`, a single-use `jti`, and `ath`, the hash of the exact
   bearer in that request. `policy.device_proof` is `off` (a lab staging the change: proofs it gets are still checked,
   none are asked for), `optional` or `required`. A token copied into another tool fails. Access doesn't issue
