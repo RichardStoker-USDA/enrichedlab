@@ -66,7 +66,9 @@ Rein (Gate's web harness) serves v1 as files rather than through its event strea
   and never decreases; call ids are unique within one assistant event; at most 64 calls per assistant event;
   arguments over 96 KiB are kept as `{}`; at most 20,000 records, blank lines aside. The engine's export makes
   repeated call ids unique (`<id>~2`), keeps a turn's first 64 calls and their results with a notice for the rest,
-  and holds `through` steady or rising.
+  and holds `through` steady or rising. A session longer than 20,000 records exports its newest turns, from a user
+  turn, behind one leading compaction that says how much was left out (with the latest summary when there is one),
+  so every export imports.
 
 ## Status
 

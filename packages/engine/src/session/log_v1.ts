@@ -110,7 +110,34 @@ export function toV1(events: SessionEvent[]): { events: V1Event[]; attachments: 
 			push(at, `x-${t.replace(/_/g, "-")}`, rest, e.id);
 		}
 	}
-	return { events: out, attachments };
+	return { events: fit(out), attachments };
+}
+
+/**
+ * A log over the shared format's record limit keeps its newest part, from a turn's start, behind one compaction that
+ * says what was left out (the latest summary when there is one), so every export imports.
+ */
+function fit(out: V1Event[]): V1Event[] {
+	if (out.length <= MAX_RECORDS) return out;
+	let start = out.length - (MAX_RECORDS - 1);
+	while (start < out.length && out[start]!.kind !== "user") start++;
+	const kept = out.slice(start);
+	const latest = out.slice(0, start).reverse().find((e) => e.kind === "compaction");
+	const left = `The first ${start.toLocaleString("en-US")} records of this session were left out of the export to fit the shared log's ${MAX_RECORDS.toLocaleString("en-US")} records.`;
+	const head: V1Event = { v: 1, seq: 1, time: kept[0]?.time ?? out[start - 1]!.time, kind: "compaction", data: { summary: latest ? `${latest.data.summary}\n\n${left}` : left, through: 0, model: latest?.data.model ?? "" } };
+	// New numbers from 2; a later compaction's `through` moves with them and never goes back.
+	let floor = 0;
+	return [
+		head,
+		...kept.map((e, i) => {
+			const seq = i + 2;
+			if (e.kind !== "compaction") return { ...e, seq };
+			const old = Number(e.data.through ?? 0);
+			const through = Math.min(seq - 1, Math.max(floor, old > start ? old - start + 1 : 0));
+			floor = through;
+			return { ...e, seq, data: { ...e.data, through } };
+		}),
+	];
 }
 
 const STOPS = new Set<StopReason>(["end", "tool_use", "length", "error", "cancelled"]);

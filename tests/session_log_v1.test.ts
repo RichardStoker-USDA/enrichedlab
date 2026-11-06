@@ -1,7 +1,7 @@
 // The shared session log v1 (docs/session-log.md): engine logs go out and come back with the same model context.
 import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "../packages/protocol/src/index.ts";
-import { MAX_CALLS, fromV1, toV1 } from "../packages/engine/src/session/log_v1.ts";
+import { MAX_CALLS, MAX_RECORDS, fromV1, toV1 } from "../packages/engine/src/session/log_v1.ts";
 import { derive } from "../packages/engine/src/session/context.ts";
 
 const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex").toString("base64");
@@ -91,5 +91,26 @@ describe("session log v1", () => {
 		const compactions = out.filter((e) => e.kind === "compaction");
 		for (const c of compactions) expect(Number(c.data.through)).toBeLessThan(c.seq);
 		expect(Number(compactions[1]!.data.through)).toBeGreaterThanOrEqual(Number(compactions[0]!.data.through));
+	});
+
+	test("a session longer than the record limit exports its newest turns behind a summary, and imports", () => {
+		const events: SessionEvent[] = [{ t: "header", v: 1, id: "h", at: at(0), cwd: "/tmp/p", created: at(0), system: "" }];
+		for (let n = 0; n < 10_500; n++) {
+			events.push({ t: "user", id: `u${n}`, at: at(1), text: `question ${n}` });
+			events.push({ t: "assistant", id: `a${n}`, at: at(2), model: "m", text: `answer ${n}`, stop: "end" });
+			if (n === 9_000) events.push({ t: "compaction", id: "k", at: at(3), summary: "Questions up to 8,990.", firstKeptId: "u8990", tokensBefore: 1, model: "m" });
+		}
+		const out = toV1(events).events;
+		expect(out.length).toBeLessThanOrEqual(MAX_RECORDS);
+		expect(out.map((e) => e.seq)).toEqual(out.map((_, i) => i + 1));
+		expect(out[0]!.kind).toBe("compaction");
+		expect(String(out[0]!.data.summary)).toContain("left out of the export");
+		expect(out[1]!.kind).toBe("user");
+		for (const c of out.filter((e) => e.kind === "compaction")) expect(Number(c.data.through)).toBeLessThan(c.seq);
+		// The newest turn is there, and the engine reads the export back.
+		expect(out.at(-1)!.data.text).toBe("answer 10499");
+		const back = fromV1(out);
+		expect(back.events.some((e) => e.t === "compaction")).toBe(true);
+		expect(back.events.filter((e) => e.t === "user").at(-1)).toMatchObject({ text: "question 10499" });
 	});
 });
