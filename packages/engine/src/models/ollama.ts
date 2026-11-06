@@ -4,7 +4,7 @@
 // MLX by default on Apple silicon wherever MLX supports the architecture.
 
 import type { Part } from "@enrichedlab/protocol";
-import { httpError, labFetch } from "./http.ts";
+import { httpError, labFetch, modelPost } from "./http.ts";
 import type { ModelAdapter, ModelRequest, Msg, StreamEvent } from "./types.ts";
 
 /** The first release that runs models on MLX by default on Apple silicon. */
@@ -197,13 +197,7 @@ interface ChatChunk {
 
 async function open(request: ModelRequest, signal: AbortSignal, think?: boolean | string): Promise<Response> {
 	const { model } = request;
-	return labFetch(`${ollamaRoot(model.baseUrl)}/api/chat`, {
-		method: "POST",
-		headers: { "content-type": "application/json", ...(await model.headers()) },
-		body: JSON.stringify(ollamaBody(request, think)),
-		signal,
-		ca: model.ca,
-	});
+	return modelPost(model, `${ollamaRoot(model.baseUrl)}/api/chat`, JSON.stringify(ollamaBody(request, think)), signal, { "content-type": "application/json" });
 }
 
 export const ollamaChat: ModelAdapter = {

@@ -33,8 +33,13 @@ export interface ModelProfile {
 	replayReasoning: boolean;
 	temperature?: number;
 	instructions?: string;
-	/** Returns request headers including credentials, read at the moment of use. */
-	headers: () => Promise<Record<string, string>>;
+	/**
+	 * Returns request headers including credentials, read at the moment of use. Given the method and address, a lab
+	 * that binds sign-ins to devices adds this request's proof.
+	 */
+	headers: (method?: string, url?: string) => Promise<Record<string, string>>;
+	/** Reads a response's freshness hints; true when the request should go once more (a lab's new proof nonce). */
+	answered?: (response: Response) => boolean;
 	/** PEM text for a private CA, when the endpoint uses one. */
 	ca?: string;
 	/** Group the tools under this name in the request (routes that want tools grouped). */

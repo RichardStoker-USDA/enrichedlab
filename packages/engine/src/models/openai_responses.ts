@@ -3,7 +3,7 @@
 // within the conversation. Used for ChatGPT plan sign-in, which takes only this API, and ready for API keys too.
 
 import type { Part } from "@enrichedlab/protocol";
-import { labFetch, sseData } from "./http.ts";
+import { modelPost, sseData } from "./http.ts";
 import { type ModelAdapter, ModelHttpError, type ModelRequest, type Msg, type StreamEvent } from "./types.ts";
 
 /** What an assistant event keeps for replay: the response's output items, ids removed. */
@@ -132,14 +132,7 @@ export function responsesAdapter(namespace?: string): ModelAdapter {
 	return {
 		async *stream(request: ModelRequest, signal: AbortSignal): AsyncGenerator<StreamEvent> {
 			const { model } = request;
-			const response = await labFetch(`${model.baseUrl.replace(/\/+$/, "")}/responses`, {
-				method: "POST",
-				headers: { "content-type": "application/json", accept: "text/event-stream", ...(await model.headers()) },
-				body: JSON.stringify(responsesBody(request, namespace)),
-				signal,
-				ca: model.ca,
-				redirect: "manual",
-			});
+			const response = await modelPost(model, `${model.baseUrl.replace(/\/+$/, "")}/responses`, JSON.stringify(responsesBody(request, namespace)), signal, { "content-type": "application/json", accept: "text/event-stream" }, "manual");
 			if (!response.ok || !response.body) throw await failure(response, model.provider);
 
 			const calls = new Map<number, { index: number; args: boolean }>();

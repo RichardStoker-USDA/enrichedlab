@@ -3,7 +3,7 @@
 // server; both are read. The reasoning level goes where the model's profile says.
 
 import type { Part } from "@enrichedlab/protocol";
-import { httpError, labFetch, sseData } from "./http.ts";
+import { httpError, modelPost, sseData } from "./http.ts";
 import type { ModelAdapter, ModelRequest, Msg, StreamEvent } from "./types.ts";
 
 type Content = string | ({ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } })[];
@@ -97,14 +97,7 @@ export const openaiChat: ModelAdapter = {
 	async *stream(request: ModelRequest, signal: AbortSignal): AsyncGenerator<StreamEvent> {
 		const { model } = request;
 		await model.prepare?.(signal);
-		const response = await labFetch(`${model.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
-			method: "POST",
-			headers: { "content-type": "application/json", accept: "text/event-stream", ...(await model.headers()) },
-			body: JSON.stringify(chatBody(request)),
-			signal,
-			ca: model.ca,
-			redirect: "manual",
-		});
+		const response = await modelPost(model, `${model.baseUrl.replace(/\/+$/, "")}/chat/completions`, JSON.stringify(chatBody(request)), signal, { "content-type": "application/json", accept: "text/event-stream" }, "manual");
 		if (response.status >= 300 && response.status < 400) {
 			throw await httpError(new Response("The service asked for a sign-in. Run el login.", { status: 401 }), model.provider);
 		}

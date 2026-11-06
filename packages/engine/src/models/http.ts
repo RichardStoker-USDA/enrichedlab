@@ -13,6 +13,25 @@ export function labFetch(url: string, options: FetchOptions = {}): Promise<Respo
 	return fetch(url, withTls);
 }
 
+/**
+ * POST to a model endpoint with credentials for this exact request (a lab's device proof is per method and address),
+ * sent once more when the lab answers with a fresh proof nonce. The body is a string, so it can go twice.
+ */
+export async function modelPost(
+	model: { headers: (method?: string, url?: string) => Promise<Record<string, string>>; answered?: (response: Response) => boolean; ca?: string },
+	url: string,
+	body: string,
+	signal: AbortSignal,
+	headers: Record<string, string>,
+	redirect?: RequestRedirect,
+): Promise<Response> {
+	const send = async () => labFetch(url, { method: "POST", headers: { ...headers, ...(await model.headers("POST", url)) }, body, signal, ca: model.ca, ...(redirect ? { redirect } : {}) });
+	const first = await send();
+	if (!model.answered?.(first)) return first;
+	await first.body?.cancel().catch(() => undefined);
+	return send();
+}
+
 /** Yield each `data:` payload of an event stream, with its event name and id. Ends at `[DONE]` or the end of the body. */
 export async function* sseData(body: ReadableStream<Uint8Array>, signal: AbortSignal): AsyncGenerator<{ event?: string; data: string; id?: string }> {
 	const reader = body.getReader();

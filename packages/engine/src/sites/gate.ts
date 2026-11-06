@@ -685,7 +685,9 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			defaultEffort: reasoning ? g.default_effort : undefined,
 			effortField: reasoning ? (template ? "chat_template_kwargs" : "reasoning_effort") : "none",
 			replayReasoning: reasoning,
-			headers: () => this.route.headers(),
+			// Each model request carries this computer's proof when the lab binds the sign-in to it.
+			headers: async (method = "POST", url = `${this.route.base}/v1/chat/completions`) => (await this.freshNonce(), this.authHeaders(method, url)),
+			answered: this.answered,
 			ca: this.route.ca,
 		};
 	}

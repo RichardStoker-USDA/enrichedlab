@@ -22,6 +22,8 @@ const lab = {
 	code: undefined as string | undefined,
 	/** Nonce challenges sent (401 use_dpop_nonce). */
 	challenges: 0,
+	/** Model requests that got through. */
+	chats: 0,
 	/** A person with a device already: new devices wait for approval (Gate's rule from publication 53). */
 	approval: false,
 	/** Proofs optional: a request without one is served. */
@@ -121,6 +123,12 @@ async function answer(request: Request): Promise<Response> {
 		}
 		if (url.pathname === "/v1/me") return Response.json({ subject: "u_1", handle: "pat", memberships: [{ lab: "devlab", roles: ["member"] }] });
 		if (url.pathname === "/v1/models") return Response.json({ data: [] });
+		if (url.pathname === "/v1/chat/completions" && request.method === "POST") {
+			// Reached only with a valid proof (checked above): one streamed word and the end.
+			lab.chats++;
+			const chunk = (o: unknown) => `data: ${JSON.stringify(o)}\n\n`;
+			return new Response(chunk({ choices: [{ index: 0, delta: { content: "reachable" } }] }) + chunk({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }) + "data: [DONE]\n\n", { headers: { "content-type": "text/event-stream" } });
+		}
 		return new Response("", { status: 404 });
 	}
 }
@@ -181,6 +189,26 @@ describe("device-bound lab tokens", () => {
 			["proof used twice", "pass"],
 		]);
 		expect(device[0]!.detail).toContain("Cloudflare Access keeps the token from the lab");
+	});
+
+	test("a model request carries this computer's proof, also after a nonce challenge", async () => {
+		const { openaiChat } = await import("../packages/engine/src/models/openai_chat.ts");
+		const s = site();
+		await s.connect();
+		const model = (s as unknown as { profile(m: { id: string }): import("../packages/engine/src/models/types.ts").ModelProfile }).profile({ id: "m1" });
+		const ask = async () => {
+			let text = "";
+			for await (const e of openaiChat.stream({ model, system: "", messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }] as never, tools: [] }, new AbortController().signal)) {
+				if ((e as { type: string }).type === "text") text += (e as { delta: string }).delta;
+			}
+			return text;
+		};
+		const before = lab.chats;
+		expect(await ask()).toBe("reachable");
+		// The lab starts asking for nonces: the request goes once more with the new one and gets through.
+		lab.nonce = "n-chat";
+		expect(await ask()).toBe("reachable");
+		expect(lab.chats).toBe(before + 2);
 	});
 
 	test("a nonce challenge is answered once with the nonce", async () => {
