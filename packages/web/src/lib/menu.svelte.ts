@@ -68,8 +68,12 @@ export function contextMenu(node: HTMLElement, entries: () => MenuAction[]) {
 	const open = (e: MouseEvent) => void showMenu(get(), e);
 	const key = (e: KeyboardEvent) => {
 		if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+			const list = get();
+			if (!list.length) return;
+			// The innermost menu wins, as with a right-click.
 			e.preventDefault();
-			void showMenu(get(), node);
+			e.stopPropagation();
+			void showMenu(list, node);
 		}
 	};
 	node.addEventListener("contextmenu", open);

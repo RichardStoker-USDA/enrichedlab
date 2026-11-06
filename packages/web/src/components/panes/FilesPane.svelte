@@ -47,6 +47,17 @@
 		];
 	}
 
+	/** Right-click on the list's background: the whole folder. */
+	function folderActions(): MenuAction[] {
+		return [
+			{ label: "Refresh", run: refresh },
+			{ label: "Collapse All", disabled: !Object.entries(openDirs).some(([p, o]) => o && p !== "."), run: () => (openDirs = { ".": true }) },
+			separator,
+			{ label: "Copy Folder Path", disabled: !root, run: () => lab.copy(root, "the folder path") },
+			...(lab.place.id === "local" && window.labDesktop && root ? [{ label: mac ? "Show in Finder" : "Show in Folder", run: () => lab.reveal(root) }] : []),
+		];
+	}
+
 	/** Read every open folder again, so expanded folders stay expanded and current. */
 	function refresh() {
 		listings = {};
@@ -121,7 +132,7 @@
 			</button>
 		</div>
 		{#if error}<p class="error">{error}</p>{/if}
-		<div class="scroll">{@render tree(".", 0)}</div>
+		<div class="scroll" use:contextMenu={folderActions}>{@render tree(".", 0)}</div>
 	</div>
 	{#if preview}
 		<div class="preview">

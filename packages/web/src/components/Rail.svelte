@@ -225,7 +225,11 @@
 				<div class="project">
 					<div class="project-name" title={project.path} use:contextMenu={() => projectActions(project.path)}>
 						<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5A1.5 1.5 0 0 1 4 3h2.6l1.4 1.5h4A1.5 1.5 0 0 1 13.5 6v5.5A1.5 1.5 0 0 1 12 13H4a1.5 1.5 0 0 1-1.5-1.5Z" /></svg>
-						<span>{project.name}</span>
+						<span class="project-label">{project.name}</span>
+						<!-- The same actions as right-click, for the keyboard and touch. -->
+						<button class="project-more" aria-label={`Actions for ${project.name}`} aria-haspopup="menu" onclick={(e) => showMenu(projectActions(project.path), e.currentTarget as HTMLElement)}>
+							<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="4" cy="8" r="1.2" /><circle cx="8" cy="8" r="1.2" /><circle cx="12" cy="8" r="1.2" /></svg>
+						</button>
 					</div>
 					{#each shown as s (s.id)}
 						{@const place = s.place && s.place !== "local" ? placeOf(lab.places, s.place) : undefined}
@@ -464,13 +468,44 @@
 		align-items: center;
 		gap: 7px;
 		height: 26px;
-		padding: 0 10px;
+		padding: 0 4px 0 10px;
 		font-weight: 600;
 		font-size: 12px;
 		color: var(--text-muted);
 		white-space: nowrap;
+	}
+	.project-label {
+		flex: 1;
+		min-width: 0;
 		overflow: hidden;
 		text-overflow: ellipsis;
+	}
+	.project-more {
+		display: grid;
+		place-items: center;
+		width: 24px;
+		height: 24px;
+		border-radius: 6px;
+		color: var(--text-muted);
+		opacity: 0;
+	}
+	.project-more svg {
+		width: 14px;
+		height: 14px;
+		fill: currentColor;
+	}
+	.project-name:hover .project-more,
+	.project-more:focus-visible {
+		opacity: 1;
+	}
+	.project-more:hover {
+		background: var(--hover);
+		color: var(--text);
+	}
+	@media (hover: none) {
+		.project-more {
+			opacity: 1;
+		}
 	}
 	.project-name svg {
 		width: 14px;
