@@ -3,6 +3,7 @@
 
 import {
 	CombinedAutocompleteProvider,
+	wrapTextWithAnsi,
 	type Component,
 	Container,
 	Editor,
@@ -37,12 +38,12 @@ const COMMANDS = [
 	{ name: "model", description: "Choose the model for this session" },
 	{ name: "effort", description: "Set the reasoning level", argumentHint: "<level>" },
 	{ name: "undo", description: "Put back the files changed since your last message" },
-	{ name: "new", description: "Start a new session in this folder (/new <site> to work with one site only)" },
+	{ name: "new", description: "Start a new session in this folder (/new <lab> to work in that lab's sandbox)" },
 	{ name: "resume", description: "Open an earlier session" },
 	{ name: "compact", description: "Summarize older turns now" },
 	{ name: "window", description: "Open this session in the EnrichedLab window; /window off keeps it in the terminal" },
-	{ name: "sites", description: "Sites and what they grant you" },
-	{ name: "login", description: "Sign in to a site", argumentHint: "<site>" },
+	{ name: "sites", description: "Your labs and what each grants you" },
+	{ name: "login", description: "Sign in to a lab", argumentHint: "<lab>" },
 	{ name: "canvas", description: "Open the latest view the agent showed" },
 	{ name: "theme", description: "Use light or dark colors", argumentHint: "light|dark" },
 	{ name: "help", description: "Keys and commands" },
@@ -116,7 +117,9 @@ export async function runTui(options: TuiOptions): Promise<void> {
 		render: (width) => [statusLine(t, status, { started, cwd: options.cwd, site: sites.filter((s) => s.signedIn).map((s) => `${s.name} ✓`).join(" ") }, width)],
 		invalidate: () => undefined,
 	};
-	for (const c of [header, transcript, live, permission, spacer, editor, statusBar]) tui.addChild(c);
+	// Choices from a command (a model, a level, a session) open here, right under the prompt, as the slash list does.
+	const pickerHost = new Container();
+	for (const c of [header, transcript, live, permission, spacer, editor, pickerHost, statusBar]) tui.addChild(c);
 	tui.setFocus(editor);
 
 	const render = () => tui.requestRender();
@@ -141,7 +144,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
 			case "undo":
 				return ruleView(t, `undone: ${event.files.join(", ")}`);
 			case "model":
-				return modelView(t, event.model, event.effort);
+				return modelView(t, event.model, event.effort, origins.get(event.model));
 			default:
 				return undefined;
 		}
@@ -162,8 +165,11 @@ export async function runTui(options: TuiOptions): Promise<void> {
 		live.running.clear();
 		permission.clear();
 		approvals = [];
+		// Model names in the transcript read as the window's do.
+		const [listed, siteList] = await Promise.all([client.call("model.list", {}).catch(() => ({ models: [] as ModelInfo[] })), client.call("site.list", {}).catch(() => [])]);
+		learnOrigins(listed.models, siteList);
 		if (!snap.events.some((e) => e.t === "user")) {
-			const sites = await client.call("site.list", {}).catch(() => []);
+			const sites = siteList;
 			const placed = [...snap.events].reverse().find((e) => e.t === "place") as Extract<SessionEvent, { t: "place" }> | undefined;
 			const place = !placed || placed.place === "local" ? `${process.platform === "darwin" ? "this Mac" : "this computer"}, contained` : `the ${sites.find((s) => s.name === placed.place)?.title ?? placed.place} sandbox`;
 			const labs = sites.map((s) => `${s.title}${s.signedIn ? ` ${t.muted(`(${s.who ?? "signed in"})`)}` : ` ${t.muted("(sign in: el login " + s.name + ")")}`}`);
@@ -323,18 +329,41 @@ export async function runTui(options: TuiOptions): Promise<void> {
 
 	// ── Commands ───────────────────────────────────────────────────────────────────────────────────────────────────
 
-	function pick(items: SelectItem[], onPick: (item: SelectItem) => void): void {
+	/** Where each model comes from, in the words the window uses (a lab's title, "this computer", a key's name). */
+	const origins = new Map<string, string>();
+	function learnOrigins(models: ModelInfo[], sites: { name: string; title: string }[]): void {
+		for (const m of models) origins.set(m.ref, m.source === "site" ? (sites.find((x) => x.name === m.provider)?.title ?? m.provider) : m.source === "local" ? "this computer" : (m.label.split(" · ")[1] ?? m.provider));
+	}
+
+	/** A line under the prompt while a command looks something up; the returned function clears it. */
+	function working(text: string): () => void {
+		pickerHost.clear();
+		pickerHost.addChild(new Lines(() => [`  ${t.faint(text)}`]));
+		render();
+		return () => {
+			pickerHost.clear();
+			render();
+		};
+	}
+
+	function pick(title: string, items: SelectItem[], onPick: (item: SelectItem) => void, current?: string): void {
 		const list = new SelectList(items, Math.min(10, items.length), t.select);
-		const handle = tui.showOverlay(list, { anchor: "bottom-center", width: "80%", maxHeight: 14, offsetY: -3 });
-		list.onSelect = (item) => {
-			handle.hide();
+		const at = current ? items.findIndex((i) => i.value === current) : -1;
+		if (at > 0) list.setSelectedIndex(at);
+		const done = () => {
+			pickerHost.clear();
 			tui.setFocus(editor);
+			render();
+		};
+		list.onSelect = (item) => {
+			done();
 			onPick(item);
 		};
-		list.onCancel = () => {
-			handle.hide();
-			tui.setFocus(editor);
-		};
+		list.onCancel = done;
+		pickerHost.clear();
+		pickerHost.addChild(new Lines(() => ["", `  ${t.text(title)}  ${t.faint("↑↓ to move · Enter to choose · Esc to leave")}`]));
+		pickerHost.addChild(list);
+		pickerHost.addChild(new Lines(() => [""]));
 		tui.setFocus(list);
 		render();
 	}
@@ -344,8 +373,11 @@ export async function runTui(options: TuiOptions): Promise<void> {
 		const arg = args.join(" ");
 		switch (name) {
 			case "model": {
-				const { models } = await client.call("model.list", { refresh: true });
-				if (!models.length) return say("No models found. Start a local model server, add a provider, or /login a site.", "warn");
+				const stop = working("Looking for models on this computer, your keys and your labs…");
+				const [{ models }, sites] = await Promise.all([client.call("model.list", { refresh: true }), client.call("site.list", {}).catch(() => [])]).finally(stop);
+				if (!models.length) return say("No models found. Start a local model server, add a provider, or /login to a lab.", "warn");
+				learnOrigins(models, sites);
+				const origin = (m: ModelInfo) => origins.get(m.ref) ?? m.provider;
 				const choose = (m: ModelInfo) => client.call("session.model", { sessionId, model: m.ref }).then((s) => {
 					status = s;
 					render();
@@ -355,8 +387,10 @@ export async function runTui(options: TuiOptions): Promise<void> {
 					return m ? void (await choose(m)) : say(`No model ${arg}.`, "warn");
 				}
 				return pick(
-					models.map((m) => ({ value: m.ref, label: m.ref, description: `${m.source}, ${Math.round(m.context / 1024)}k${m.vision ? ", vision" : ""}` })),
+					"Model for this session",
+					models.map((m) => ({ value: m.ref, label: m.id, description: `${origin(m)} · ${Math.round(m.context / 1024)}k context${m.vision ? " · sees images" : ""}${m.ref === status?.model ? " · current" : ""}` })),
 					(item) => void choose(models.find((m) => m.ref === item.value)!).catch((e) => say(e.message, "error")),
+					status?.model,
 				);
 			}
 			case "effort": {
@@ -368,7 +402,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
 					render();
 				});
 				if (arg) return void (await set(arg).catch((e) => say(e.message, "error")));
-				return pick(model.efforts.map((e) => ({ value: e, label: e, description: e === status?.effort ? "current" : "" })), (item) => void set(item.value));
+				return pick("Reasoning level", model.efforts.map((e) => ({ value: e, label: e, description: e === status?.effort ? "current" : "" })), (item) => void set(item.value), status?.effort);
 			}
 			case "new":
 				return newSession(arg || undefined);
@@ -381,6 +415,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
 				const list = await client.call("session.list", { cwd: options.cwd, limit: 30 });
 				if (!list.length) return say("No earlier sessions in this folder.");
 				return pick(
+					"Earlier sessions in this folder",
 					list.map((s) => ({ value: s.id, label: s.title, description: `${s.updated.slice(0, 16).replace("T", " ")}${s.running ? " · running" : ""}` })),
 					(item) => void openSession(item.value),
 				);
@@ -406,7 +441,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
 				return;
 			}
 			case "login": {
-				if (!arg) return say("Which site? /login <site>", "warn");
+				if (!arg) return say("Which lab? /login <lab>", "warn");
 				say(`Signing in to ${arg}…`);
 				const site = await client.call("site.login", { name: arg });
 				return say(site.signedIn ? `Signed in to ${arg} as ${site.who}.` : `Not signed in: ${site.error}`, site.signedIn ? "info" : "warn");
@@ -423,11 +458,24 @@ export async function runTui(options: TuiOptions): Promise<void> {
 				t = makeTheme(appearance);
 				return say(`Using ${appearance} colors. Restart el to redraw earlier lines.`);
 			}
-			case "help":
-				return say(
-					"Enter sends · Shift+Enter or Ctrl+J new line · Esc stops the agent · Ctrl+O opens steps and reasoning · Ctrl+C clears, then leaves · Tab completes paths · " +
-						COMMANDS.map((c) => `/${c.name}`).join(" "),
-				);
+			case "help": {
+				// Two aligned tables, keys then commands, wrapped to the terminal's width.
+				const keys: [string, string][] = [
+					["Enter", "send"],
+					["Shift+Enter, Ctrl+J", "new line"],
+					["Esc", "stop the agent"],
+					["Ctrl+O", "open steps, output and reasoning"],
+					["Tab", "complete a path or command"],
+					["Ctrl+C", "clear the prompt; twice to leave"],
+					["y  a  n", "answer a permission request: once, for the session, no"],
+				];
+				const rows = (title: string, list: [string, string][], width: number) => {
+					const pad = Math.max(...list.map(([k]) => k.length)) + 3;
+					return ["", `  ${t.text(title)}`, ...list.flatMap(([k, v]) => wrapTextWithAnsi(v, Math.max(20, width - pad - 2)).map((line, i) => `  ${t.muted((i ? "" : k).padEnd(pad))}${line}`))];
+				};
+				transcript.addChild(new Lines((width) => [...rows("Keys", keys, width), ...rows("Commands", COMMANDS.map((c) => [`/${c.name}${"argumentHint" in c && c.argumentHint ? ` ${c.argumentHint}` : ""}`, c.description]), width)]));
+				return render();
+			}
 			case "quit":
 			case "exit":
 				return quit();
@@ -507,5 +555,5 @@ export async function runTui(options: TuiOptions): Promise<void> {
 		if (latest) await openSession(latest.id);
 		else await newSession();
 	} else await newSession();
-	if (!status?.model) say("No model is available yet. Start Ollama or LM Studio, add a provider to ~/.el/config.json, or /login a site.", "warn");
+	if (!status?.model) say("No model is available yet. Start Ollama or LM Studio, add a provider to ~/.el/config.json, or /login to a lab.", "warn");
 }

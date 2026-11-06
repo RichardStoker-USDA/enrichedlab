@@ -156,10 +156,11 @@ export function welcomeView(t: Theme, info: { version: string; place: string; la
 }
 
 /** The session's model: a row in the opening lines, and a line of its own when it changes later. */
-export function modelView(t: Theme, model: string, effort?: string): Component {
+export function modelView(t: Theme, model: string, effort?: string, origin?: string): Component {
 	const [provider, ...rest] = model.split("/");
 	const name = rest.length ? rest.join("/") : model;
-	return new Lines(() => [`${INDENT}${t.muted("Model".padEnd(9))}${t.text(name)}${t.muted(`${rest.length ? `  ${provider}` : ""}${effort ? ` · ${effort}` : ""}`)}`]);
+	const from = origin ?? (rest.length ? provider : "");
+	return new Lines(() => [`${INDENT}${t.muted("Model".padEnd(9))}${t.text(name)}${t.muted(`${from ? `  ${from}` : ""}${effort ? ` · ${effort}` : ""}`)}`]);
 }
 
 export function ruleView(t: Theme, label: string): Component {
