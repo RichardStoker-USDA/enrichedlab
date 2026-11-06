@@ -83,9 +83,16 @@
 		starting = true;
 		lab.newPlace = undefined;
 		lab.newFolder = undefined;
-		const common = { worktree, model: chosenModel?.ref, prompt: task.trim() || undefined, progress: (to: string) => (movingTo = to) };
+		// Without a model the task can't run yet: it waits in the new session's composer while a model is set up.
+		const text = task.trim();
+		const waits = Boolean(text) && !offered.length;
+		const common = { worktree, model: chosenModel?.ref, prompt: waits ? undefined : text || undefined, progress: (to: string) => (movingTo = to) };
 		// A lab that keeps data in place binds the session to it; other labs take the session (and its repository) along.
-		await lab.create(folder.trim(), isolated ? { ...common, site: place } : { ...common, place });
+		const id = await lab.create(folder.trim(), isolated ? { ...common, site: place } : { ...common, place });
+		if (id && waits) {
+			lab.returned = { sessionId: id, text };
+			lab.services = true;
+		}
 		starting = false;
 		movingTo = "";
 	}
@@ -160,9 +167,9 @@
 	<p class="where" title={folder} aria-live="polite">{movingTo ? `Moving ${folder ? folderName(folder) : "the project"} to the ${movingTo} sandbox…` : starting ? "Starting the session…" : where}</p>
 	<label class="check"><input type="checkbox" bind:checked={worktree} /> Work on its own git branch, away from your checkout</label>
 
-	{#if !lab.models.length}
+	{#if !offered.length}
 		<div class="no-model" role="note">
-			<p><strong>No model yet.</strong> Sign in to a lab, use your ChatGPT plan or a key, or run an open model on this computer.</p>
+			<p><strong>{lab.models.length ? `No model may work in ${chosen.title} yet.` : "No model yet."}</strong> Sign in to a lab, use your ChatGPT plan or a key, or run an open model on this computer. A task you write now waits in the session until then.</p>
 			<button type="button" class="btn primary" onclick={() => (lab.services = true)}>Set Up a Model</button>
 		</div>
 	{/if}

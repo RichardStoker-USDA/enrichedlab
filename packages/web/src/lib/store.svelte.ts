@@ -56,8 +56,12 @@ class Lab {
 		}
 	}
 	/** Search all history, past what the sidebar holds. */
-	async searchSessions(query: string): Promise<SessionSummary[]> {
-		return rpc.call("session.list", { query, limit: 40 }).catch(() => []);
+	/** Older sessions matching a search; a search that couldn't run says so rather than finding nothing. */
+	async searchSessions(query: string): Promise<{ found: SessionSummary[]; error?: string }> {
+		return rpc.call("session.list", { query, limit: 40 }).then(
+			(found) => ({ found }),
+			(error: Error) => ({ found: [], error: error.message }),
+		);
 	}
 	/** Requests the person chose to decide later: kept, counted on the lab's row, and opened again from there. */
 	deferredDevices = $state<DeviceRequest[]>([]);
@@ -168,8 +172,15 @@ class Lab {
 
 	/** A lab that keeps its sessions' work in its sandbox can't be left. */
 	/** A sheet, the palette or a page menu covers the window: native browser views hide, since nothing draws over them. */
+	/** Menus drawn in the page that may lie over a pane (the workbench's Browser and Apps menus), counted while open. */
+	overlays = $state(0);
+
+	/**
+	 * Something drawn in the page lies over the panes. A browser pane is a native view that page content can't cover,
+	 * so it steps aside while this is true.
+	 */
 	get covered(): boolean {
-		return Boolean(this.palette || this.settings || this.services || this.join || this.confirming || this.deviceRequests.length || pageMenu.current);
+		return Boolean(this.palette || this.settings || this.services || this.join || this.confirming || this.deviceRequests.length || pageMenu.current || this.overlays > 0 || this.drawer);
 	}
 
 	get pinned(): boolean {
@@ -332,10 +343,22 @@ class Lab {
 		this.workbench = wide && (store.get(`enrichedlab.bench.${id}`) ?? (groups(layout).some((g) => g.tabs.length) ? "1" : "0")) === "1";
 	}
 
+	/** Layout saves wait for a pause (a dragged gutter changes the layout every frame), one timer per session. */
+	private layoutSaves = new Map<string, ReturnType<typeof setTimeout>>();
 	private saveLayout(): void {
-		if (!this.current) return;
-		store.set(`enrichedlab.layout.${this.current}`, JSON.stringify(this.layout));
-		store.set(`enrichedlab.bench.${this.current}`, this.workbench ? "1" : "0");
+		const id = this.current;
+		if (!id) return;
+		const layout = JSON.stringify(this.layout);
+		const bench = this.workbench ? "1" : "0";
+		clearTimeout(this.layoutSaves.get(id));
+		this.layoutSaves.set(
+			id,
+			setTimeout(() => {
+				this.layoutSaves.delete(id);
+				store.set(`enrichedlab.layout.${id}`, layout);
+				store.set(`enrichedlab.bench.${id}`, bench);
+			}, 250),
+		);
 	}
 
 	setLayout(layout: Node): void {

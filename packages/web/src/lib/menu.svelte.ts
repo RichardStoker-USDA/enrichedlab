@@ -59,7 +59,13 @@ export async function showMenu(entries: MenuAction[], at: MouseEvent | HTMLEleme
 	const native = typeof window !== "undefined" ? window.labDesktop?.menu : undefined;
 	const id = native ? await native(strip(list), { x, y }) : await new Promise<string | undefined>((resolve) => (pageMenu.current = { entries: list, x, y, resolve }));
 	if (id === undefined || id === "") return;
-	await find(list, id)?.run?.();
+	// A menu command that fails says why, instead of seeming to do nothing.
+	try {
+		await find(list, id)?.run?.();
+	} catch (error) {
+		const { lab } = await import("./store.svelte.ts");
+		lab.say((error as Error).message);
+	}
 }
 
 /** A Svelte action: right-click (or the menu key, or Shift+F10) on the element opens its menu. */

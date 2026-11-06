@@ -16,12 +16,21 @@
 
 	let query = $state("");
 	let older = $state<{ id: string; title: string; cwd: string }[]>([]);
+	let searchError = $state("");
 	// With more history than the sidebar holds, typed words also search the rest.
 	$effect(() => {
 		const q = query.trim();
 		if (!q || !lab.moreSessions) return void (older = []);
 		let current = true;
-		const timer = setTimeout(() => void lab.searchSessions(q).then((found) => current && (older = found)), 160);
+		const timer = setTimeout(
+			() =>
+				void lab.searchSessions(q).then((result) => {
+					if (!current) return;
+					older = result.found;
+					searchError = result.error ? `Older sessions couldn't be searched: ${result.error}` : "";
+				}),
+			160,
+		);
 		return () => ((current = false), clearTimeout(timer));
 	});
 	let index = $state(0);
@@ -66,12 +75,18 @@
 		return list.filter((i) => words.every((w) => `${i.label} ${i.hint ?? ""}`.toLowerCase().includes(w))).slice(0, 80);
 	});
 
+	// Closing returns focus to what opened it, unless a command moved it on purpose.
 	$effect(() => {
-		if (lab.palette) {
-			query = "";
-			index = 0;
-			void tick().then(() => input?.focus());
-		}
+		if (!lab.palette) return;
+		query = "";
+		index = 0;
+		const opener = document.activeElement as HTMLElement | null;
+		void tick().then(() => input?.focus());
+		return () => {
+			requestAnimationFrame(() => {
+				if (document.activeElement === document.body || !document.activeElement) opener?.focus?.();
+			});
+		};
 	});
 	$effect(() => {
 		void query;
@@ -112,7 +127,7 @@
 					{#if item.shortcut}<kbd class="hint key">{item.shortcut}</kbd>{/if}
 				</button>
 			{:else}
-				<p class="none">Nothing matches.</p>
+				<p class="none">{searchError || "Nothing matches."}</p>
 			{/each}
 		</div>
 	</div>

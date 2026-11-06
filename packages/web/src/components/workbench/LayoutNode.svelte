@@ -29,6 +29,30 @@
 		handle.addEventListener("pointermove", move);
 		handle.addEventListener("pointerup", () => handle.removeEventListener("pointermove", move), { once: true });
 	}
+
+	/** Arrow keys move the gutter by 5%; Home evens the two sides. */
+	function nudge(e: KeyboardEvent, i: number) {
+		if (node.type !== "split") return;
+		const back = node.dir === "row" ? "ArrowLeft" : "ArrowUp";
+		const forward = node.dir === "row" ? "ArrowRight" : "ArrowDown";
+		if (e.key === "Home") return void (e.preventDefault(), even(i));
+		if (e.key !== back && e.key !== forward) return;
+		e.preventDefault();
+		const sizes = [...node.sizes];
+		const pair = sizes[i]! + sizes[i + 1]!;
+		const a = Math.min(pair - 0.12, Math.max(0.12, sizes[i]! + (e.key === forward ? 0.05 : -0.05) * pair));
+		sizes[i] = a;
+		sizes[i + 1] = pair - a;
+		lab.resizeSplit(node.id, sizes);
+	}
+
+	function even(i: number) {
+		if (node.type !== "split") return;
+		const sizes = [...node.sizes];
+		const half = (sizes[i]! + sizes[i + 1]!) / 2;
+		sizes[i] = sizes[i + 1] = half;
+		lab.resizeSplit(node.id, sizes);
+	}
 </script>
 
 {#if node.type === "split"}
@@ -38,7 +62,21 @@
 				<LayoutNode node={child} />
 			</div>
 			{#if i < node.children.length - 1}
-				<div class="gutter" role="separator" aria-orientation={node.dir === "row" ? "vertical" : "horizontal"} onpointerdown={(e) => drag(e, i)}></div>
+				<!-- A focusable separator is the ARIA window-splitter pattern: arrows move it, Home evens it. -->
+				<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+				<div
+					class="gutter"
+					role="separator"
+					tabindex="0"
+					aria-label="Resize the panes"
+					aria-orientation={node.dir === "row" ? "vertical" : "horizontal"}
+					aria-valuemin={12}
+					aria-valuemax={88}
+					aria-valuenow={Math.round((node.sizes[i]! / (node.sizes[i]! + node.sizes[i + 1]!)) * 100)}
+					onpointerdown={(e) => drag(e, i)}
+					onkeydown={(e) => nudge(e, i)}
+					ondblclick={() => even(i)}
+				></div>
 			{/if}
 		{/each}
 	</div>
@@ -83,7 +121,12 @@
 	.column > .gutter::after {
 		inset: -4px 0;
 	}
-	.gutter:hover {
+	.gutter:hover,
+	.gutter:focus-visible {
 		background: var(--accent);
+	}
+	.gutter:focus-visible {
+		outline: none;
+		box-shadow: 0 0 0 1px var(--focus-inner);
 	}
 </style>

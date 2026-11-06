@@ -61,31 +61,48 @@
 				return false;
 			}
 		}
-		if (!(await start())) {
-			if (!gone) {
-				offOut();
-				term.dispose();
-			}
-			return;
-		}
+		if (gone) return;
 		restart = async () => {
 			ended = false;
 			term.reset();
 			if (await start()) term.focus();
 			else ended = true;
 		};
+		// A shell that didn't open keeps the pane, with Start Again beside the reason.
+		if (!(await start())) {
+			if (gone) return;
+			ended = true;
+		}
 		const offExit = rpc.on("term.exit", (m) => {
 			if (m.termId !== termId) return;
 			ended = true;
 			term.write("\r\n\x1b[2m(ended)\x1b[0m\r\n");
 		});
-		const input = term.onData((data) => termId && void rpc.call("term.input", { termId, data }));
-		const resize = term.onResize(({ cols, rows }) => termId && void rpc.call("term.resize", { termId, cols, rows }));
+		// The engine closes a window's shells when the window loses its connection: this one says so and offers to
+		// start again, instead of taking keystrokes nothing receives.
+		const lost = () => {
+			if (ended || !termId) return;
+			ended = true;
+			termId = undefined;
+			term.write("\r\n\x1b[2m(the connection to the engine dropped; this shell ended)\x1b[0m\r\n");
+		};
+		const input = term.onData((data) => {
+			if (termId && !ended) void rpc.call("term.input", { termId, data }).catch(lost);
+		});
+		const resize = term.onResize(({ cols, rows }) => {
+			if (termId && !ended) void rpc.call("term.resize", { termId, cols, rows }).catch(() => undefined);
+		});
+		const stopWatch = $effect.root(() => {
+			$effect(() => {
+				if (lab.lost) lost();
+			});
+		});
 		const observer = new ResizeObserver(() => fit.fit());
 		observer.observe(host!);
 		// Only the pane in front takes focus; a terminal restored behind others doesn't steal it.
 		if (active) term.focus();
 		cleanup = () => {
+			stopWatch();
 			stopTheme();
 			observer.disconnect();
 			input.dispose();

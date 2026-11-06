@@ -131,8 +131,8 @@
 				? "The session is moving; send when it arrives."
 				: lab.place.missing
 					? `This session works in ${lab.place.title}, which isn't one of your labs now. Add it again to keep going here.`
-					: missing
-						? "Choose a model first."
+					: missing || !lab.model
+						? "Choose a model first: Models in the sidebar sets one up."
 						: "",
 	);
 
@@ -308,6 +308,7 @@
 									onclick={() => {
 										void lab.setModel(m.ref);
 										menuOpen = false;
+										chip?.focus();
 									}}
 								>
 									<span class="check" aria-hidden="true">{m.ref === lab.status?.model ? "✓" : ""}</span>

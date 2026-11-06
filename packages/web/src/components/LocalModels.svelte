@@ -68,9 +68,15 @@
 	}
 
 	async function remove(model: string) {
-		await rpc.call("local.remove", { model });
-		message = `Removed ${model}.`;
-		failed = false;
+		try {
+			await rpc.call("local.remove", { model });
+			message = `Removed ${model}.`;
+			failed = false;
+		} catch (error) {
+			message = `${model} wasn't removed: ${(error as Error).message}`;
+			failed = true;
+			return;
+		}
 		await lab.refreshModels();
 		await load();
 	}

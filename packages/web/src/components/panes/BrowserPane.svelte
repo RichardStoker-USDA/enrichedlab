@@ -17,13 +17,36 @@
 	// Only a change between loaded and failed re-places the view, not every title or progress update.
 	const failed = $derived(Boolean(page?.failed));
 
+	/** A new load starts clean: the failure notice goes, and the page shows again while it loads. */
+	function clearFailure() {
+		if (page?.failed) page = { ...page, failed: undefined };
+	}
+
 	function go(e?: Event) {
 		e?.preventDefault();
 		const next = normalize(address);
 		if (!next) return;
 		current = next;
+		clearFailure();
 		if (desktop) desktop.navigate(id, next);
 	}
+
+	function retry() {
+		clearFailure();
+		desktop?.go(id, "reload");
+	}
+
+	// The page's state is followed for the pane's whole life, also while a failure notice replaces the view.
+	$effect(() => {
+		if (!desktop) return;
+		return desktop.onState((which, s) => {
+			if (which !== id) return;
+			page = s;
+			title = s.title;
+			// The address only follows the page while the person isn't typing in it.
+			if (document.activeElement !== addressField) address = s.url;
+		});
+	});
 
 	// The desktop app's real browser view sits exactly over this pane's slot and follows it.
 	function bounds() {
@@ -38,17 +61,9 @@
 		observer.observe(slot);
 		const onWindow = () => desktop.bounds(id, bounds());
 		window.addEventListener("resize", onWindow);
-		const off = desktop.onState((which, s) => {
-			if (which !== id) return;
-			page = s;
-			title = s.title;
-			// The address only follows the page while the person isn't typing in it.
-			if (document.activeElement !== addressField) address = s.url;
-		});
 		return () => {
 			observer.disconnect();
 			window.removeEventListener("resize", onWindow);
-			off();
 			desktop.hide(id);
 		};
 	});
@@ -70,7 +85,7 @@
 					<svg viewBox="0 0 16 16"><path d="m4.5 4.5 7 7M11.5 4.5l-7 7" /></svg>
 				</button>
 			{:else}
-				<button type="button" class="icon-btn" onclick={() => desktop.go(id, "reload")} aria-label="Reload">
+				<button type="button" class="icon-btn" onclick={retry} aria-label="Reload">
 					<svg viewBox="0 0 16 16"><path d="M12.5 8a4.5 4.5 0 1 1-1.3-3.2M12.5 3v2.5H10" /></svg>
 				</button>
 			{/if}
@@ -86,7 +101,7 @@
 		<div class="blank" role="alert">
 			<p><strong>This page didn't load.</strong> {page.failed.reason}</p>
 			<p class="url">{page.failed.url}</p>
-			<button type="button" class="btn" onclick={() => desktop.go(id, "reload")}>Try Again</button>
+			<button type="button" class="btn" onclick={retry}>Try Again</button>
 		</div>
 	{:else if desktop}
 		<div class="slot" bind:this={slot} title={title}></div>

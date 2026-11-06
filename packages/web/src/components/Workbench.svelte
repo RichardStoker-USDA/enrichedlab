@@ -34,6 +34,12 @@
 	const empty = $derived(!lab.layout || (lab.layout.type === "group" && lab.layout.tabs.length === 0));
 	let appsOpen = $state(false);
 	let browserOpen = $state(false);
+	// While either menu is open, a browser pane under it steps aside (lab.covered).
+	$effect(() => {
+		if (!appsOpen && !browserOpen) return;
+		lab.overlays++;
+		return () => lab.overlays--;
+	});
 	// Labs that run a browser in the person's sandbox: the Browser button then asks which browser.
 	const browserLabs = $derived(lab.places.filter((p) => p.site?.signedIn && p.site.browser));
 	function toggleApps() {
@@ -59,6 +65,15 @@
 	// The local terminal is the person's own shell, with their rights: the agent's containment doesn't apply to it.
 	const terminalNote = $derived(lab.place.id === "local" ? "Your own shell in the project folder, with your usual rights" : `A command console in the ${lab.place.title} sandbox`);
 </script>
+
+<!-- Escape closes the Browser and Apps menus, as it does every other menu. -->
+<svelte:window
+	onkeydown={(e) => {
+		if (e.key !== "Escape" || (!appsOpen && !browserOpen)) return;
+		e.preventDefault();
+		appsOpen = browserOpen = false;
+	}}
+/>
 
 <aside class="workbench" aria-label="Workbench" hidden={!lab.workbench}>
 	<div class="bar toolbar">
