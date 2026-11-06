@@ -203,11 +203,26 @@ async function open(argv) {
 		// A screenshot run can set the scene first (open a sheet, the palette, a pane).
 		if (process.env.EL_SHOT_JS) {
 			await window.webContents.executeJavaScript(process.env.EL_SHOT_JS).catch(() => undefined);
-			await new Promise((r) => setTimeout(r, 900));
+			// Then type, as key events into whatever the scene focused (a screenshot run's window has no OS focus).
+			if (process.env.EL_SHOT_TYPE) {
+				await new Promise((r) => setTimeout(r, 2500));
+				for (const ch of process.env.EL_SHOT_TYPE) window.webContents.sendInputEvent({ type: "char", keyCode: ch });
+				window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Return" });
+				window.webContents.sendInputEvent({ type: "char", keyCode: "\r" });
+				window.webContents.sendInputEvent({ type: "keyUp", keyCode: "Return" });
+			}
+			await new Promise((r) => setTimeout(r, Number(process.env.EL_SHOT_AFTER) || 900));
 		}
 		const image = await window.webContents.capturePage();
 		const { writeFileSync } = await import("node:fs");
 		writeFileSync(process.env.EL_SHOT, image.toPNG());
+		// Browser panes are native views over the page: each is captured on its own, with what it shows.
+		let n = 0;
+		for (const view of views.values()) {
+			const shot = process.env.EL_SHOT.replace(/\.png$/, `-browser-${++n}.png`);
+			writeFileSync(shot, (await view.webContents.capturePage()).toPNG());
+			writeFileSync(shot.replace(/\.png$/, ".json"), JSON.stringify({ url: view.webContents.getURL(), title: view.webContents.getTitle() }));
+		}
 		app.quit();
 	}
 }
