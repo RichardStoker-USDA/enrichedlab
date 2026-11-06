@@ -3,10 +3,11 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "n
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-export const VERSION = "0.2.9";
+export const VERSION = "0.2.10";
 
 /** What changed in this version, one line each, newest first. Surfaces show the first lines when a session opens. */
 export const NEWS = [
+	"0.2.10: the terminal inside the window draws its text everywhere; its GPU renderer could leave it blank.",
 	"0.2.9: models on this computer are found by how their server answers (Ollama, LM Studio, llama.cpp, MLX, oMLX, vLLM, SGLang), and each gets the context its server holds; Ollama models get their full planned context instead of Ollama's 4K default; el local and Model services suggest open models that fit your computer and download them (el model pull); el join adds a lab from its invite; a session whose model goes away stops and says so instead of switching models.",
 	"0.2.8: a file downloaded from a lab sandbox that the lab cuts short no longer stops the engine or hangs; a full disk says so instead of trying again; el lab check proves a lab's internet sandboxes refuse private addresses in every IPv6 spelling, refuse sites with broken certificates, and that the lab's browser opens public pages there; a request to a public site whose name starts like a private address (fcc.gov) no longer says it is on your network.",
 	"0.2.7: the browser in a lab sandbox runs in your own sandbox, made from the lab's browser image, so it opens the apps you run there (el sandbox create <lab> --image browser); el sandbox create makes a new sandbox to work in, with internet access where the lab allows it, and no lab files go into those; el sandboxes shows why the lab ended one.",
