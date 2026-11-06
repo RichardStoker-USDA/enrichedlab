@@ -36,7 +36,9 @@ export interface SandboxApi {
 /** Quote for the sandbox's POSIX shell. */
 export const shq = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 
-const PIECE = 64 * 1024; // raw bytes per exec: base64 of it stays well under the 128 KB argument limit
+// Raw bytes per exec: its base64 (16 KB) stays under what labs take in one command (one refused about 36 KB with a
+// misleading "sandboxes aren't available"). Larger files go through the lab's file upload.
+const PIECE = 12 * 1024;
 const READ_PIECE = 512 * 1024;
 const GLOB_SAFE = /^[\w./*?\-[\]{}@+, ]+$/;
 
@@ -124,7 +126,7 @@ export class SandboxWorkspace implements Workspace {
 		const full = this.resolve(path);
 		const bytes = typeof data === "string" ? Buffer.from(data, "utf8") : data;
 		const dir = shq(posix.dirname(full));
-		if (bytes.length > 4 * PIECE) {
+		const upload = async () => {
 			const scratch = await mkdtemp(join(tmpdir(), "enrichedlab-write-"));
 			try {
 				const local = join(scratch, `${randomBytes(4).toString("hex")}-${posix.basename(full)}`);
@@ -135,12 +137,17 @@ export class SandboxWorkspace implements Workspace {
 			} finally {
 				await rm(scratch, { recursive: true, force: true });
 			}
-			return;
-		}
+		};
+		if (bytes.length > 4 * PIECE) return upload();
 		const temp = `${full}.${randomBytes(3).toString("hex")}.part`;
 		for (let offset = 0, first = true; first || offset < bytes.length; offset += PIECE, first = false) {
 			const piece = bytes.subarray(offset, offset + PIECE).toString("base64");
-			const r = await this.run(`mkdir -p ${dir} && printf %s ${shq(piece)} | base64 -d ${first ? ">" : ">>"} ${shq(temp)}`, 60);
+			// A lab that refuses the command itself (not the shell failing in it) gets the file by upload instead.
+			const r = await this.run(`mkdir -p ${dir} && printf %s ${shq(piece)} | base64 -d ${first ? ">" : ">>"} ${shq(temp)}`, 60).catch(() => undefined);
+			if (!r) {
+				await this.run(`rm -f -- ${shq(temp)}`, 30).catch(() => undefined);
+				return upload();
+			}
 			if (r.exitCode !== 0) throw new Error(r.stderr.trim() || `Can't write ${this.display(full)}.`);
 		}
 		const done = await this.run(`mv -f -- ${shq(temp)} ${shq(full)}`, 30);

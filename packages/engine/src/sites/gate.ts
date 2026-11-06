@@ -16,7 +16,7 @@ import { repoRoot } from "../git.ts";
 import { connectRemote, type McpConnection } from "../mcp.ts";
 import { labFetch, sseData } from "../models/http.ts";
 import { DeviceKey, dpopError } from "./dpop.ts";
-import { type OpenPort, openPort } from "./port_proxy.ts";
+import { type OpenPort, openPort, type RunningServer } from "./port_proxy.ts";
 import { type AttachSpec, type Attached, attachSocket, retryingAttach } from "./attach.ts";
 import { Cdp } from "./cdp.ts";
 import type { SandboxBrowserLane } from "./sandbox_browser.ts";
@@ -62,6 +62,9 @@ interface Made {
 }
 
 const title = (entry: LabAppEntry) => `${entry.title || entry.name} ${entry.version}`;
+
+/** Minutes a served app goes unused (no requests, no open WebSockets) before its server stops until the next visit. */
+const SERVE_IDLE_MINUTES = 15;
 
 /** Refusals (409, 429, 503) that clear on their own, and the longest Retry-After waited each time, in seconds. */
 const WAITS: Record<string, number> = { sandbox_starting: 30, sandbox_busy: 30, browser_starting: 5, scanner_unavailable: 60, downloads_in_progress: 30, too_many_deletes: 15 };
@@ -963,6 +966,25 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				try {
 					const ran = await this.json<{ exit_code?: number; stdout?: string }>("POST", `/v1/containers/${made.id}/exec`, { json: { command: "echo ok", timeout_seconds: 30 }, signal: AbortSignal.timeout(120_000) });
 					add("sandbox runs a command", ran.exit_code === 0 && ran.stdout?.trim() === "ok" ? "pass" : "fail", `exit ${ran.exit_code}`);
+					await attempt("long command", async () => {
+						// Agents write files as long commands: a 64 KB one runs, or the lab refuses it with a size it says.
+						const filler = "x".repeat(64 * 1024);
+						const long = await this.call("POST", `/v1/containers/${made.id}/exec`, { json: { command: `printf %s '${filler}' | wc -c`, timeout_seconds: 30 }, noWait: true, signal: t() }).then(
+							async (r) => ({ status: r.status, body: (await r.json().catch(() => ({}))) as { exit_code?: number; stdout?: string } }),
+							(e: { status?: number; code?: string; message?: string }) => ({ status: e.status ?? 0, body: { stdout: `${e.code ?? ""} ${e.message ?? ""}`.trim() } }),
+						);
+						const ran = long.status === 200 && long.body.stdout?.trim() === String(filler.length);
+						add("long command", ran || long.status === 413 ? "pass" : "fail", ran ? "a 64 KB command ran" : long.status === 413 ? "413: the lab says it's too long" : `answered ${long.status}: ${String(long.body.stdout ?? "").slice(0, 120)}`);
+					});
+					await attempt("background job", async () => {
+						const job = await this.json<{ id: string }>("POST", `/v1/containers/${made.id}/jobs`, { json: { command: "echo el-job-ok" }, signal: t() });
+						let state: { status?: string; exit_code?: number | null; log?: string } = {};
+						for (const until = Date.now() + 30_000; Date.now() < until; await sleep(1_000)) {
+							state = await this.json("GET", `/v1/containers/${made.id}/jobs/${encodeURIComponent(job.id)}?log_bytes=1000`, { signal: t() });
+							if (state.status !== "queued" && state.status !== "running") break;
+						}
+						add("background job", state.exit_code === 0 && state.log?.includes("el-job-ok") ? "pass" : "fail", `${state.status ?? "?"}${state.exit_code !== undefined && state.exit_code !== null ? ` (exit ${state.exit_code})` : ""}`);
+					});
 					await attempt("file download", async () => {
 						// A small file in and out again: the lab scans it on the way out and says the checksum it passed (RFC 9530).
 						const text = `el-file-ok ${randomBytes(6).toString("hex")}\n`;
@@ -1620,16 +1642,30 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		const openPortTool: Tool = {
 			name: `${site}_sandbox_open_port`,
 			kind: "sandbox",
-			description: `Open a web app running in your ${site} sandbox (Shiny, Streamlit, a dev server) in the browser pane. Start the app first, in the background (${site}_sandbox_job_start), listening on 0.0.0.0 at that port. Returns the page, or a local address when no window is open.`,
+			description: [
+				`Show a web app from your ${site} sandbox (a Shiny app, a dashboard, Streamlit, Dash, a dev server) in the browser pane, where the person uses it.`,
+				`Give command: the shell command that starts its server, run in the project folder, listening on 0.0.0.0 at port (also in $PORT), for example "R -e 'shiny::runApp(\\"app\\", host=\\"0.0.0.0\\", port=8501)'" or "python3 -m streamlit run app.py --server.port 8501 --server.address 0.0.0.0".`,
+				`EnrichedLab starts it, waits for the page, shows it, stops the server when nobody has used it for ${SERVE_IDLE_MINUTES} minutes, and starts it again on the next visit: don't start servers in the background yourself.`,
+				"Leave command out only to show a server that already runs. Returns the page as text; the server's last output when it didn't start.",
+			].join(" "),
 			parameters: {
 				type: "object",
-				properties: { port: { type: "integer", minimum: 1, maximum: 65535 }, path: { type: "string", description: "Path to open, default /" } },
+				properties: {
+					port: { type: "integer", minimum: 1024, maximum: 65535 },
+					command: { type: "string", description: "Shell command that starts the app's server on 0.0.0.0 at port" },
+					path: { type: "string", description: "Path to open, default /" },
+				},
 				required: ["port"],
 				additionalProperties: false,
 			},
-			view: (a) => ({ verb: `${site} sandbox`, target: `open port ${a.port}` }),
+			view: (a) => ({ verb: `${site} app`, target: a.command ? `${String(a.command)} (port ${a.port})` : `port ${a.port}` }),
 			run: async (args, ctx) => {
-				const opened = await this.openPort(num(args, "port") ?? 0, typeof args.path === "string" ? args.path : "/", ctx.signal);
+				const port = num(args, "port") ?? 0;
+				const path = typeof args.path === "string" ? args.path : "/";
+				const command = typeof args.command === "string" && args.command.trim() ? args.command : undefined;
+				// The server starts in the session's project folder when the session works in this lab.
+				const workdir = ctx.workspace.kind === "sandbox" && ctx.place === site ? ctx.workspace.root : undefined;
+				const opened = command ? await this.serve(port, command, workdir, path, ctx.signal) : await this.openPort(port, path, ctx.signal);
 				if (ctx.surface) {
 					const page = await ctx.surface.call("browser", "open", { url: opened.url }, ctx.signal).catch(() => undefined);
 					if (page) return { ok: true, content: page.text, view: { result: `opened ${opened.origin}` } };
@@ -1648,7 +1684,6 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		return container;
 	}
 
-	/** Engine shutdown: delete the sandbox unless a background job is still running in it; Gate expires it then. */
 	/** A process in the sandbox with stdin and output streamed (attach.ts). */
 	async attach(spec: AttachSpec, signal?: AbortSignal): Promise<Attached> {
 		if (!this.offers("attach")) throw Object.assign(new Error(`${this.title} doesn't stream sandbox processes.`), { unsupported: true });
@@ -1702,6 +1737,49 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		return Cdp.open(url.replace(/^http/, "ws"), await this.authHeaders("GET", url), this.route.ca);
 	}
 
+	/**
+	 * Run a web app's server in the sandbox behind one of its ports: started now over attach, stopped when unused for
+	 * a while, started again on the next visit (port_proxy.ts). Rejects with the server's last output when it doesn't
+	 * answer.
+	 */
+	async serve(port: number, command: string, workdir: string | undefined, path = "/", signal?: AbortSignal): Promise<OpenPort> {
+		if (!this.offers("attach")) throw new ToolError(`${this.title} doesn't run servers for you here; start it yourself and leave command out.`);
+		const opened = await this.openPort(port, path, signal);
+		const start = async (): Promise<RunningServer> => {
+			const started = await this.attach({ argv: ["sh", "-c", command], ...(workdir ? { workdir } : {}), env: { PORT: String(port), HOST: "0.0.0.0", NO_COLOR: "1" } });
+			// A web server reads no input: close stdin at once (a lab may hold the process until stdin closes).
+			started.end();
+			let tail = "";
+			const keep = (chunk: Uint8Array) => void (tail = (tail + new TextDecoder().decode(chunk)).slice(-1_500));
+			started.onStdout(keep);
+			started.onStderr(keep);
+			let ended: string | undefined;
+			const exit = started.exit.then(
+				(code) => void (ended = `it stopped (exit ${code ?? "stopped"})`),
+				(error: Error) => void (ended = error.message),
+			);
+			const stop = async () => {
+				started.signal("TERM");
+				started.close();
+			};
+			for (const until = Date.now() + 120_000; ; ) {
+				if (ended) throw new Error(`${ended}. Its last output:\n${tail.trim() || "(none)"}`);
+				const status = await opened.probe();
+				if (status && status !== 502 && status !== 503 && status !== 504) break;
+				if (Date.now() > until) {
+					await stop();
+					throw new Error(`nothing answered on port ${port} within 2 minutes. Its last output:\n${tail.trim() || "(none)"}`);
+				}
+				await sleep(700);
+			}
+			return { ended: exit, stop };
+		};
+		await opened.serve({ start }, SERVE_IDLE_MINUTES * 60_000).catch((error: Error) => {
+			throw new ToolError(`The app's server didn't start: ${error.message}`);
+		});
+		return opened;
+	}
+
 	/** Open a port of the sandbox on this computer (port_proxy.ts); one loopback address per port, reused. */
 	async openPort(port: number, path = "/", signal?: AbortSignal): Promise<OpenPort> {
 		if (!this.offers("ports")) throw Object.assign(new Error(`${this.title} doesn't open sandbox ports.`), { unsupported: true });
@@ -1724,7 +1802,12 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		return opened;
 	}
 
-	async close(): Promise<void> {
+	/**
+	 * Engine shutdown or sign-out. The sandbox keeps the person's work (a session may work in it), so it is never
+	 * deleted here: where the lab can stop one it stops (files kept, nothing running, it costs the lab only storage), and
+	 * the next start wakes it. A lab that can't stop sandboxes ends idle ones itself. Returns the sandbox's id.
+	 */
+	async close(): Promise<string | undefined> {
 		// The next connection waits for approval itself. (A connect that failed is never closed: its wait goes on
 		// and reconnects through onApproved.)
 		clearInterval(this.approving);
@@ -1734,12 +1817,17 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		await this.mcp?.close().catch(() => undefined);
 		const id = this.container;
 		this.container = undefined;
-		if (!id) return;
+		if (!id || !this.offers("stop")) return id;
+		// A background job still running keeps the sandbox running for it.
 		for (const job of this.jobs) {
 			const state = await this.json<{ status?: string }>("GET", `/v1/containers/${id}/jobs/${encodeURIComponent(job)}?log_bytes=0`, { signal: AbortSignal.timeout(5_000) }).catch(() => undefined);
-			if (state?.status === "running" || state?.status === "queued") return;
+			if (state?.status === "running" || state?.status === "queued") return id;
 		}
-		await this.call("DELETE", `/v1/containers/${id}`, { signal: AbortSignal.timeout(10_000) }).catch(() => undefined);
+		await this.call("POST", `/v1/containers/${encodeURIComponent(id)}/stop`, { json: {}, noWait: true, signal: AbortSignal.timeout(10_000) }).then(
+			(r) => r.arrayBuffer(),
+			() => undefined,
+		);
+		return id;
 	}
 }
 

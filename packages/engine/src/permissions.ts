@@ -5,6 +5,7 @@
 import type { LabConfig } from "./config.ts";
 import { isReadOnlyCommand, pathsInside } from "./tools/shell.ts";
 import type { Tool } from "./tools/types.ts";
+import { isOpenPort } from "./sites/port_proxy.ts";
 import { FULL_CONTAINMENT } from "./tools/workspace.ts";
 import type { Workspace } from "./tools/workspace.ts";
 
@@ -109,6 +110,8 @@ export function decide(tool: Tool, args: Record<string, unknown>, workspace: Wor
 	if (!key.includes("!") && allowed.has(extra ? outside : key)) return { action: "run" };
 	switch (tool.kind) {
 		case "net": {
+			// The engine's own ports show the person's sandbox apps; nothing goes anywhere the person didn't send it.
+			if (typeof args.url === "string" && isOpenPort(args.url)) return { action: "run" };
 			if (extra) return { action: "ask", reason: extra, key: outside };
 			const name = tool.host?.(args) ?? host(args);
 			const reason = localHost(name) ? `It reaches ${name}, an address on this computer or your network.` : `It sends a request to ${name}.`;
@@ -121,9 +124,10 @@ export function decide(tool: Tool, args: Record<string, unknown>, workspace: Wor
 			return extra ? { action: "ask", reason: extra, key: outside } : { action: "run" };
 		case "write":
 			if (extra) return { action: "ask", reason: extra, key: outside };
-			// File edits in a session's own worktree go to its own branch: the person reviews them when they merge.
-			// Other writes (a click in the browser, a new app) ask in every mode until allowed.
-			if (key === "write" && (mode === "edits" || ownWorktree(workspace))) return { action: "run" };
+			// File edits in a session's own worktree go to its own branch, and work in a lab's sandbox comes home as a
+			// branch: the person reviews them when they merge. Other writes (a click in the browser, a new app) ask in every
+			// mode until allowed.
+			if (key === "write" && (mode === "edits" || ownWorktree(workspace) || workspace.sandboxed === "site")) return { action: "run" };
 			return { action: "ask", reason: key === "write" ? "It changes a file." : `It ${WRITES[tool.name] ?? (tool.name.endsWith("_sandbox_download") ? "copies a file from the sandbox into the project" : "changes something")}.`, key };
 		case "exec": {
 			const command = String(args.command ?? "");

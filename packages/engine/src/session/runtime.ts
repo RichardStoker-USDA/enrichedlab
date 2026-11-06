@@ -128,10 +128,13 @@ export class SessionRuntime {
 		return this.header?.parent ? (this.header.mode ?? "read") : undefined;
 	}
 
-	/** Tools this session can use: a subagent can't start agents of its own; skills when the project has any. */
+	/**
+	 * Tools this session can use: a subagent can't start agents of its own; tools that work only on this computer
+	 * aren't offered while it works in a lab (a model calls what it's offered); skills when the project has any.
+	 */
 	private visibleTools(): Tool[] {
-		const tools = this.deps.tools(this.site);
-		const visible = this.parent ? tools.filter((t) => !t.name.startsWith("agent_")) : tools;
+		const local = this.place === "local";
+		const visible = this.deps.tools(this.site).filter((t) => !(this.parent && t.name.startsWith("agent_")) && (local || !t.localOnly));
 		return this.skills().length ? [...visible, this.skillTool] : visible;
 	}
 

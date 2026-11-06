@@ -93,7 +93,8 @@ function selfCommand(): string[] {
 export type Facility = "seatbelt" | "bubblewrap" | "restricted-token";
 
 /** Facilities that contain reads and the network as well as writes; commands under them run without asking. */
-export const FULL_CONTAINMENT = new Set<string>(["seatbelt", "bubblewrap"]);
+// "site": a lab's sandbox, a separate Linux machine with no network; nothing a command does there reaches this computer.
+export const FULL_CONTAINMENT = new Set<string>(["seatbelt", "bubblewrap", "site"]);
 
 /** The OS facility that contains a command, when this machine has one that works. */
 function sandboxer(): Facility | undefined {

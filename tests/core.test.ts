@@ -12,6 +12,8 @@ import { allowKey, decide } from "../packages/engine/src/permissions.ts";
 import { isReadOnlyCommand } from "../packages/engine/src/tools/shell.ts";
 import type { Tool } from "../packages/engine/src/tools/types.ts";
 import { LocalWorkspace } from "../packages/engine/src/tools/workspace.ts";
+import { type SandboxApi, SandboxWorkspace } from "../packages/engine/src/sites/sandbox_workspace.ts";
+import { openPort } from "../packages/engine/src/sites/port_proxy.ts";
 import { unifiedDiff } from "../packages/engine/src/tools/diff.ts";
 import { editTool, globToRegex } from "../packages/engine/src/tools/files.ts";
 import { splitBlocks } from "../packages/web/src/lib/blocks.ts";
@@ -157,6 +159,29 @@ describe("permissions", () => {
 		const edits = { permissions: { mode: "edits", allowCommands: [] } } as unknown as LabConfig;
 		expect(decide(edit, { path: "a.ts" }, ws, edits, new Set()).action).toBe("run");
 		expect(decide(click, { ref: "e3" }, ws, edits, new Set()).action).toBe("ask");
+	});
+
+	test("in a lab's sandbox, commands and file edits in the project run; work comes home as a branch to merge", () => {
+		const api = { title: "Field Lab", run: async () => ({ exitCode: 0, stdout: "", stderr: "" }) } as unknown as SandboxApi;
+		const lab = new SandboxWorkspace(api, "/sandbox/work/project-1");
+		const edit = { name: "edit", kind: "write" } as unknown as Tool;
+		expect(decide(shell, { command: "cd app && python3 server.py" }, lab, config, new Set()).action).toBe("run");
+		expect(decide(edit, { path: "app/index.html" }, lab, config, new Set()).action).toBe("run");
+		// Lab data outside the project still asks before a command changes it.
+		expect(decide(shell, { command: "rm -rf /sandbox/data/raw" }, lab, config, new Set()).action).toBe("ask");
+		// On this computer, without containment, a command that changes things still asks.
+		expect(decide(shell, { command: "rm -rf build" }, new LocalWorkspace(scratch("perm-plain"), "off"), config, new Set()).action).toBe("ask");
+	});
+
+	test("opening one of the engine's own app ports doesn't ask; other local addresses do", async () => {
+		const open = { name: "browser_open", kind: "net" } as unknown as Tool;
+		const opened = openPort({ url: (p) => `http://127.0.0.1:9/${p}`, headers: async () => ({}) });
+		try {
+			expect(decide(open, { url: `${opened.origin}/` }, ws, config, new Set()).action).toBe("run");
+			expect(decide(open, { url: "http://127.0.0.1:5432/" }, ws, config, new Set()).action).toBe("ask");
+		} finally {
+			opened.close();
+		}
 	});
 
 	test("an answer about a path outside the project covers that path only", () => {

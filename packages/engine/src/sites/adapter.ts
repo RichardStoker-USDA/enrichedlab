@@ -53,8 +53,11 @@ export interface SiteAdapter {
 	bundles?(): Promise<BundleGrant[]>;
 	/** Stop using this connection but keep remote state (a sandbox); returns a handle the next adapter takes over. */
 	detach(): Promise<string | undefined>;
-	/** Engine shutdown or sign-out: release remote state. */
-	close(): Promise<void>;
+	/**
+	 * Engine shutdown or sign-out: let go of the connection. A sandbox with the person's work stays (stopped where the
+	 * lab can stop one); its id is returned so the next start uses it again.
+	 */
+	close(): Promise<string | undefined>;
 	/** What the lab says about itself at /.well-known/enrichedlab-lab, when it serves that. */
 	readonly descriptor?: LabDescriptor;
 	/** Follow the lab's event stream until stopped; `reset` means re-read what was granted. */

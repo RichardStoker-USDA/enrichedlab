@@ -86,6 +86,18 @@ export class Sites {
 		private onNotice: (notice: LabNotice) => void = () => undefined,
 	) {}
 
+	/** Each lab's sandbox, kept across restarts so sessions working there find their files again. */
+	private get sandboxFile(): string {
+		return join(this.p.home, "lab_sandboxes.json");
+	}
+
+	private keepSandbox(name: string, id: string | undefined): void {
+		const kept = readJson<Record<string, string>>(this.sandboxFile, {});
+		if (id) kept[name] = id;
+		else delete kept[name];
+		writeJson(this.sandboxFile, kept);
+	}
+
 	/** Where each lab's event cursor is kept, so a restart resumes instead of replaying or missing events. */
 	private get cursorFile(): string {
 		return join(this.p.home, "lab_cursors.json");
@@ -403,7 +415,11 @@ export class Sites {
 		rmSync(this.deviceFile(name), { force: true });
 		rmSync(this.credPath(name), { force: true });
 		if (this.catalog.delete(name)) this.onAppsChanged?.(name);
-		this.adapters.get(name)?.close();
+		// The sandbox stays for the next sign-in, with its files.
+		const adapter = this.adapters.get(name);
+		const sandbox = await adapter?.detach();
+		void adapter?.close();
+		if (sandbox) this.parked.set(name, sandbox);
 		this.adapters.delete(name);
 		this.states.delete(name);
 		const config = this.configs().find((s) => s.name === name);
@@ -419,7 +435,10 @@ export class Sites {
 		rmSync(this.deviceFile(name), { force: true });
 		rmSync(this.credPath(name), { force: true });
 		if (this.catalog.delete(name)) this.onAppsChanged?.(name);
-		this.adapters.get(name)?.close();
+		// The lab's sandbox, stopped, stays the person's at the lab (el sandboxes lists it); this computer forgets it.
+		void this.adapters.get(name)?.close();
+		this.parked.delete(name);
+		this.keepSandbox(name, undefined);
 		this.adapters.delete(name);
 		this.states.delete(name);
 		this.saveConfigs(this.configs().filter((s) => s.name !== name));
@@ -430,7 +449,7 @@ export class Sites {
 		const config = this.configs().find((s) => s.name === name);
 		if (!config) throw new Error(`No site named ${name}.`);
 		// The old connection goes, its sandbox stays: files and running jobs survive a refresh.
-		const container = (await this.adapters.get(name)?.detach()) ?? this.parked.get(name);
+		const container = (await this.adapters.get(name)?.detach()) ?? this.parked.get(name) ?? readJson<Record<string, string>>(this.sandboxFile, {})[name];
 		this.adapters.delete(name);
 		this.parked.delete(name);
 		const first = this.route(config);
@@ -562,7 +581,7 @@ export class Sites {
 	async close(): Promise<void> {
 		for (const stop of this.following.values()) stop();
 		this.following.clear();
-		await Promise.all([...this.adapters.values()].map((a) => a.close()));
+		await Promise.all([...this.adapters.entries()].map(async ([name, a]) => this.keepSandbox(name, (await a.close()) ?? this.parked.get(name))));
 	}
 }
 

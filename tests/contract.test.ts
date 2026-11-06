@@ -86,8 +86,16 @@ const lab = Bun.serve<{ stdin: string; started: boolean }, never>({
 			}
 			case "/v1/containers/n1/files":
 				return Response.json({ error: { code: "internet_no_files", message: "A sandbox with internet access takes no files." } }, { status: 409 });
-			case "/v1/containers/c1/exec":
-				return Response.json({ exit_code: 0, stdout: "ok\n", stderr: "" });
+			case "/v1/containers/c1/exec": {
+				// A long command, written the way agents write files: its byte count.
+				const { command } = (await request.json()) as { command: string };
+				const piped = /^printf %s '(x*)' \| wc -c$/.exec(command);
+				return Response.json({ exit_code: 0, stdout: piped ? `${piped[1]!.length}\n` : "ok\n", stderr: "" });
+			}
+			case "/v1/containers/c1/jobs":
+				return Response.json({ id: "j1", status: "running" }, { status: 201 });
+			case "/v1/containers/c1/jobs/j1":
+				return Response.json({ id: "j1", status: "succeeded", exit_code: 0, log: "el-job-ok\n" });
 			case "/v1/containers/c1/attach":
 				return srv.upgrade(request, { data: { stdin: "", started: false } }) ? undefined : new Response("", { status: 400 });
 			case "/v1/containers/c1/files":

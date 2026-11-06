@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { Terminals } from "../packages/engine/src/terminal.ts";
 import { showTool } from "../packages/engine/src/tools/harness.ts";
 import { LocalWorkspace, type Workspace } from "../packages/engine/src/tools/workspace.ts";
+import { type SandboxApi, SandboxWorkspace } from "../packages/engine/src/sites/sandbox_workspace.ts";
 
 const made: string[] = [];
 function scratch(name: string): string {
@@ -86,5 +87,33 @@ describe("contained commands", () => {
 		} finally {
 			delete process.env.ENRICHED_TEST_TOKEN;
 		}
+	});
+});
+
+describe("files written into a lab's sandbox", () => {
+	test("a small file goes in a few short commands; one the lab refuses as a command goes by upload", async () => {
+		const commands: string[] = [];
+		const uploads: string[] = [];
+		const refuseLong = (limit: number) =>
+			({
+				title: "Field Lab",
+				run: async (command: string) => {
+					if (command.length > limit) throw new Error("Sandboxes aren't available right now. Try again in a few minutes.");
+					commands.push(command);
+					return { exitCode: 0, stdout: "", stderr: "", timedOut: false };
+				},
+				put: async (local: string) => {
+					uploads.push(local);
+					return { path: "/sandbox/in/x", bytes: 0 };
+				},
+			}) as unknown as SandboxApi;
+		const page = "<p>dashboard</p>\n".repeat(1_700); // about 27 KB, like the page in the session that failed
+		await new SandboxWorkspace(refuseLong(32_000), "/sandbox/work/p").write("app/index.html", page);
+		expect(uploads).toEqual([]);
+		expect(Math.max(...commands.map((c) => c.length))).toBeLessThan(17_000);
+		commands.length = 0;
+		await new SandboxWorkspace(refuseLong(8_000), "/sandbox/work/p").write("app/index.html", page);
+		expect(uploads).toHaveLength(1);
+		expect(commands.at(-1)).toContain("mv -f -- '/sandbox/in/x' '/sandbox/work/p/app/index.html'");
 	});
 });

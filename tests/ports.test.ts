@@ -3,8 +3,10 @@
 
 import { afterAll, describe, expect, test } from "bun:test";
 import { GateSite } from "../packages/engine/src/sites/gate.ts";
+import { isOpenPort, withoutSandbox } from "../packages/engine/src/sites/port_proxy.ts";
 
 const PORT_PATH = "/v1/containers/c1/ports/8080";
+let deleted = false;
 const lab = Bun.serve({
 	port: 0,
 	hostname: "127.0.0.1",
@@ -14,14 +16,16 @@ const lab = Bun.serve({
 		if (url.pathname === "/.well-known/enrichedlab-lab") return Response.json({ contract: "2026-11", name: "devlab", title: "Dev Lab", endpoints: { containers: true, ports: true }, sign_in: { kind: "key" } });
 		if (url.pathname === "/v1/me") return Response.json({ subject: "u_1", handle: "pat", memberships: [] });
 		if (url.pathname === "/v1/models") return Response.json({ data: [] });
+		if (url.pathname === "/v1/containers/c1" && request.method === "DELETE") return (deleted = true), new Response(null, { status: 202 });
 		if (url.pathname === "/v1/containers/c1") return Response.json({ id: "c1", status: "running" });
 		if (url.pathname === `${PORT_PATH}/ws`) return srv.upgrade(request) ? undefined : new Response("", { status: 400 });
 		if (url.pathname === `${PORT_PATH}/go2`) return new Response(null, { status: 302, headers: { location: `${PORT_PATH}/landed2` } });
 		if (url.pathname === `${PORT_PATH}/go`) return new Response(null, { status: 302, headers: { location: `${url.origin}${PORT_PATH}/landed` } });
-		if (url.pathname.startsWith(PORT_PATH)) {
+		if (url.pathname.startsWith(PORT_PATH) || url.pathname.startsWith("/v1/containers/c1/ports/8081")) {
+			// Like Gate: app pages come sandboxed, so they never act with the lab's origin.
 			return Response.json(
 				{ path: url.pathname.slice(PORT_PATH.length), query: url.search, method: request.method, body: request.body ? await request.text() : "", cookie: request.headers.get("cookie"), origin: request.headers.get("origin") },
-				{ headers: { "set-cookie": "app=1; Path=/" } },
+				{ headers: { "set-cookie": "app=1; Path=/", "content-security-policy": "sandbox allow-scripts allow-forms; frame-ancestors 'self'" } },
 			);
 		}
 		return new Response("", { status: 404 });
@@ -58,6 +62,45 @@ describe("sandbox ports", () => {
 		expect(movedPath.headers.get("location")).toBe("/landed2");
 	});
 
+	test("the page gets the port's own origin: the lab's sandbox directive goes, its other rules stay", async () => {
+		const opened = await site.openPort(8080);
+		const cookie = (await fetch(opened.url, { redirect: "manual" })).headers.get("set-cookie")!.split(";")[0]!;
+		const page = await fetch(`${opened.origin}/`, { headers: { cookie } });
+		expect(page.headers.get("content-security-policy")).toBe("frame-ancestors 'self'");
+		expect(withoutSandbox("sandbox")).toBe("");
+		expect(withoutSandbox("default-src 'self'; sandbox allow-scripts, sandbox")).toBe("default-src 'self'");
+		expect(isOpenPort(`${opened.origin}/api`)).toBe(true);
+		expect(isOpenPort(opened.origin.replace("127.0.0.1", "localhost"))).toBe(true);
+		expect(isOpenPort("http://127.0.0.1:1/")).toBe(false);
+	});
+
+	test("a served app starts at once, stops when unused, and starts again on the next visit", async () => {
+		const opened = await site.openPort(8081);
+		const events: string[] = [];
+		await opened.serve(
+			{
+				start: async () => {
+					events.push("start");
+					return { ended: new Promise(() => undefined), stop: async () => void events.push("stop") };
+				},
+			},
+			60,
+		);
+		expect(events).toEqual(["start"]);
+		await Bun.sleep(250);
+		expect(events).toEqual(["start", "stop"]);
+		const cookie = (await fetch(opened.url, { redirect: "manual" })).headers.get("set-cookie")!.split(";")[0]!;
+		expect((await fetch(`${opened.origin}/`, { headers: { cookie } })).status).toBe(200);
+		expect(events).toEqual(["start", "stop", "start"]);
+		// A server that won't start says why, in place of the page.
+		await opened.serve({ start: async () => Promise.reject(new Error("port 8081 is in use")) }, 60_000).catch(() => undefined);
+		const failed = await fetch(`${opened.origin}/`, { headers: { cookie } });
+		expect(failed.status).toBe(502);
+		expect(await failed.text()).toContain("port 8081 is in use");
+		opened.close();
+		expect(isOpenPort(opened.origin)).toBe(false);
+	});
+
 	test("requests without the cookie, from another origin, or for another host are refused", async () => {
 		const opened = await site.openPort(8080);
 		const cookie = (await fetch(opened.url, { redirect: "manual" })).headers.get("set-cookie")!.split(";")[0]!;
@@ -79,6 +122,8 @@ describe("sandbox ports", () => {
 		});
 		ws.close();
 		expect(reply).toBe("echo hello");
-		await site.close();
+		// Closing keeps the sandbox, with the person's work, for the next start.
+		expect(await site.close()).toBe("c1");
+		expect(deleted).toBe(false);
 	});
 });

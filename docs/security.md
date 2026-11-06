@@ -22,8 +22,10 @@ approves to run uncontained gets the whole environment.
 
 "Allow for this session" covers what was asked about and nothing wider. File edits share one answer; each other
 kind of change (a click or typing in the browser, a new app, a memory or skill, a filled PDF, a sandbox download)
-has its own, and edits mode and a session's own worktree run file edits only. An answer about a path outside the
-project covers that path. Pushes and unreviewed lab tools ask every time.
+has its own, and edits mode and a session's own worktree run file edits only. In a lab's sandbox, commands and file
+edits inside the project run without asking: the sandbox is a separate machine with no network, and its work comes
+home as a branch the person merges. Commands that change lab data outside the project still ask. An answer about a
+path outside the project covers that path. Pushes and unreviewed lab tools ask every time.
 
 A lab sandbox is one Linux container per person at that lab, and the sessions moved there share it: a command in one
 project can read the others'. Keep work that must stay apart in different labs or sandboxes (`el sandbox create`). Hiding reads and blocking the
@@ -57,7 +59,16 @@ key whose private half stays in the OS credential store, so a copied token is us
 A sandbox port opened on this computer (`<lab>_sandbox_open_port`) is a loopback proxy that adds the person's lab
 sign-in to what it forwards. It answers only its own page: the Host must be its loopback address, a browser Origin its
 own origin, and each request carries a per-port cookie (HttpOnly, SameSite=Strict) set from a one-time token in the
-first address. Other sites in the browser and other programs get 403.
+first address. Other sites in the browser and other programs get 403. The lab serves app pages with
+`Content-Security-Policy: sandbox` so they never act with the lab's origin; the proxy drops that one directive, since
+each port has a loopback origin of its own that reaches nothing but that port. The app then keeps its cookies,
+storage, requests and WebSockets to its own server (Shiny needs the WebSocket). Opening one of these addresses in the
+browser pane doesn't ask; other local addresses do.
+
+A served app (`<lab>_sandbox_open_port` with a command) runs as the person in their sandbox. Its server stops after
+15 minutes with no requests and no open WebSockets, and starts again on the next visit. When the engine quits, the
+person's lab sandbox is stopped, not deleted, where the lab can stop one: its files stay for the next start, and it
+uses only storage meanwhile. `el sandbox delete` removes it.
 
 A lab sandbox's browser has none of the person's sign-ins: the engine never copies cookies into it, each session gets
 its own browser context (disposed when the session or the connection ends), and it reaches only what the lab's network

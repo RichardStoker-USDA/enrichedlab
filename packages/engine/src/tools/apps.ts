@@ -11,6 +11,7 @@ const folder = (name: string) => join("apps", name);
 export const appCreateTool: Tool = {
 	name: "app_create",
 	kind: "write",
+	localOnly: true,
 	description: [
 		"Start a web app in the project, at apps/<name>/, that the person uses in a workbench pane beside this conversation.",
 		"Templates: data (default: reads a table from the project, draws it on the GPU with an interactive plot, and has a backend tool), blank (a page), shiny (an R Shiny app), shiny-python (a Python Shiny app). Shiny apps carry a pixi.toml: their R or Python packages install per user from conda-forge on first open, no administrator needed; add packages there.",
@@ -33,7 +34,11 @@ export const appCreateTool: Tool = {
 	async run(args, ctx) {
 		const name = str(args, "name");
 		if (!APP_NAME.test(name)) throw new ToolError("name: lowercase letters, digits and dashes.");
-		if (ctx.place !== "local") throw new ToolError("Apps are built on this computer; move the session back first. Apps can still reach the lab with lab.cluster().");
+		// In a lab the app runs next to the data as its own server; app_create's kind of app lives on this computer.
+		if (ctx.place !== "local")
+			throw new ToolError(
+				`This session works in the ${ctx.place} sandbox, so make the app a server there instead: write its files in the project (a Shiny app.R, a Streamlit or Dash app.py, a page and a small server), then call ${ctx.place}_sandbox_open_port with the command that starts it on 0.0.0.0 at a port. EnrichedLab runs it, shows it, and stops it when unused.`,
+			);
 		const template = (str(args, "template", false) || "data") as Template;
 		if (!TEMPLATES.includes(template)) throw new ToolError(`template is one of ${TEMPLATES.join(", ")}.`);
 		const dir = folder(name);

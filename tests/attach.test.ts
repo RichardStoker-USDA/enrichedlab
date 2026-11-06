@@ -182,7 +182,7 @@ describe.skipIf(process.platform === "win32")("app backends in a lab sandbox", (
 			openPort: async (p) => {
 				port = p;
 				const origin = `http://127.0.0.1:${p}`;
-				return { url: `${origin}/`, origin, probe: () => fetch(`${origin}/`).then((r) => r.status, () => 0), close: () => undefined };
+				return { url: `${origin}/`, origin, probe: () => fetch(`${origin}/`).then((r) => r.status, () => 0), serve: async () => undefined, close: () => undefined };
 			},
 		};
 		const backend = await startBackend(manifest, { dir: app, dataDir: join(box, "local_data"), runDir: join(box, "run"), toolsDir: join(box, "tools"), network: false, log: () => undefined, sandbox: withPorts });

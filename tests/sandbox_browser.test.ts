@@ -164,9 +164,9 @@ beforeAll(async () => {
 
 afterAll(async () => {
 	await browsers?.closeAll();
-	// The person's sandbox goes with the session, as any does.
+	// The person's sandbox stays when the engine closes, with its files, for the next start.
 	await gate?.close();
-	if (devtools) expect(seen.deleted).toContain("b1");
+	if (devtools) expect(seen.deleted).not.toContain("b1");
 	browser?.kill();
 	lab.stop(true);
 	site.stop(true);
@@ -210,8 +210,9 @@ describe.skipIf(!devtools)("the browser in a lab's sandbox", () => {
 		const cdp = await fresh.cdp(AbortSignal.timeout(30_000));
 		cdp.close();
 		expect(seen.made.at(-1)).toEqual({ name: "EnrichedLab", image: "browser" });
-		await fresh.close();
-		expect(seen.deleted).toEqual(["b2"]);
+		// Closing keeps the person's sandbox, with its work, for the next start.
+		expect(await fresh.close()).toBe("b2");
+		expect(seen.deleted).toEqual([]);
 	}, 60_000);
 
 	test("a browser that fails to start is reported at once, not asked for again and again", async () => {
@@ -226,8 +227,8 @@ describe.skipIf(!devtools)("the browser in a lab's sandbox", () => {
 		expect(rows.find((r) => r.row === "unknown image refused")).toMatchObject({ status: "pass" });
 		expect(rows.find((r) => r.row === "browser sandbox")).toMatchObject({ status: "pass" });
 		expect(rows.find((r) => r.row === "browser sandbox")?.detail).toContain("in the browser image");
-		// Its sandbox is removed again; the person's (b1) stays.
-		expect(seen.deleted).toEqual(["b2", "b3"]);
+		// The check's own sandbox is removed again; the person's stay.
+		expect(seen.deleted).toEqual(["b3"]);
 	}, 60_000);
 
 	test("the agent opens, reads, types and submits, through the lab's port path with its sign-in", async () => {
