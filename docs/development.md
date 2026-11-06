@@ -62,7 +62,10 @@ session, loads a page in the browser pane and saves screenshots of the window an
 is a temporary folder, a source engine on a throwaway home, and a git project with one session on This Mac and one
 moved to the lab. `--open` opens the app on it; `--shots <folder>` captures every scene (new session, both sessions,
 the place and model menus, the workbench, every sheet, narrow windows) in light and dark, and checks the flows that
-cross places, such as a first task typed after "New Session in <lab>" running there. Build the window first
+cross places, such as a first task typed after "New Session in <lab>" running there. Its stand-in config adds a cloud
+service beside the lab, so model menus show private and cloud models. The `streaming_write` scene streams a 30 KB tool
+call at a model's pace while resizing the window, and prints frame times, long tasks, and whether the page kept the
+window's size. Build the window first
 (`bun run build:web`). Run it before calling a change to the window done, and add a scene with each new surface.
 
 A development run of the desktop app (`apps/desktop`, unpackaged) takes these for screenshots and tests:
@@ -76,6 +79,7 @@ A development run of the desktop app (`apps/desktop`, unpackaged) takes these fo
 | `EL_SHOT_SIZE=1024x720` | The window's size, to check narrower layouts |
 | `EL_SHOT_ROUTE` | The page to open instead of the session |
 | `EL_SHOT_MENU` | The label of the menu item to choose when the scene opens a menu; a screenshot run shows no native menus |
+| `EL_SHOT_RESIZE` | `WxH`: the window is resized back and forth to this size during the scene, then the page's size is compared with the window's (printed as `shot: perf window …`) |
 | `EL_BINARY` | The engine to start, such as a wrapper that runs `packages/cli/src/main.ts` from source |
 
 Pass `--use-mock-keychain` to Electron in these runs, so a test never asks for the login keychain.
