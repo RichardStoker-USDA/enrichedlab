@@ -22,17 +22,22 @@
 	/** The app's folder in its project, such as "fieldtrial/apps/yield-explorer". */
 	const where = (dir: string) => dir.split(/[\\/]/).filter(Boolean).slice(-3).join("/");
 
+	// Only the latest open may land: one that finishes after the pane switched sessions, or closed, is closed again.
+	let asked = 0;
+	let closed = false;
 	async function open() {
 		error = "";
+		const ask = ++asked;
 		try {
 			const next = await rpc.call("app.open", { sessionId: lab.current, id });
+			if (ask !== asked || closed) return void rpc.call("app.close", { token: next.token }).catch(() => undefined);
 			if (token) void rpc.call("app.close", { token }).catch(() => undefined);
 			token = next.token;
 			opened = next;
 			generation++;
 			fault = "";
 		} catch (e) {
-			error = (e as Error).message;
+			if (ask === asked) error = (e as Error).message;
 		}
 	}
 
@@ -42,12 +47,28 @@
 		void open();
 	});
 
+	let deciding = $state(false);
+	let decideError = $state("");
 	async function decide(allow: boolean) {
-		await rpc.call("app.grant", { id, allow });
-		void lab.refreshApps();
-		if (allow) await open();
-		else error = "Not allowed. Reopen the app to decide again.";
+		if (deciding) return;
+		deciding = true;
+		decideError = "";
+		try {
+			await rpc.call("app.grant", { id, allow });
+			void lab.refreshApps();
+			if (allow) await open();
+			else error = "Not allowed. Reopen the app to decide again.";
+		} catch (e) {
+			decideError = `That didn't go through: ${(e as Error).message}`;
+		} finally {
+			deciding = false;
+		}
 	}
+	// The question takes focus when it appears, on itself rather than on Allow, so a stray Enter allows nothing.
+	let consent: HTMLElement | undefined = $state();
+	$effect(() => {
+		if (consent && active) consent.focus({ preventScroll: true });
+	});
 
 	// ── Theme for the page, in the MCP Apps standard variable names ──────────────────────────────────────────────
 
@@ -181,6 +202,7 @@
 	}
 
 	onDestroy(() => {
+		closed = true;
 		void bridge?.close().catch(() => undefined);
 		if (token) void rpc.call("app.close", { token }).catch(() => undefined);
 	});
@@ -204,17 +226,18 @@
 	{#if error}
 		<p class="state">{error}</p>
 	{:else if opened && !opened.app.granted}
-		<div class="consent" role="dialog" aria-labelledby="consent-title">
+		<section class="consent" bind:this={consent} tabindex="-1" aria-labelledby="consent-title">
 			<h2 id="consent-title">{opened.app.title} asks to</h2>
 			<ul>
 				{#each opened.asks as line}<li>{line}</li>{/each}
 			</ul>
 			<p class="where">{opened.app.description || where(opened.app.dir)}{opened.app.signer ? ` · signed by ${opened.app.signer}` : ""}</p>
+			{#if decideError}<p class="fault" role="alert">{decideError}</p>{/if}
 			<div class="actions">
-				<button class="btn primary" onclick={() => decide(true)}>Allow</button>
-				<button class="btn" onclick={() => decide(false)}>Not now</button>
+				<button class="btn primary" disabled={deciding} onclick={() => decide(true)}>{deciding ? "Allowing…" : decideError ? "Try Again" : "Allow"}</button>
+				<button class="btn" disabled={deciding} onclick={() => decide(false)}>Not now</button>
 			</div>
-		</div>
+		</section>
 	{:else if opened?.url}
 		{#key generation}
 			{#if opened.kind === "view"}
@@ -278,6 +301,9 @@
 		max-width: 420px;
 		text-align: center;
 		white-space: pre-wrap;
+	}
+	.consent:focus {
+		outline: none;
 	}
 	.consent {
 		margin: auto;
