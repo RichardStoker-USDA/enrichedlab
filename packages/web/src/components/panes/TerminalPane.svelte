@@ -14,6 +14,20 @@
 	// Closed while still starting: whatever opened afterwards is closed at once.
 	let gone = false;
 
+	/** WebGL2 on a real GPU: a software rasterizer names itself in the unmasked renderer string. */
+	function hardwareWebgl(): boolean {
+		try {
+			const gl = document.createElement("canvas").getContext("webgl2");
+			if (!gl) return false;
+			const info = gl.getExtension("WEBGL_debug_renderer_info");
+			const renderer = String(info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+			gl.getExtension("WEBGL_lose_context")?.loseContext();
+			return !/swiftshader|llvmpipe|softpipe|software|microsoft basic render/i.test(renderer);
+		} catch {
+			return false;
+		}
+	}
+
 	onMount(async () => {
 		const [{ Terminal }, { FitAddon }] = await Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit")]);
 		const colors = () => ({ background: tokenColor("--canvas", host), foreground: tokenColor("--text", host), cursor: tokenColor("--accent", host), selectionBackground: "rgba(128,128,128,0.3)" });
@@ -29,14 +43,17 @@
 		const fit = new FitAddon();
 		term.loadAddon(fit);
 		term.open(host!);
-		// The GPU renderer where WebGL2 works; xterm's DOM renderer otherwise.
-		try {
-			const { WebglAddon } = await import("@xterm/addon-webgl");
-			const gl = new WebglAddon();
-			gl.onContextLoss(() => gl.dispose());
-			term.loadAddon(gl);
-		} catch {
-			// DOM renderer.
+		// The GPU renderer where WebGL2 runs on a hardware GPU; xterm's DOM renderer otherwise. On a software GPU
+		// (SwiftShader, llvmpipe: virtual machines, remote desktops) WebGL is slower than the DOM and can draw nothing.
+		if (hardwareWebgl()) {
+			try {
+				const { WebglAddon } = await import("@xterm/addon-webgl");
+				const gl = new WebglAddon();
+				gl.onContextLoss(() => gl.dispose());
+				term.loadAddon(gl);
+			} catch {
+				// DOM renderer.
+			}
 		}
 		fit.fit();
 		let termId: string | undefined;
