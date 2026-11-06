@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "n
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-export const VERSION = "0.2.16";
+export const VERSION = "0.2.17";
 
 /**
  * How the harness names itself to a lab. Gate files every request under the User-Agent's first word, so the lab's
@@ -13,6 +13,7 @@ export const CLIENT_AGENT = `EnrichedLab/${VERSION} (${process.platform}; ${proc
 
 /** What changed in this version, one line each, newest first. Surfaces show the first lines when a session opens. */
 export const NEWS = [
+	"0.2.17: a task typed after choosing New Session in a lab runs there; a calmer light theme and darker dark theme; moves are reviewed the same way from everywhere and keep secret-looking files and their history at home; Stop, a failed send and a rename never lose what you typed; terminals keep running when panes move; tables and plots keep values exactly as the file has them; commands that run without asking get no keys or tokens; el session push and pull move a session to your lab's Rein and back.",
 	"0.2.16: an exported session keeps every event within the shared log's size limit, so a session with a very large file or command output still imports into Gate's Rein.",
 	"0.2.15: sessions export in a form Gate's Rein always imports, however long they ran (el session export), and an empty session shows its project folder short enough to read.",
 	"0.2.14: a lab that binds your sign-in to this computer now gets its proof on model requests too, so your lab's models answer instead of refusing with 401; the terminal version's pickers open under the prompt with names you know, and /help reads as a table.",
