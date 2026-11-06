@@ -65,7 +65,8 @@
 		const resize = term.onResize(({ cols, rows }) => termId && void rpc.call("term.resize", { termId, cols, rows }));
 		const observer = new ResizeObserver(() => fit.fit());
 		observer.observe(host!);
-		term.focus();
+		// Only the pane in front takes focus; a terminal restored behind others doesn't steal it.
+		if (active) term.focus();
 		cleanup = () => {
 			stopTheme();
 			observer.disconnect();

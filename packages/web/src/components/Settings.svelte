@@ -56,11 +56,14 @@
 					<span class="sub">{site.signedIn ? `Signed in as ${site.who ?? "you"} · ${site.models} ${site.models === 1 ? "model" : "models"} · ${site.tools} tools${site.sandbox ? " · sandbox" : ""}` : site.error ? `Can't connect: ${site.error}` : "Not signed in"}</span>
 					<span class="url">{site.url}</span>
 				</span>
-				{#if site.signedIn}
-					<button class="btn" onclick={() => lab.logout(place.id)}>Sign Out</button>
-				{:else}
-					<button class="btn primary" onclick={() => lab.login(place.id)}>Sign In</button>
-				{/if}
+				<span class="acts">
+					{#if site.signedIn}
+						<button class="btn" onclick={() => lab.logout(place.id)}>Sign Out</button>
+					{:else}
+						<button class="btn primary" onclick={() => lab.login(place.id)}>Sign In</button>
+					{/if}
+					<button class="btn quiet" onclick={() => ((lab.settings = false), lab.removeLab(place.id))}>Remove…</button>
+				</span>
 			</div>
 		{:else}
 			<p class="note">No labs yet. A lab gives you its models, tools and a sandbox next to its data.</p>
@@ -104,6 +107,10 @@
 	.what {
 		display: grid;
 		min-width: 0;
+	}
+	.acts {
+		display: flex;
+		gap: 6px;
 	}
 	.name {
 		font-weight: 600;

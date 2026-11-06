@@ -52,7 +52,7 @@
 		const q = query.trim().toLowerCase();
 		if (!q) return list.filter((i) => i.group !== "Sessions" && i.group !== "Apps").concat(list.filter((i) => i.group === "Apps").slice(0, 6), list.filter((i) => i.group === "Sessions").slice(0, 8));
 		const words = q.split(/\s+/);
-		return list.filter((i) => words.every((w) => `${i.label} ${i.hint ?? ""}`.toLowerCase().includes(w))).slice(0, 40);
+		return list.filter((i) => words.every((w) => `${i.label} ${i.hint ?? ""}`.toLowerCase().includes(w))).slice(0, 80);
 	});
 
 	$effect(() => {
@@ -66,6 +66,11 @@
 		void query;
 		index = 0;
 	});
+	// The highlighted result stays in sight as the arrows move through a long list.
+	$effect(() => {
+		const id = items[index]?.id;
+		if (id) document.getElementById(`p-${id}`)?.scrollIntoView({ block: "nearest" });
+	});
 
 	function run(item: Item | undefined) {
 		if (!item) return;
@@ -77,18 +82,20 @@
 		if (e.key === "ArrowDown") (e.preventDefault(), (index = Math.min(items.length - 1, index + 1)));
 		else if (e.key === "ArrowUp") (e.preventDefault(), (index = Math.max(0, index - 1)));
 		else if (e.key === "Enter") (e.preventDefault(), run(items[index]));
-		else if (e.key === "Escape") lab.palette = false;
+		else if (e.key === "Escape") (e.preventDefault(), (lab.palette = false));
+		// Focus stays in the field (the combobox pattern); Tab doesn't wander into the page behind.
+		else if (e.key === "Tab") (e.preventDefault(), input?.focus());
 	}
 </script>
 
 {#if lab.palette}
 	<button class="scrim" aria-label="Close" onclick={() => (lab.palette = false)}></button>
-	<div class="palette" role="dialog" aria-label="Search and commands">
-		<input bind:this={input} bind:value={query} onkeydown={keys} placeholder="Search sessions, or type a command" aria-label="Search sessions, or type a command" role="combobox" aria-expanded="true" aria-controls="palette-list" aria-activedescendant={items[index] ? `p-${items[index].id}` : undefined} />
+	<div class="palette" role="dialog" aria-modal="true" aria-label="Search and commands" tabindex="-1" onkeydown={keys}>
+		<input bind:this={input} bind:value={query} placeholder="Search sessions, or type a command" aria-label="Search sessions, or type a command" role="combobox" aria-expanded="true" aria-controls="palette-list" aria-activedescendant={items[index] ? `p-${items[index].id}` : undefined} />
 		<div class="list" id="palette-list" role="listbox">
 			{#each items as item, i (item.id)}
 				{#if i === 0 || items[i - 1]!.group !== item.group}<p class="group">{item.group}</p>{/if}
-				<button id={`p-${item.id}`} class="item" class:on={i === index} role="option" aria-selected={i === index} onclick={() => run(item)} onpointermove={() => (index = i)}>
+				<button id={`p-${item.id}`} class="item" class:on={i === index} role="option" tabindex="-1" aria-selected={i === index} onclick={() => run(item)} onpointermove={() => (index = i)}>
 					<span>{item.label}</span>
 					{#if item.hint}<span class="hint">{item.hint}</span>{/if}
 					{#if item.shortcut}<kbd class="hint key">{item.shortcut}</kbd>{/if}

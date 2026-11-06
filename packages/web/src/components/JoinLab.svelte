@@ -45,8 +45,13 @@
 			const id = name.trim() || slug(title || host.split(".")[0] || "lab");
 			await rpc.call("site.add", { name: id, url: address.trim(), title: title.trim() || undefined, isolated: isolated || undefined });
 			message = "Finish signing in in your browser. The first time, the lab may ask you to set up a passkey, a security key or an authenticator app.";
-			await lab.login(id);
-			dialog?.close();
+			const result = await lab.login(id);
+			if (result.ok) dialog?.close();
+			else {
+				// The lab is added; the sign-in can be tried again from here (or from the sidebar later).
+				failed = true;
+				message = `Not signed in yet: ${result.error}. Try again, or sign in later from ${title.trim() || "the lab"} in the sidebar.`;
+			}
 		} catch (error) {
 			failed = true;
 			message = (error as Error).message;

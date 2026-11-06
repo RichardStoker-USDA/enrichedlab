@@ -546,6 +546,25 @@ class Lab {
 		}
 	}
 
+	/** Ask first, then forget a lab on this computer. */
+	removeLab(name: string): void {
+		const title = this.sites.find((s) => s.name === name)?.title ?? name;
+		this.confirming = {
+			title: `Remove ${title}?`,
+			detail: `You're signed out of ${title} and it leaves this computer. Its sessions stay here, without its models and tools. You can add it again from its invite.`,
+			action: "Remove",
+			run: async () => {
+				try {
+					await rpc.call("site.remove", { name });
+					await this.refreshModels();
+					this.say(`Removed ${title}.`);
+				} catch (error) {
+					this.say((error as Error).message);
+				}
+			},
+		};
+	}
+
 	async reconnect(name?: string): Promise<void> {
 		try {
 			this.sites = await rpc.call("site.refresh", name ? { name } : {});
@@ -572,22 +591,33 @@ class Lab {
 		this.sites = await rpc.call("site.list", {});
 	}
 
-	async login(name: string): Promise<void> {
+	/** Sign in to a lab in the browser. Says whether it worked, so a form can stay open to try again. */
+	async login(name: string): Promise<{ ok: boolean; error?: string }> {
 		try {
 			const site = await rpc.call("site.login", { name });
 			this.say(site.signedIn ? `Signed in to ${site.title} as ${site.who}.` : `Not signed in: ${site.error}`);
 			await this.refreshModels();
+			return site.signedIn ? { ok: true } : { ok: false, error: site.error ?? "The sign-in didn't finish." };
 		} catch (error) {
 			this.say((error as Error).message);
+			return { ok: false, error: (error as Error).message };
 		}
 	}
 
+	/** Applied at once, then saved; if saving fails the choice goes back and says why. */
 	async setTheme(theme: UiPrefs["theme"]): Promise<void> {
-		this.ui = await rpc.call("ui.set", { theme });
+		await this.setUi({ theme });
 	}
 
 	async setUi(prefs: Partial<UiPrefs>): Promise<void> {
-		this.ui = await rpc.call("ui.set", prefs);
+		const before = this.ui;
+		this.ui = { ...this.ui, ...prefs };
+		try {
+			this.ui = await rpc.call("ui.set", prefs);
+		} catch (error) {
+			this.ui = before;
+			this.say(`Couldn't save that setting: ${(error as Error).message}`);
+		}
 	}
 
 	/** Start a session in a folder right away, on a place (the rail's "New session here"). */

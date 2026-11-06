@@ -26,6 +26,7 @@
 <script lang="ts">
 	import type { Part } from "@enrichedlab/protocol";
 	import { lab, USAGE_URL } from "../lib/store.svelte.ts";
+	import { tick } from "svelte";
 	import { tokens } from "../lib/format.ts";
 	import PlaceSwitch from "./PlaceSwitch.svelte";
 	import { allowedModels } from "../lib/places.ts";
@@ -163,6 +164,33 @@
 	function outside(e: MouseEvent) {
 		if (menuOpen && menu && !menu.contains(e.target as Node)) menuOpen = false;
 	}
+
+	let chip: HTMLButtonElement | undefined = $state();
+	/** The model popover: focus starts on the chosen model, Escape closes and returns to the chip, arrows move. */
+	async function toggleModels() {
+		menuOpen = !menuOpen;
+		if (!menuOpen) return;
+		await tick();
+		(menu?.querySelector<HTMLButtonElement>("[role=radio][aria-checked=true]") ?? menu?.querySelector<HTMLButtonElement>("[role=radio]"))?.focus();
+	}
+	function closeModels() {
+		menuOpen = false;
+		chip?.focus();
+	}
+	function modelKeys(e: KeyboardEvent) {
+		if (!menuOpen) return;
+		if (e.key === "Escape") {
+			e.preventDefault();
+			e.stopPropagation();
+			closeModels();
+		} else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+			const items = [...(menu?.querySelectorAll<HTMLButtonElement>("[role=radio]") ?? [])];
+			const at = items.indexOf(document.activeElement as HTMLButtonElement);
+			if (at < 0 && !items.length) return;
+			e.preventDefault();
+			items[(at + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
+		}
+	}
 </script>
 
 <svelte:window onclick={outside} />
@@ -204,8 +232,8 @@
 		<div class="row">
 			<PlaceSwitch />
 			<span class="divider" aria-hidden="true"></span>
-			<div class="model" bind:this={menu}>
-				<button type="button" class="chip" class:missing onclick={() => (menuOpen = !menuOpen)} aria-expanded={menuOpen} aria-haspopup="menu" title={missing ? `${lab.status?.model} isn't offered now. Choose another model.` : gauge ? `${leftPct}% of context left before older turns are summarized (${tokens(gauge.used)} of ${tokens(gauge.threshold)})` : "Choose the model"}>
+			<div class="model" bind:this={menu} onkeydown={modelKeys} role="none">
+				<button type="button" class="chip" class:missing bind:this={chip} onclick={toggleModels} aria-expanded={menuOpen} aria-haspopup="dialog" title={missing ? `${lab.status?.model} isn't offered now. Choose another model.` : gauge ? `${leftPct}% of context left before older turns are summarized (${tokens(gauge.used)} of ${tokens(gauge.threshold)})` : "Choose the model"}>
 					<svg class="ring" class:sweeping viewBox="0 0 22 22" aria-hidden="true">
 						<circle cx="11" cy="11" r="9" class="track" />
 						<circle cx="11" cy="11" r="9" class="arc" class:low={leftPct < 15} stroke-dasharray={CIRC} stroke-dashoffset={CIRC * (1 - left)} />
@@ -216,7 +244,7 @@
 					<svg class="caret" viewBox="0 0 12 12" aria-hidden="true"><path d="m3 7.5 3-3 3 3" /></svg>
 				</button>
 				{#if menuOpen}
-					<div class="menu" role="menu">
+					<div class="menu" role="dialog" aria-label="Model and reasoning">
 						{#if missing}
 							<p class="menu-missing">{lab.status?.model} isn't offered now: its server may have stopped, or your access changed.</p>
 						{/if}
@@ -225,7 +253,7 @@
 							{#each group.models as m (m.ref)}
 								<button
 									type="button"
-									role="menuitemradio"
+									role="radio"
 									aria-checked={m.ref === lab.status?.model}
 									class="menu-item"
 									onclick={() => {
@@ -280,7 +308,9 @@
 </div>
 
 <style>
+	/* The composer fits its column, not the window: beside an open workbench it narrows the same way. */
 	.dock {
+		container-type: inline-size;
 		padding: 0 20px 18px;
 		padding-bottom: max(18px, env(safe-area-inset-bottom));
 		background: linear-gradient(to bottom, transparent, var(--canvas) 30%);
@@ -565,6 +595,25 @@
 		color: var(--canvas);
 		font-size: 13px;
 		line-height: 1;
+	}
+	@container (max-width: 600px) {
+		.origin,
+		.rate,
+		.plan {
+			display: none;
+		}
+		.chip {
+			max-width: 190px;
+		}
+	}
+	@container (max-width: 420px) {
+		.effort,
+		.divider {
+			display: none;
+		}
+		.chip {
+			max-width: 150px;
+		}
 	}
 	@keyframes pop {
 		from {

@@ -70,6 +70,8 @@
 			return [
 				{ label: `Sign In to ${name}…`, run: () => lab.login(place.id) },
 				{ label: "Try Connecting Again", run: () => lab.reconnect(place.id) },
+				separator,
+				{ label: `Remove ${name}…`, run: () => lab.removeLab(place.id) },
 			];
 		}
 		return [
@@ -79,6 +81,7 @@
 			...(site.docs ? [{ label: `${name} Help`, run: () => window.open(site.docs, "_blank", "noopener") }] : []),
 			separator,
 			{ label: `Sign Out of ${name}`, run: () => lab.logout(place.id) },
+			{ label: `Remove ${name}…`, run: () => lab.removeLab(place.id) },
 		];
 	}
 
@@ -133,6 +136,16 @@
 		node.select();
 	}
 
+	// On a narrow window the sidebar is a drawer: closed, it's out of the keyboard and screen reader's way.
+	let narrow = $state(false);
+	$effect(() => {
+		const query = window.matchMedia("(max-width: 860px)");
+		const update = () => (narrow = query.matches);
+		update();
+		query.addEventListener("change", update);
+		return () => query.removeEventListener("change", update);
+	});
+
 	let now = $state(Date.now());
 	$effect(() => {
 		const timer = setInterval(() => (now = Date.now()), 30_000);
@@ -140,10 +153,11 @@
 	});
 </script>
 
+<svelte:window onkeydown={(e) => narrow && open && e.key === "Escape" && (open = false)} />
 {#if open}
 	<button class="scrim" aria-label="Close the sidebar" onclick={() => (open = false)}></button>
 {/if}
-<nav class="rail" class:open class:hidden={!lab.sidebar} aria-label="Places and sessions">
+<nav class="rail" class:open class:hidden={!lab.sidebar} aria-label="Places and sessions" inert={narrow && !open}>
 	<div class="toolbar">
 		<span class="spacer"></span>
 		<button class="icon-btn wide-only" onclick={() => (lab.sidebar = false)} title={`Hide the sidebar (${mac ? "⌃⌘S" : "Ctrl+Shift+S"})`} aria-label="Hide the sidebar">

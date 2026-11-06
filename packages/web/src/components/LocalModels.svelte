@@ -87,7 +87,12 @@
 <section class="local" aria-labelledby="local-title" aria-busy={loading}>
 	<h3 id="local-title">On this computer</h3>
 	{#if !status}
-		<p class="note">{loading ? "Looking for model servers here…" : ""}</p>
+		{#if loading}
+			<p class="note">Looking for model servers here…</p>
+		{:else if failed}
+			<p class="status failed" role="status">{message}</p>
+			<button type="button" class="link" onclick={load}>Try again</button>
+		{/if}
 	{:else}
 		<p class="note">
 			{status.memoryGiB} GB of memory{status.appleSilicon ? ", Apple silicon" : ""}.

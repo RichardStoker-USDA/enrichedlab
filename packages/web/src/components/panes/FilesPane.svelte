@@ -46,6 +46,12 @@
 		];
 	}
 
+	/** Read every open folder again, so expanded folders stay expanded and current. */
+	function refresh() {
+		listings = {};
+		for (const [path, isOpen] of Object.entries(openDirs)) if (isOpen) void load(path);
+	}
+
 	function join(dir: string, name: string) {
 		return dir === "." ? name : `${dir}/${name}`;
 	}
@@ -95,7 +101,7 @@
 		<div class="where" title={root}>
 			<span class="place-dot" class:local={lab.place.id === "local"} style:--dot={`var(${lab.place.color})`}></span>
 			{lab.place.title}<span class="root">{root}</span>
-			<button class="icon-btn" onclick={() => ((listings = {}), load("."))} aria-label="Refresh" title="Refresh">
+			<button class="icon-btn" onclick={refresh} aria-label="Refresh" title="Refresh">
 				<svg viewBox="0 0 16 16"><path d="M12.5 8a4.5 4.5 0 1 1-1.3-3.2M12.5 3v2.5H10" /></svg>
 			</button>
 		</div>

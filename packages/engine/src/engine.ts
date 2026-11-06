@@ -911,6 +911,12 @@ export class Engine {
 					writeFileSync(target, bytes, { flag: "wx" });
 					return { path: relative(runtime.cwd, target), bytes: bytes.length };
 				}
+				case "site.remove": {
+					const name = need("name");
+					await this.sites.remove(name);
+					this.registry.removeSource(name);
+					return { ok: true };
+				}
 				case "site.logout":
 					await this.sites.logout(need("name"));
 					return { ok: true };

@@ -511,6 +511,8 @@ export interface Requests {
 	"site.add": { params: { name: string; url: string; title?: string; isolated?: boolean }; result: SiteSummary };
 	"site.login": { params: { name: string }; result: SiteSummary };
 	"site.logout": { params: { name: string }; result: { ok: true } };
+	/** Forget a lab on this computer: sign out and drop it. Its sessions stay, without its models and tools. */
+	"site.remove": { params: { name: string }; result: { ok: true } };
 	/** Exercise a lab against the lab contract (contract/ in the repository); read-only apart from one throwaway sandbox. */
 	"lab.check": { params: { name: string }; result: { rows: { row: string; status: "pass" | "fail" | "skip"; detail?: string }[] } };
 	/** The person's devices at a lab, and approving or revoking one (a lab that binds sign-ins to devices). */

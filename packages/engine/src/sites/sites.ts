@@ -402,6 +402,21 @@ export class Sites {
 		if (config) void this.connect(name).catch(() => undefined);
 	}
 
+	/** Forget a lab on this computer: sign out (revoking the device key while the sign-in still works) and drop it. */
+	async remove(name: string): Promise<void> {
+		if (!this.configs().some((s) => s.name === name)) throw new Error(`No site named ${name}.`);
+		this.following.get(name)?.();
+		this.following.delete(name);
+		await this.adapters.get(name)?.forget?.().catch(() => undefined);
+		rmSync(this.deviceFile(name), { force: true });
+		rmSync(this.credPath(name), { force: true });
+		if (this.catalog.delete(name)) this.onAppsChanged?.(name);
+		this.adapters.get(name)?.close();
+		this.adapters.delete(name);
+		this.states.delete(name);
+		this.saveConfigs(this.configs().filter((s) => s.name !== name));
+	}
+
 	/** Connect (or reconnect) one site and read what this person was granted. */
 	async connect(name: string): Promise<SiteSummary> {
 		const config = this.configs().find((s) => s.name === name);

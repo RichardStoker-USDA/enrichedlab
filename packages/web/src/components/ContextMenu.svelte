@@ -50,7 +50,14 @@
 			e.preventDefault();
 			(document.activeElement as HTMLButtonElement | null)?.click();
 		} else if (e.key === "Tab") {
+			// Tab leaves a menu, as the system's do.
 			e.preventDefault();
+			close();
+		} else if (e.key === "ArrowLeft" && open !== undefined) {
+			e.preventDefault();
+			const parent = open;
+			open = undefined;
+			void tick().then(() => root?.querySelectorAll<HTMLButtonElement>(".menu-item")[parent]?.focus());
 		}
 	}
 
@@ -77,7 +84,17 @@
 					aria-expanded={entry.submenu ? open === i : undefined}
 					disabled={entry.disabled}
 					onclick={() => choose(entry, String(i), i)}
-					onkeydown={(e) => e.key === "ArrowRight" && entry.submenu && (open = i)}
+					onkeydown={(e) => {
+						if (e.key === "ArrowRight" && entry.submenu) {
+							open = i;
+							// Into the submenu, and back on screen if it grew past the edge.
+							void tick().then(() => {
+								root?.querySelector<HTMLButtonElement>(".sub button:not(:disabled)")?.focus();
+								const box = root?.getBoundingClientRect();
+								if (box && box.bottom > window.innerHeight - 8) y = Math.max(8, window.innerHeight - box.height - 8);
+							});
+						}
+					}}
 				>
 					<span class="check" aria-hidden="true">{entry.checked ? "✓" : ""}</span>
 					<span>{entry.label}</span>

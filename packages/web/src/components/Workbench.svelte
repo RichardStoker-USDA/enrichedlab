@@ -28,7 +28,8 @@
 		for (const offer of lab.labOffers) groups.set(offer.lab, [...(groups.get(offer.lab) ?? []), offer]);
 		return [...groups];
 	});
-	const terminalNote = $derived(lab.place.id === "local" ? "Your shell, in the project folder" : `A command console in the ${lab.place.title} sandbox`);
+	// The local terminal is the person's own shell, with their rights: the agent's containment doesn't apply to it.
+	const terminalNote = $derived(lab.place.id === "local" ? "Your own shell in the project folder, with your usual rights" : `A command console in the ${lab.place.title} sandbox`);
 </script>
 
 <aside class="workbench" aria-label="Workbench" hidden={!lab.workbench}>

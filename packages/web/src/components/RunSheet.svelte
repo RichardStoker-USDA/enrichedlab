@@ -165,8 +165,10 @@
 			<button class="undo" onclick={() => lab.undo()} title={undoable.join(", ")}>Undo changes to {undoable.length === 1 ? undoable[0] : `${undoable.length} files`}</button>
 		{/if}
 		{#if lab.busy}
-			<div class="live-area" aria-live="polite">
-				{#if lab.partial.reasoning && !lab.partial.text}
+			<!-- Screen readers hear the activity when it changes, not every token or second. -->
+			<p class="visually-hidden" role="status">{activityWord[lab.status?.activity ?? ""] ?? "Working"}</p>
+			<div class="live-area">
+				{#if lab.partial.reasoning && !lab.partial.text && lab.ui.showReasoning}
 					<p class="thinking">{thinkingTail}</p>
 				{/if}
 				{#if lab.partial.text}
@@ -188,6 +190,12 @@
 	</div>
 </div>
 
+{#if !pinned && items.length}
+	<button class="latest" onclick={() => ((pinned = true), toBottom(true))}>
+		<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3.5 8.5 8 13l4.5-4.5" /></svg>
+		Jump to Latest
+	</button>
+{/if}
 <Composer />
 
 <style>
@@ -276,6 +284,38 @@
 	.icon-btn.on {
 		color: var(--text);
 		background: var(--selected);
+	}
+	.latest {
+		position: relative;
+		z-index: 3;
+		align-self: center;
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		height: 30px;
+		margin: -42px 0 12px;
+		padding: 0 14px;
+		border-radius: 15px;
+		background: var(--raised);
+		box-shadow: var(--shadow);
+		font-size: 12.5px;
+		font-weight: 500;
+		animation: latest-in 160ms var(--ease-out);
+	}
+	.latest svg {
+		width: 13px;
+		height: 13px;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.7;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+	@keyframes latest-in {
+		from {
+			opacity: 0;
+			transform: translateY(4px);
+		}
 	}
 	.sheet {
 		flex: 1;
