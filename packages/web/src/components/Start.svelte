@@ -150,16 +150,12 @@
 
 			<span class="spacer"></span>
 			<button class="go" type="submit" disabled={!folder.trim() || starting} aria-label={task.trim() ? "Start" : "Open session"} title={`${task.trim() ? "Start" : "Open session"} (Return)`}>
-				{#if starting}
-					<span class="spin" aria-hidden="true"></span>
-				{:else}
-					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" /></svg>
-				{/if}
+				<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" /></svg>
 			</button>
 		</div>
 	</div>
 
-	<p class="where" title={folder} aria-live="polite">{movingTo ? `Moving ${folder ? folderName(folder) : "the project"} to the ${movingTo} sandbox…` : where}</p>
+	<p class="where" title={folder} aria-live="polite">{movingTo ? `Moving ${folder ? folderName(folder) : "the project"} to the ${movingTo} sandbox…` : starting ? "Starting the session…" : where}</p>
 	<label class="check"><input type="checkbox" bind:checked={worktree} /> Work on its own git branch, away from your checkout</label>
 
 	{#if !lab.models.length}
@@ -214,9 +210,8 @@
 	}
 	.card {
 		border: 1px solid var(--edge);
-		border-radius: 16px;
+		border-radius: 12px;
 		background: var(--raised);
-		box-shadow: 0 1px 2px var(--shadow-color), 0 8px 24px var(--shadow-color);
 		padding: 14px 10px 10px 16px;
 		transition: border-color 150ms ease-out;
 	}
@@ -337,19 +332,6 @@
 		stroke-linecap: round;
 		stroke-linejoin: round;
 	}
-	.spin {
-		width: 14px;
-		height: 14px;
-		border-radius: 50%;
-		border: 2px solid currentColor;
-		border-right-color: transparent;
-		animation: spin 700ms linear infinite;
-	}
-	@keyframes spin {
-		to {
-			transform: rotate(360deg);
-		}
-	}
 	.where {
 		margin: 12px 4px 4px;
 		font-size: 12.5px;
@@ -413,11 +395,6 @@
 		.no-model {
 			flex-direction: column;
 			align-items: flex-start;
-		}
-	}
-	@media (prefers-reduced-motion: reduce) {
-		.spin {
-			animation: none;
 		}
 	}
 </style>

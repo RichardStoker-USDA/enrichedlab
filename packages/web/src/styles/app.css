@@ -25,29 +25,29 @@
 
 	/* Roles */
 	--canvas: light-dark(#ffffff, #000000);
-	--surface: light-dark(#f1f4f8, var(--black-90));
-	--surface-2: light-dark(#e8edf3, #222222);
-	--raised: light-dark(#ffffff, #1c1c1c);
-	--rail: light-dark(rgb(236 241 247 / 0.9), rgb(22 22 22 / 0.82));
+	--surface: light-dark(#f5f7fa, var(--black-90));
+	--surface-2: light-dark(#edf1f5, var(--black-80));
+	--raised: light-dark(#ffffff, var(--black-90));
+	--rail: light-dark(rgb(247 249 252 / 0.96), rgb(25 25 25 / 0.96));
 	/* Hairlines between regions, and the stronger edge that marks a control (3:1 against the canvas). */
-	--rule: light-dark(#d6dde6, #2b2b2b);
-	--rule-strong: light-dark(var(--aggie-blue-20), var(--black-70));
-	--edge: light-dark(#7a889b, #6b6b6b);
+	--rule: light-dark(#dfe4eb, var(--black-80));
+	--rule-strong: light-dark(var(--aggie-blue-10), var(--black-70));
+	--edge: light-dark(#6884a3, #808080);
 	/* A destructive button: its own fill, so error-text colors never become a background under white text. */
 	--danger-bg: light-dark(#b3261e, #c5221f);
 	--danger-fg: #ffffff;
-	--fill: light-dark(rgb(2 40 81 / 0.05), rgb(255 255 255 / 0.07));
+	--fill: light-dark(rgb(2 40 81 / 0.025), rgb(255 255 255 / 0.06));
 	--text: light-dark(#0b1a2e, #f2f2f2);
-	--text-muted: light-dark(#3f5167, #bdbdbd);
-	--text-faint: light-dark(#5b6c82, #a0a0a0);
+	--text-muted: light-dark(#355b85, #bdbdbd);
+	--text-faint: light-dark(#4c6077, #a0a0a0);
 	--prompt: light-dark(var(--aggie-blue), #ffffff);
 	--accent: light-dark(var(--aggie-blue), var(--aggie-gold));
-	--accent-text: light-dark(var(--aggie-blue-80), var(--aggie-gold-70));
+	--accent-text: light-dark(var(--aggie-blue-80), var(--aggie-gold));
 	--link: var(--accent-text);
 	--primary-bg: light-dark(var(--aggie-blue), var(--aggie-gold));
 	--primary-fg: light-dark(#ffffff, var(--aggie-blue));
 	--focus-inner: light-dark(var(--aggie-blue), var(--aggie-gold));
-	--focus-outer: light-dark(var(--aggie-gold), rgb(255 191 0 / 0.35));
+	--focus-outer: transparent;
 	--live: light-dark(var(--aggie-blue), var(--aggie-gold));
 	--notch: var(--aggie-gold);
 	--notch-edge: light-dark(var(--aggie-blue), var(--aggie-gold));
@@ -57,13 +57,13 @@
 	--removed: light-dark(#b3261e, #ff9c93);
 	--added-bg: light-dark(rgb(30 107 67 / 0.07), rgb(143 211 166 / 0.08));
 	--removed-bg: light-dark(rgb(179 38 30 / 0.06), rgb(255 156 147 / 0.07));
-	--code-bg: light-dark(rgb(2 40 81 / 0.04), rgb(255 255 255 / 0.05));
-	--hover: light-dark(rgb(2 40 81 / 0.065), rgb(255 255 255 / 0.08));
-	--selected: light-dark(rgb(2 40 81 / 0.12), rgb(255 255 255 / 0.13));
-	--shadow-color: light-dark(rgb(2 40 81 / 0.14), rgb(0 0 0 / 0.6));
-	--shadow: 0 0 0 0.5px light-dark(rgb(2 40 81 / 0.12), rgb(255 255 255 / 0.1)), 0 2px 6px var(--shadow-color), 0 16px 40px var(--shadow-color);
+	--code-bg: light-dark(#f6f8fb, var(--black-90));
+	--hover: light-dark(rgb(2 40 81 / 0.04), rgb(255 255 255 / 0.07));
+	--selected: light-dark(rgb(2 40 81 / 0.075), rgb(255 255 255 / 0.12));
+	--shadow-color: light-dark(rgb(11 26 46 / 0.08), rgb(0 0 0 / 0.55));
+	--shadow: 0 0 0 1px light-dark(rgb(11 26 46 / 0.06), rgb(255 255 255 / 0.08)), 0 2px 6px var(--shadow-color), 0 10px 24px var(--shadow-color);
 	/* The highlighted row of a menu, as macOS draws it: the accent filled, its text reversed. */
-	--menu-bg: light-dark(rgb(255 255 255 / 0.86), rgb(36 36 36 / 0.86));
+	--menu-bg: light-dark(rgb(255 255 255 / 0.98), rgb(25 25 25 / 0.98));
 	--menu-hl: light-dark(var(--aggie-blue), var(--aggie-gold));
 	--menu-hl-text: light-dark(#ffffff, var(--aggie-blue));
 
@@ -144,7 +144,6 @@ a {
 :focus-visible {
 	outline: 2px solid var(--focus-inner);
 	outline-offset: 2px;
-	box-shadow: 0 0 0 5px var(--focus-outer);
 	border-radius: var(--radius-small);
 }
 
@@ -326,6 +325,7 @@ input::placeholder {
 .menu-item:focus-visible small,
 .menu-item.active small,
 .menu-item:hover:not(:disabled) .meta,
+.menu-item:focus-visible .meta,
 .menu-item.active .meta {
 	color: inherit;
 	opacity: 0.85;

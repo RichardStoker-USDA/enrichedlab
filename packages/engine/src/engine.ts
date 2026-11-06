@@ -339,6 +339,8 @@ export class Engine {
 				detail = commits.length ? `The sandbox's work is on branch ${branch} (${commits.length} commit${commits.length === 1 ? "" : "s"}); merge it to keep going with it.` : "The sandbox had no new commits.";
 			}
 			runtime.moveTo(local, { place, label: local.label, root: local.root });
+			// Where the work came home stays in the record, not only in a passing notice.
+			if (carried && from !== "local") runtime.notice("info", detail);
 			return detail;
 		}
 		if (!this.sites.exists(place)) throw new RpcError(-32602, `No site named ${place}.`);
@@ -356,6 +358,7 @@ export class Engine {
 			detail = `The repository moved to ${api.title} (${sent.head})${left}.${alone}`;
 		}
 		runtime.moveTo(workspace, { place, label: workspace.label, root: workspace.root, carried });
+		if (carried && detail.includes("secret")) runtime.notice("info", detail);
 		return detail;
 	}
 

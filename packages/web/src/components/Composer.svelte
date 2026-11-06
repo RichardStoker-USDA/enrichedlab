@@ -53,7 +53,7 @@
 	/** The context gauge, once the engine has counted the session (a session with no model has no count). */
 	const gauge = $derived(typeof lab.status?.context?.used === "number" && lab.status.context.threshold ? lab.status.context : undefined);
 	const left = $derived(gauge ? Math.max(0, Math.min(1, 1 - gauge.used / gauge.threshold)) : 1);
-	// The ring fills as the context does, so a fresh session shows only its faint track.
+	// The ring appears once half the context is used, and fills as it does; before that the popover has the count.
 	const leftPct = $derived(Math.round(left * 100));
 	const CIRC = 2 * Math.PI * 9;
 	let sweeping = $state(false);
@@ -254,10 +254,12 @@
 			<span class="divider" aria-hidden="true"></span>
 			<div class="model" bind:this={menu} onkeydown={modelKeys} role="none">
 				<button type="button" class="chip" class:missing bind:this={chip} onclick={toggleModels} aria-expanded={menuOpen} aria-haspopup="dialog" title={missing ? `${lab.status?.model} isn't offered now. Choose another model.` : gauge ? `${leftPct}% of context left before older turns are summarized (${tokens(gauge.used)} of ${tokens(gauge.threshold)})` : "Choose the model"}>
-					<svg class="ring" class:sweeping viewBox="0 0 22 22" aria-hidden="true">
-						<circle cx="11" cy="11" r="9" class="track" />
-						<circle cx="11" cy="11" r="9" class="arc" class:low={leftPct < 15} class:none={left > 0.99} stroke-dasharray={CIRC} stroke-dashoffset={CIRC * left} />
-					</svg>
+					{#if left < 0.5}
+						<svg class="ring" class:sweeping viewBox="0 0 22 22" aria-hidden="true">
+							<circle cx="11" cy="11" r="9" class="track" />
+							<circle cx="11" cy="11" r="9" class="arc" class:low={leftPct < 15} stroke-dasharray={CIRC} stroke-dashoffset={CIRC * left} />
+						</svg>
+					{/if}
 					<span class="model-name">{lab.model ? named(lab.model) : missing ? "Model unavailable: choose one" : "Choose a model"}</span>
 					{#if lab.model}<span class="origin">{origin(lab.model)}</span>{/if}
 					{#if lab.status?.effort && lab.model}<span class="effort">{lab.status.effort}</span>{/if}
@@ -301,9 +303,9 @@
 							<p class="menu-plan">Using ChatGPT plan · <a href={USAGE_URL} target="_blank" rel="noreferrer">Manage usage</a></p>
 						{/if}
 						<div class="menu-foot">
-							<span>{gauge ? `${leftPct}% context left · ${tokens(gauge.used)} of ${tokens(gauge.threshold)}` : ""}</span>
+							<span>{gauge ? `${tokens(gauge.used)} of ${tokens(gauge.threshold)} used before older turns are summarized` : ""}</span>
 							<span class="foot-actions">
-								<button type="button" class="link" onclick={() => ((lab.services = true), (menuOpen = false))}>Model services</button>
+								<button type="button" class="link" onclick={() => ((lab.services = true), (menuOpen = false))}>Model Services</button>
 								<button type="button" class="link" onclick={() => lab.compact()} disabled={lab.busy}>Summarize now</button>
 							</span>
 						</div>
@@ -339,9 +341,8 @@
 		max-width: calc(var(--measure) - 16px);
 		margin: 0 auto;
 		border: 1px solid var(--edge);
-		border-radius: 16px;
+		border-radius: 12px;
 		background: var(--raised);
-		box-shadow: 0 1px 2px var(--shadow-color), 0 8px 24px var(--shadow-color);
 		padding: 12px 10px 8px 14px;
 		transition: border-color 150ms;
 	}
@@ -412,9 +413,6 @@
 		stroke: var(--text-muted);
 		stroke-linecap: round;
 		transition: stroke-dashoffset 400ms var(--ease-out);
-	}
-	.arc.none {
-		opacity: 0;
 	}
 	.arc.low {
 		stroke: var(--bad);

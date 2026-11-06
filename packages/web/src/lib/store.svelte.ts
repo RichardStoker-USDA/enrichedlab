@@ -4,7 +4,7 @@
 import { pageMenu } from "./menu.svelte.ts";
 import type { AppSummary, BrowserFrame, BrowserInput, BrowserPageState, CanvasSummary, DeviceRequest, LabApp, ModelInfo, Part, Partial_, PermissionDecision, PermissionRequest, SessionEvent, SessionStatus, SessionSummary, SiteSummary, UiPrefs } from "@enrichedlab/protocol";
 import { close as closeTab, emptyLayout, move, place, type Node, open as openTab, resize as resizeSplit, revive, sync, type Edge, type PaneKind, type Tab, uid, activate, groups } from "./layout.ts";
-import { placeOf, places, type Place } from "./places.ts";
+import { computerName, placeOf, places, type Place } from "./places.ts";
 import { rpc } from "./rpc.ts";
 
 const emptyPartial = (): Partial_ => ({ text: "", reasoning: "", tools: [], output: {} });
@@ -89,11 +89,17 @@ class Lab {
 	/** The workbench: open or not, and its panes for the current session. */
 	workbench = $state(false);
 	layout = $state<Node>(emptyLayout());
-	/** A move between places is running (it can carry a repository). */
-	moving = $state<string | undefined>();
+	/** A move between places that is running (it can carry a repository), and the session it moves. */
+	private movingFor = $state<{ sessionId: string; place: string } | undefined>();
+	/** Where the open session is moving to, while it moves. */
+	get moving(): string | undefined {
+		return this.movingFor && this.movingFor.sessionId === this.current ? this.movingFor.place : undefined;
+	}
 	palette = $state(false);
 	/** The model services sheet (add a key for OpenAI, Gemini and the like). */
 	services = $state(false);
+	/** The Model Services section to show when it next opens ("Models on This Computer…" opens its own). */
+	servicesTab = $state<"plan" | "local" | "keys" | undefined>();
 	/** An invite being joined (from an enrichedlab://join link or "Add a lab"). */
 	join = $state<{ url?: string; name?: string; title?: string; isolated?: boolean } | undefined>();
 	/** The settings sheet: appearance, labs, models. */
@@ -124,7 +130,7 @@ class Lab {
 		this.sidebarOverBench = false;
 	}
 	/** A question that needs a yes before something that can't be undone. */
-	confirming = $state<{ title: string; detail: string; action: string; tone?: "danger" | "plain"; run: () => unknown } | undefined>();
+	confirming = $state<{ title: string; detail?: string; facts?: { label: string; text: string; path?: boolean }[]; action: string; tone?: "danger" | "plain"; run: () => unknown } | undefined>();
 	/** The place the new-session screen starts on (the rail's "New session in <place>"). */
 	newPlace = $state<string | undefined>();
 	/** The sidebar as a drawer, on a narrow window. */
@@ -492,17 +498,54 @@ class Lab {
 
 	// ── Session actions ────────────────────────────────────────────────────────────────────────────────────────────
 
-	async movePlace(place: string): Promise<void> {
-		if (!this.current || this.moving) return;
-		this.moving = place;
+	/**
+	 * Every move starts here: the composer's switch, the rail and the palette. It's reviewed first (what goes along,
+	 * where it runs, how work comes back), and the move then acts on the session that was reviewed.
+	 */
+	async requestMove(place: string): Promise<void> {
+		const sessionId = this.current;
+		const target = this.places.find((p) => p.id === place);
+		if (!sessionId || !target || place === this.place.id || this.movingFor) return;
+		if (target.site && !target.site.signedIn) return void this.login(place);
+		const from = this.place;
+		if (place !== "local" && from.id !== "local") return this.say(`Move back to ${computerName()} first: the work comes home as a branch, and then it can go to ${target.title}.`);
+		const runs = { label: "Runs", text: `On Linux in the ${target.title} sandbox, with no network` };
+		let facts: { label: string; text: string; path?: boolean }[];
+		if (place === "local") {
+			facts = [{ label: "Works in", text: this.summary?.cwd ?? "the project folder", path: true }];
+			if (from.site) facts.push({ label: "Comes back", text: `New commits from the ${from.title} sandbox, as a branch for you to merge` }, { label: "Stays there", text: "Changes it didn't commit" });
+		} else {
+			let plan: { repo?: string };
+			try {
+				plan = await rpc.call("session.moveplan", { sessionId });
+			} catch (error) {
+				return this.say(`Couldn't check what would move: ${(error as Error).message}`);
+			}
+			if (this.current !== sessionId) return;
+			facts = plan.repo
+				? [
+						{ label: "Goes along", text: "The git repository, uncommitted changes included. Files that look like secrets stay here." },
+						{ label: "Repository", text: plan.repo, path: true },
+						runs,
+						{ label: "Comes back", text: "New commits, as a branch, when you move back" },
+					]
+				: [{ label: "Goes along", text: "Nothing: this folder isn't a git repository, so the sandbox starts empty. Make it a repository first to take its files." }, runs];
+		}
+		this.confirming = { title: place === "local" ? `Move back to ${target.title}?` : `Move this session to the ${target.title} sandbox?`, facts, action: "Move", tone: "plain", run: () => this.movePlace(place, sessionId) };
+	}
+
+	async movePlace(place: string, sessionId = this.current): Promise<void> {
+		if (!sessionId || this.movingFor) return;
+		this.movingFor = { sessionId, place };
 		try {
-			const result = await rpc.call("session.place", { sessionId: this.current, place });
+			const result = await rpc.call("session.place", { sessionId, place });
 			this.upsert(result.summary);
+			if (this.current === sessionId) this.summary = result.summary;
 			this.say(result.detail);
 		} catch (error) {
 			this.say((error as Error).message);
 		} finally {
-			this.moving = undefined;
+			this.movingFor = undefined;
 		}
 	}
 

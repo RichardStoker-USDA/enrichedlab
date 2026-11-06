@@ -327,11 +327,18 @@
 		min-height: 0;
 		overflow-y: auto;
 		scrollbar-gutter: stable;
+		container-type: inline-size;
 	}
 	.column {
 		max-width: 820px;
 		margin: 0 auto;
 		padding: 28px 32px 40px;
+	}
+	/* Beside an open workbench the record keeps its reading width: the sides give way first. */
+	@container (max-width: 560px) {
+		.column {
+			padding-inline: 18px;
+		}
 	}
 	.blank {
 		padding: 18vh 0 0;

@@ -93,6 +93,8 @@
 		if (open && !dialog.open) {
 			message = "";
 			key = "";
+			if (lab.servicesTab) tab = lab.servicesTab;
+			lab.servicesTab = undefined;
 			void load();
 			dialog.showModal();
 		} else if (!open && dialog.open) dialog.close();

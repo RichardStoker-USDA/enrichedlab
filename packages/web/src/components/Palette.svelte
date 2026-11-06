@@ -40,12 +40,12 @@
 			if (!lab.pinned && !lab.busy) {
 				for (const place of lab.places) {
 					if (place.id === lab.place.id || !place.ready || place.site?.isolated) continue;
-					list.push({ id: `move-${place.id}`, label: place.id === "local" ? `Move this session to ${place.title}` : `Move this session to the ${place.title} sandbox`, group: "Places", run: () => void lab.movePlace(place.id) });
+					list.push({ id: `move-${place.id}`, label: place.id === "local" ? `Move this session to ${place.title}` : `Move this session to the ${place.title} sandbox`, group: "Places", run: () => void lab.requestMove(place.id) });
 				}
 			}
 		}
 		list.push(
-			{ id: "services", label: "Model services", hint: "ChatGPT plan, keys, models on this computer", group: "Actions", run: () => (lab.services = true) },
+			{ id: "services", label: "Model Services", hint: "ChatGPT plan, keys, models on this computer", group: "Actions", run: () => (lab.services = true) },
 			{ id: "join", label: "Add a lab", group: "Actions", run: () => (lab.join = {}) },
 			{ id: "settings", label: "Settings", shortcut: mac ? "⌘," : "Ctrl ,", group: "Actions", run: () => (lab.settings = true) },
 			{ id: "sidebar", label: lab.sidebar ? "Hide the sidebar" : "Show the sidebar", shortcut: mac ? "⌃⌘S" : "Ctrl ⇧ S", group: "Actions", run: () => (lab.sidebar = !lab.sidebar) },
@@ -189,6 +189,9 @@
 		flex: none;
 		font-size: 12px;
 		color: var(--text-faint);
+	}
+	.item.on .hint {
+		color: var(--text-muted);
 	}
 	.none {
 		margin: 14px;

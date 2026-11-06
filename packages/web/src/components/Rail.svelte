@@ -68,7 +68,7 @@
 			return [
 				{ label: `New Session on ${name}`, run: () => fresh("local") },
 				separator,
-				{ label: "Models on This Computer…", run: () => (lab.services = true) },
+				{ label: "Models on This Computer…", run: () => ((lab.servicesTab = "local"), (lab.services = true)) },
 			];
 		}
 		const site = place.site!;
@@ -101,7 +101,7 @@
 				? [
 						{
 							label: "Run On",
-							submenu: lab.places.map((p) => ({ label: p.id === "local" ? p.title : `${p.title} sandbox`, checked: p.id === lab.place.id, radio: true as const, disabled: !p.ready || Boolean(p.site?.isolated) || lab.busy, run: () => lab.movePlace(p.id) })),
+							submenu: lab.places.map((p) => ({ label: p.id === "local" ? p.title : `${p.title} sandbox`, checked: p.id === lab.place.id, radio: true as const, disabled: !p.ready || Boolean(p.site?.isolated) || lab.busy, run: () => void lab.requestMove(p.id) })),
 						},
 					]
 				: []),
@@ -249,16 +249,17 @@
 							<button
 								class="session"
 								class:current={s.id === lab.current}
+								class:away={Boolean(place)}
+								style:--mark={place ? `var(${place.color})` : "var(--accent)"}
 								aria-current={s.id === lab.current ? "page" : undefined}
 								onclick={() => pick(s.id)}
 								ondblclick={() => startRename(s)}
 								use:contextMenu={() => sessionActions(s)}
 							>
-								<span class="title" title={s.title}>{s.title}</span>
+								<span class="title" title={place ? `${s.title} (runs in the ${place.title} sandbox)` : s.title}>{s.title}</span>
+								{#if place}<span class="visually-hidden">, in the {place.title} sandbox</span>{/if}
 								{#if s.running}
 									<span class="live" aria-label="running"></span>
-								{:else if place}
-									<span class="place-dot" style:--dot={`var(${place.color})`} title={`Runs in the ${place.title} sandbox`}></span>
 								{:else}
 									<span class="when">{ago(s.updated, now)}</span>
 								{/if}
@@ -389,10 +390,7 @@
 	.place-main:hover {
 		background: var(--hover);
 	}
-	.place.here .place-main {
-		background: var(--selected);
-	}
-	.place.here .sub,
+	/* The open session's place says so in words; only the session row is filled, so one thing reads as selected. */
 	.place.here .here-mark {
 		color: var(--text);
 	}
@@ -535,23 +533,38 @@
 	.session:hover {
 		background: var(--hover);
 	}
-	/* The open session: a filled row and an accent bar, so the selection reads at a glance in both themes. */
+	/* The mark left of the title says where a session runs: a lab's sessions carry its color as a small dot, and the
+	   open session's mark grows into a bar, so place and selection read in one spot without competing badges. */
 	.session {
 		position: relative;
+	}
+	.session.away::before,
+	.session.current::before {
+		content: "";
+		position: absolute;
+		left: 16px;
+		top: calc(50% - 2.5px);
+		width: 5px;
+		height: 5px;
+		border-radius: 50%;
+		background: var(--mark);
+		transition: height 160ms var(--ease-out), top 160ms var(--ease-out), border-radius 160ms var(--ease-out);
 	}
 	.session.current {
 		background: var(--selected);
 		font-weight: 600;
 	}
 	.session.current::before {
-		content: "";
-		position: absolute;
-		left: 16px;
 		top: 8px;
-		bottom: 8px;
+		height: 14px;
 		width: 3px;
+		left: 17px;
 		border-radius: 2px;
-		background: var(--accent);
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.session::before {
+			transition: none;
+		}
 	}
 	.session.current .when {
 		color: var(--text-muted);

@@ -23,25 +23,10 @@
 		if (refocus) chip?.focus();
 	}
 
-	/** Moving is a transfer, so it's reviewed first: what goes along, where it runs, and how work comes back. */
-	async function choose(id: string) {
+	/** Moving is a transfer, so it's reviewed first (lab.requestMove). */
+	function choose(id: string) {
 		close();
-		const target = lab.places.find((p) => p.id === id);
-		if (!target || id === lab.place.id) return;
-		if (target.site && !target.site.signedIn) return void lab.login(id);
-		const from = lab.place;
-		let detail: string;
-		if (id === "local") {
-			detail = from.site
-				? `Files and commands act in ${lab.summary?.cwd ?? "the project folder"} again. New commits from the ${from.title} sandbox come back as a branch for you to merge; changes it didn't commit stay there.`
-				: "Files and commands act on this computer again.";
-		} else {
-			const plan = lab.current ? await rpc.call("session.moveplan", { sessionId: lab.current }).catch(() => ({ repo: undefined })) : { repo: undefined };
-			detail = plan.repo
-				? `The git repository at ${plan.repo} goes along, uncommitted changes included (files that look like secrets stay here). The session then runs on Linux in the ${target.title} sandbox, with no network. Moving back brings its new commits home as a branch.`
-				: `This folder isn't a git repository, so its files stay here and the ${target.title} sandbox starts empty. Make it a repository first to take the files along.`;
-		}
-		lab.confirming = { title: id === "local" ? `Move back to ${target.title}?` : `Move this session to the ${target.title} sandbox?`, detail, action: "Move", tone: "plain", run: () => lab.movePlace(id) };
+		void lab.requestMove(id);
 	}
 
 	function keys(e: KeyboardEvent) {
