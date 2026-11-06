@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/RichardStoker-USDA/enrichedlab-harness/contract/run.schema.json",
-  "title": "A run at the lab: /v1/runs (proposed)",
+  "title": "A run at the lab: /v1/runs (proposed); a run is the lab's session, so its id is the session's",
   "$defs": {
     "create": {
       "type": "object",
@@ -24,7 +24,7 @@
         "id": { "type": "string", "minLength": 1 },
         "session": { "type": "string" },
         "title": { "type": "string" },
-        "status": { "enum": ["queued", "running", "waiting", "paused", "finished", "failed", "stopped"] },
+        "status": { "enum": ["running", "waiting", "idle", "finished", "failed", "stopped"] },
         "mode": { "enum": ["attended", "discovery"] },
         "model": { "type": "string" },
         "created": { "type": "string", "format": "date-time" },

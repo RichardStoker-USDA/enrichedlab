@@ -98,8 +98,14 @@ export interface DesktopInfo {
 	image: string;
 	screen?: { width: number; height: number };
 	actions: string[];
-	/** POST /v1/containers/{id}/desktop/open is served. */
+	/** POST /v1/containers/{id}/desktop/open is served, for these kinds of target (such as "https", "sandbox"). */
 	open?: boolean;
+	open_targets?: string[];
+	/** The most one `type` action takes, and the longest `wait`. */
+	max_type_chars?: number;
+	max_wait_seconds?: number;
+	/** The `by` labels the lab records. */
+	labels?: string[];
 }
 
 export interface BrowserInfo {

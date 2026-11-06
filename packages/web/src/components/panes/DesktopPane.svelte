@@ -2,7 +2,7 @@
 	// A lab's desktop sandbox (docs/research.md): a Linux desktop the person and the agent both use. Every click, key
 	// and scroll here goes to the lab as one checked action marked as the person's, and the lab answers with a new
 	// picture; the agent's actions show here as it works. The lab audits each action, so the pane doesn't poll: it
-	// asks for a picture when it opens, after the person acts, and on Refresh.
+	// asks for a picture when it opens, just after the person acts, and on Refresh.
 	import { untrack } from "svelte";
 	import { mac, placeOf } from "../../lib/places.ts";
 	import { lab } from "../../lib/store.svelte.ts";
@@ -77,12 +77,16 @@
 	});
 
 	const act = (action: Record<string, unknown>) => lab.desktopAct(site, action);
-	/** Programs answer a click a moment later (a menu opening): one more picture after a pause shows the result. */
+	/**
+	 * The lab answers input without a picture, and programs answer a click a moment later (a menu opening): one
+	 * picture after a short pause shows the result. Quick input in a row asks for one picture, after the last.
+	 */
 	let settle: ReturnType<typeof setTimeout> | undefined;
-	async function actThenSettle(action: Record<string, unknown>) {
+	async function actThenSettle(action: Record<string, unknown>, pause = 500) {
 		clearTimeout(settle);
 		await act(action);
-		settle = setTimeout(() => void act({ action: "screenshot" }), 1_500);
+		clearTimeout(settle);
+		settle = setTimeout(() => void act({ action: "screenshot" }), pause);
 	}
 
 	// ── The person's pointer, in the desktop's own pixels ────────────────────────────────────────────────────────
@@ -207,7 +211,11 @@
 		if (!value) return;
 		const next = value.startsWith("/") || /^https:\/\//.test(value) ? value : `https://${value}`;
 		target = "";
-		void lab.desktopOpen(site, next);
+		// A program takes a moment to open its window.
+		void lab.desktopOpen(site, next).then(() => {
+			clearTimeout(settle);
+			settle = setTimeout(() => void act({ action: "screenshot" }), 1_500);
+		});
 	}
 	const size = $derived(frame?.width ? `${frame.width} × ${frame.height}` : info?.width ? `${info.width} × ${info.height}` : "");
 </script>

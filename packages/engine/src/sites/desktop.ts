@@ -6,7 +6,10 @@ import type { DesktopFrame } from "@enrichedlab/protocol";
 import type { DesktopInfo } from "./contract.ts";
 import type { Tool } from "../tools/types.ts";
 import { ToolError } from "../tools/types.ts";
-import { clip } from "../util.ts";
+import { clip, sleep } from "../util.ts";
+
+/** How long after an input action the picture is taken: long enough for a menu or a dialog to draw. */
+const SETTLE_MS = 400;
 
 /** The actions this client knows, in the computer-use vocabulary models are trained on. */
 export const DESKTOP_ACTIONS = ["screenshot", "cursor_position", "mouse_move", "left_click", "right_click", "middle_click", "double_click", "triple_click", "left_click_drag", "type", "key", "scroll", "zoom", "wait"] as const;
@@ -38,6 +41,8 @@ export interface DesktopApi {
 }
 
 const TYPE_MAX = 4_000;
+/** Input actions a lab answers without a picture: the client takes one just after, so the agent sees the result. */
+const SHOW_AFTER = new Set<DesktopActionName>(["mouse_move", "left_click", "right_click", "middle_click", "double_click", "triple_click", "left_click_drag", "type", "key", "scroll", "wait"]);
 const isPoint = (v: unknown): v is [number, number] => Array.isArray(v) && v.length === 2 && v.every((n) => typeof n === "number" && Number.isFinite(n) && n >= 0);
 
 /** Check an action before it goes to the lab, with the reason a model can act on. */
@@ -62,8 +67,9 @@ export function checkAction(raw: Record<string, unknown>, info: DesktopInfo): De
 	if ((action === "mouse_move" || action === "left_click_drag" || action === "scroll") && !out.coordinate) throw new ToolError(`${action} needs coordinate.`);
 	if (action === "left_click_drag" && !out.start_coordinate) throw new ToolError("left_click_drag needs start_coordinate and coordinate.");
 	if (action === "type" || action === "key") {
+		const most = info.max_type_chars ?? TYPE_MAX;
 		if (typeof raw.text !== "string" || !raw.text) throw new ToolError(`${action} needs text.`);
-		if (raw.text.length > TYPE_MAX) throw new ToolError(`Type at most ${TYPE_MAX} characters at a time.`);
+		if (raw.text.length > most) throw new ToolError(`Type at most ${most} characters at a time.`);
 		out.text = raw.text;
 	}
 	if (action === "scroll") {
@@ -77,17 +83,16 @@ export function checkAction(raw: Record<string, unknown>, info: DesktopInfo): De
 		if (!Array.isArray(r) || r.length !== 4 || !r.every((n) => typeof n === "number" && n >= 0)) throw new ToolError("zoom needs region: [x0, y0, x1, y1].");
 		out.region = r.map(Math.round) as [number, number, number, number];
 	}
-	if (action === "wait") out.duration = Math.max(0, Math.min(30, Number(raw.duration ?? 1) || 1));
+	if (action === "wait") out.duration = Math.max(0, Math.min(info.max_wait_seconds ?? 30, Number(raw.duration ?? 1) || 1));
 	return out;
 }
 
 /** The screenshot in a lab's answer, whichever of the usual names it uses. */
 export function frameIn(answer: unknown, site: string, by: "agent" | "person", info?: DesktopInfo): DesktopFrame | undefined {
 	if (!answer || typeof answer !== "object") return undefined;
-	const a = answer as Record<string, unknown>;
-	const shot = (typeof a.screenshot === "object" && a.screenshot ? a.screenshot : a) as Record<string, unknown>;
-	const png = [shot.png, shot.data, shot.image, shot.base64_image].find((v): v is string => typeof v === "string" && v.length > 0);
-	if (!png) return undefined;
+	const shot = (answer as { screenshot?: Record<string, unknown> }).screenshot;
+	const png = typeof shot?.png === "string" && shot.png ? shot.png : undefined;
+	if (!shot || !png) return undefined;
 	const width = Number(shot.width ?? info?.screen?.width ?? 0);
 	const height = Number(shot.height ?? info?.screen?.height ?? 0);
 	return { site, png: png.replace(/^data:image\/png;base64,/, ""), width, height, by, at: new Date().toISOString() };
@@ -127,7 +132,7 @@ export function desktopTools(site: string, title: string, api: DesktopApi): Tool
 	const desktop: Tool = {
 		name: `${site}_desktop`,
 		kind: "sandbox",
-		description: `Use the Linux desktop in your ${title} sandbox, ${size}: for programs that only have a window (RStudio, a PDF form, a viewer). Start with a screenshot; coordinates are pixels on that screenshot. Every action answers with a new screenshot. Typing takes at most ${TYPE_MAX} characters; key takes names like Return, Tab, ctrl+s. The person can watch and use the same desktop. It has no shell: use ${site}_sandbox_run in your other sandbox for commands.`,
+		description: `Use the Linux desktop in your ${title} sandbox, ${size}: for programs that only have a window (RStudio, a PDF form, a viewer). Start with a screenshot; coordinates are pixels on that screenshot. Every action answers with a screenshot taken just after it. Typing takes at most ${info.max_type_chars ?? TYPE_MAX} characters; key takes names like Return, Tab, ctrl+s. The person can watch and use the same desktop. It has no shell: use ${site}_sandbox_run in your other sandbox for commands.`,
 		parameters: {
 			type: "object",
 			properties: {
@@ -152,7 +157,12 @@ export function desktopTools(site: string, title: string, api: DesktopApi): Tool
 			const result = await api.desktopAct(action, "agent", ctx.signal);
 			const parts = [said(action)];
 			if (result.cursor) parts.push(`The pointer is at (${result.cursor.join(", ")}).`);
-			const frame = result.frame;
+			// The lab answers input with no picture; one taken a moment later shows what the action did.
+			let frame = result.frame;
+			if (!frame && SHOW_AFTER.has(action.action)) {
+				await sleep(SETTLE_MS, ctx.signal);
+				frame = (await api.desktopAct({ action: "screenshot" }, "agent", ctx.signal)).frame;
+			}
 			if (frame && !ctx.vision) parts.push("This model can't see images, so the screenshot shows only in the person's desktop pane.");
 			return { ok: true, content: parts.join(" "), images: frame && ctx.vision ? [{ type: "image", mime: "image/png", data: frame.png }] : undefined, view: { result: said(action) } };
 		},
@@ -167,8 +177,11 @@ export function desktopTools(site: string, title: string, api: DesktopApi): Tool
 		async run(args, ctx) {
 			const target = String(args.target ?? "").trim();
 			if (!/^https:\/\//.test(target) && !target.startsWith("/sandbox/")) throw new ToolError("target is an https address or a /sandbox/... file.");
-			const result = await api.desktopOpen(target, "agent", ctx.signal);
-			return { ok: true, content: `Opened ${target}.`, images: result.frame && ctx.vision ? [{ type: "image", mime: "image/png", data: result.frame.png }] : undefined };
+			await api.desktopOpen(target, "agent", ctx.signal);
+			// A program takes a moment to open its window.
+			await sleep(1_500, ctx.signal);
+			const frame = (await api.desktopAct({ action: "screenshot" }, "agent", ctx.signal)).frame;
+			return { ok: true, content: `Opened ${target}.`, images: frame && ctx.vision ? [{ type: "image", mime: "image/png", data: frame.png }] : undefined };
 		},
 	};
 	return [desktop, open];

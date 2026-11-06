@@ -12,6 +12,11 @@ const lab = {
 	containers: [] as { id: string; image: string; status: string }[],
 	actions: [] as Record<string, unknown>[],
 	made: 0,
+	/** Containers answering as Gate does for an archived one, until restored. */
+	archived: new Set<string>(),
+	restored: [] as string[],
+	/** Containers that ended (410 container_expired). */
+	ended: new Set<string>(),
 };
 const server = Bun.serve({
 	port: 0,
@@ -37,12 +42,24 @@ const server = Bun.serve({
 			lab.containers.push(made);
 			return Response.json(made, { status: 201 });
 		}
+		const restore = /^\/v1\/containers\/([^/]+)\/restore$/.exec(url.pathname);
+		if (restore && request.method === "POST") {
+			lab.archived.delete(restore[1]!);
+			lab.restored.push(restore[1]!);
+			return Response.json({ id: restore[1], status: "restoring" }, { status: 202 });
+		}
+		const one = /^\/v1\/containers\/([^/]+)$/.exec(url.pathname);
+		if (one && request.method === "GET") return Response.json({ id: one[1], status: lab.archived.has(one[1]!) ? "archived" : "running" });
 		const desk = /^\/v1\/containers\/([^/]+)\/desktop(\/open)?$/.exec(url.pathname);
 		if (desk && request.method === "POST") {
+			if (lab.ended.has(desk[1]!)) return Response.json({ error: { code: "container_expired", message: "ended" } }, { status: 410 });
 			if (!lab.containers.some((c) => c.id === desk[1])) return Response.json({ error: { code: "container_not_found", message: "no such sandbox" } }, { status: 404 });
+			if (lab.archived.has(desk[1]!)) return Response.json({ error: { code: "sandbox_archived", message: "archived" } }, { status: 409 });
 			const body = (await request.json()) as Record<string, unknown>;
 			lab.actions.push({ ...body, container: desk[1], open: Boolean(desk[2]) });
-			return Response.json({ ok: true, screenshot: { png: PNG, width: 1280, height: 800 } });
+			if (desk[2]) return Response.json({ opened: body.target });
+			// As Gate does: a picture only for screenshot and zoom.
+			return Response.json(body.action === "screenshot" || body.action === "zoom" ? { ok: true, action: body.action, screenshot: { png: PNG, width: 1280, height: 800 } } : { ok: true, action: body.action });
 		}
 		return new Response("", { status: 404 });
 	},
@@ -66,18 +83,27 @@ describe("a lab's desktop sandbox", () => {
 		expect(result.images?.[0]).toEqual({ type: "image", mime: "image/png", data: PNG });
 		// The desktop is a sandbox of its own, made from the desktop image.
 		expect(lab.containers.map((c) => c.image)).toEqual(["desktop"]);
-		expect(lab.actions.at(-1)).toMatchObject({ action: "left_click", coordinate: [640, 200], by: "agent", container: "c1" });
+		// The lab answers the click without a picture: the tool takes one just after, so the model sees the result.
+		expect(lab.actions.slice(-2).map((a) => [a.action, a.by, a.container])).toEqual([["left_click", "agent", "c1"], ["screenshot", "agent", "c1"]]);
+		expect(lab.actions.at(-2)).toMatchObject({ coordinate: [640, 200] });
 		expect(frames.at(-1)).toMatchObject({ site: "field", png: PNG, width: 1280, height: 800, by: "agent" });
 	});
 
-	test("the person's input goes the same way, marked as theirs; a desktop the lab removed is made again once", async () => {
+	test("the person's input goes the same way, marked as theirs; an archived desktop is restored, an ended one made again", async () => {
 		const s = site();
 		await s.connect();
 		await s.desktopAct({ action: "type", text: "summary(plots)" }, "person");
 		expect(lab.actions.at(-1)).toMatchObject({ action: "type", text: "summary(plots)", by: "person" });
-		lab.containers = [];
+		// Archived: restored with its files, never replaced.
+		lab.archived.add("c1");
 		await s.desktopAct({ action: "screenshot" }, "person");
-		expect(lab.containers.map((c) => c.id)).toEqual(["c2"]);
+		expect(lab.restored).toEqual(["c1"]);
+		expect(lab.containers.map((c) => c.id)).toEqual(["c1"]);
+		expect(lab.actions.at(-1)).toMatchObject({ action: "screenshot", container: "c1" });
+		// Ended: a new one, once.
+		lab.ended.add("c1");
+		await s.desktopAct({ action: "screenshot" }, "person");
+		expect(lab.containers.map((c) => c.id)).toEqual(["c1", "c2"]);
 		expect(lab.actions.at(-1)).toMatchObject({ action: "screenshot", container: "c2" });
 	});
 

@@ -76,7 +76,7 @@ const bearerOf = (headers: Record<string, string>) => /^(?:Bearer|DPoP)\s+(.+)$/
 const SERVE_IDLE_MINUTES = 15;
 
 /** Refusals (409, 429, 503) that clear on their own, and the longest Retry-After waited each time, in seconds. */
-const WAITS: Record<string, number> = { sandbox_starting: 30, sandbox_busy: 30, browser_starting: 5, scanner_unavailable: 60, downloads_in_progress: 30, too_many_deletes: 15 };
+const WAITS: Record<string, number> = { sandbox_starting: 30, sandbox_busy: 30, browser_starting: 5, scanner_unavailable: 60, downloads_in_progress: 30, too_many_deletes: 15, desktop_unavailable: 5, too_many_commands: 5 };
 
 /**
  * The industry's harmless antivirus test file (EICAR), each character code plus one, so neither this source nor a built
@@ -1783,14 +1783,14 @@ export class GateSite implements SiteAdapter, SandboxApi, DesktopApi {
 	}
 
 	/** The person's desktop sandbox: one they already have from the desktop image, or a new one. */
-	private async desktopSandbox(signal?: AbortSignal): Promise<string> {
+	private async desktopSandbox(signal?: AbortSignal, avoid?: string): Promise<string> {
 		if (this.desktopBox) return this.desktopBox;
 		const image = this.desktop()?.image;
 		if (!image) throw new ToolError(`${this.title} has no desktop sandbox for you.`);
 		this.desktopStarting ??= (async () => {
 			const listed = await this.json<{ data?: { id: string; image?: string | null; status?: string }[] }>("GET", "/v1/containers?limit=100", { signal: AbortSignal.timeout(15_000) });
-			const found = (listed.data ?? []).find((c) => c.image === image && c.status !== "deleted" && c.status !== "deleting");
-			const id = found?.id ?? (await this.create(signal, { name: "EnrichedLab desktop", image })).id;
+			const found = (listed.data ?? []).find((c) => c.image === image && c.id !== avoid && c.status !== "deleted" && c.status !== "deleting");
+			const id = found?.id ?? (await this.create(signal, { name: "Desktop", image })).id;
 			this.desktopBox = id;
 			this.made.set(id, { image });
 			return id;
@@ -1800,15 +1800,28 @@ export class GateSite implements SiteAdapter, SandboxApi, DesktopApi {
 		return this.desktopStarting;
 	}
 
-	/** One request to the desktop; a desktop sandbox the lab removed is made again, once. */
+	/**
+	 * One request to the desktop. A stopped or starting desktop answers sandbox_starting, which call() waits out; an
+	 * archived one is restored with its files, never replaced; one that ended (410) or that the lab no longer has
+	 * (404) is made again, once.
+	 */
 	private async desktopCall(path: "desktop" | "desktop/open", body: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+		let gone: string | undefined;
 		for (let attempt = 0; ; attempt++) {
-			const id = await this.desktopSandbox(signal);
+			const id = await this.desktopSandbox(signal, gone);
 			try {
 				return await this.json<unknown>("POST", `/v1/containers/${encodeURIComponent(id)}/${path}`, { json: body, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000) });
 			} catch (error) {
-				const status = (error as { status?: number }).status;
+				const { status, code } = error as { status?: number; code?: string };
+				if (attempt < 2 && code === "sandbox_archived") {
+					this.onNotice?.(`Restoring your ${this.title} desktop from its archive. Its files come back with it.`);
+					await this.json("POST", `/v1/containers/${encodeURIComponent(id)}/restore`, { json: {}, signal }).catch(() => undefined);
+					for (const until = Date.now() + 120_000; Date.now() < until && (await this.containerStatus(id, signal).catch(() => "running")) !== "running"; ) await sleep(2_000, signal);
+					continue;
+				}
 				if (attempt === 0 && (status === 404 || status === 410)) {
+					// That one ended: a new one, not the same one found again in the list.
+					gone = id;
 					this.desktopBox = undefined;
 					continue;
 				}
