@@ -1,4 +1,6 @@
 <script lang="ts">
+	/** One section at a time: the person's ChatGPT plan, open models on this computer, or keys for a service. */
+	let tab = $state<"plan" | "local" | "keys">("plan");
 	// Model services: your ChatGPT plan through ChatGPT's own sign-in, or a service with your own key. A key is checked
 	// against the service before it's kept, and goes to the operating system's credential store, never to a settings
 	// file. ChatGPT tokens stay in the engine; this dialog sees the account's email and whether plan use is on.
@@ -104,14 +106,22 @@
 	}
 </script>
 
-<dialog bind:this={dialog} onclose={() => (open = false)} aria-labelledby="services-title">
-	<form method="dialog" class="head">
-		<h2 id="services-title">Model services</h2>
-		<button class="close" aria-label="Close">×</button>
+<dialog class="sheet services" bind:this={dialog} onclose={() => (open = false)} aria-labelledby="services-title">
+	<form method="dialog" class="sheet-head">
+		<h2 id="services-title">Model Services</h2>
+		<button class="icon-btn" aria-label="Close">
+			<svg viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8" /></svg>
+		</button>
 	</form>
-	<p class="lead">Your lab's models appear when you sign in to it. Models on this computer appear while their server runs.</p>
+	<p class="lead">Models come from three places besides your labs, which add theirs when you sign in.</p>
+	<div class="segmented tabs" role="tablist" aria-label="Where models come from">
+		{#each [["plan", "ChatGPT Plan"], ["local", "This Computer"], ["keys", "Your Keys"]] as const as [id, label] (id)}
+			<button role="tab" id={`svc-${id}`} aria-selected={tab === id} aria-controls={`svc-panel-${id}`} class:on={tab === id} onclick={() => (tab = id)}>{label}</button>
+		{/each}
+	</div>
 
-	<section class="plan" aria-labelledby="plan-title">
+	{#if tab === "plan"}
+	<div class="plan" id="svc-panel-plan" role="tabpanel" aria-labelledby="svc-plan">
 		<h3 id="plan-title">Your ChatGPT plan</h3>
 		<p class="note">Requests in EnrichedLab can use the usage included in your ChatGPT plan. No key, and nothing billed by EnrichedLab.</p>
 		{#if accounts.length}
@@ -140,11 +150,14 @@
 			{#if accounts.some((a) => a.signedIn)}<a class="usage" href={USAGE_URL} target="_blank" rel="noreferrer">Manage usage</a>{/if}
 		</div>
 		<p class="status" class:failed={planFailed} role="status" aria-live="polite">{planMessage}</p>
-	</section>
-
-	<LocalModels active={open} />
-
-	<h3>Your own key</h3>
+	</div>
+	{:else if tab === "local"}
+	<div id="svc-panel-local" role="tabpanel" aria-labelledby="svc-local">
+		<LocalModels active={open && tab === "local"} />
+	</div>
+	{:else}
+	<div id="svc-panel-keys" role="tabpanel" aria-labelledby="svc-keys">
+	<h3>Add a key</h3>
 	<form class="add" onsubmit={add}>
 		<fieldset>
 			<legend>Service</legend>
@@ -185,6 +198,8 @@
 			{/each}
 		</ul>
 	{/if}
+	</div>
+	{/if}
 </dialog>
 
 <dialog bind:this={welcomeDialog} class="welcome" aria-labelledby="welcome-title">
@@ -198,38 +213,26 @@
 </dialog>
 
 <style>
-	dialog {
-		width: min(520px, calc(100vw - 32px));
-		max-height: calc(100dvh - 48px);
-		padding: 0 22px 20px;
-		border: 1px solid var(--rule-strong);
+	.services {
+		--sheet-width: 560px;
+		min-height: min(640px, calc(100dvh - 48px));
+	}
+	.tabs {
+		display: grid;
+		width: 100%;
+		margin: 4px 0 8px;
+	}
+	.welcome {
+		width: min(400px, calc(100vw - 32px));
+		padding: 22px;
+		border: 0;
 		border-radius: 14px;
 		background: var(--raised);
 		color: var(--text);
-		box-shadow: 0 24px 60px rgb(0 0 0 / 0.22);
+		box-shadow: var(--shadow);
 	}
-	dialog::backdrop {
-		background: rgb(0 0 0 / 0.32);
-	}
-	dialog[open] {
-		animation: rise 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
-	}
-	@keyframes rise {
-		from {
-			opacity: 0;
-			transform: translateY(6px);
-		}
-	}
-	@media (prefers-reduced-motion: reduce) {
-		dialog[open] {
-			animation: none;
-		}
-	}
-	.head {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: 16px 0 4px;
+	.welcome::backdrop {
+		background: light-dark(rgb(2 40 81 / 0.22), rgb(0 0 0 / 0.55));
 	}
 	h2 {
 		margin: 0;
@@ -241,16 +244,6 @@
 		font-size: 12.5px;
 		font-weight: 600;
 		color: var(--text-muted);
-	}
-	.close {
-		width: 32px;
-		height: 32px;
-		font-size: 20px;
-		color: var(--text-muted);
-		border-radius: 8px;
-	}
-	.close:hover {
-		background: var(--hover);
 	}
 	.lead,
 	.note {

@@ -165,7 +165,7 @@
 		border-bottom: 0;
 	}
 	:global(.shell.mac.desktop) .head.inset {
-		padding-left: 84px;
+		padding-left: var(--traffic-inset, 84px);
 	}
 	.menu-toggle {
 		display: none;

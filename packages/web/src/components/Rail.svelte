@@ -275,7 +275,7 @@
 	}
 	/* The traffic lights sit at the left of this row in the desktop app on macOS. */
 	:global(.shell.mac.desktop) .toolbar {
-		padding-left: 84px;
+		padding-left: var(--traffic-inset, 84px);
 	}
 	.spacer {
 		flex: 1;

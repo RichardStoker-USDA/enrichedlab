@@ -20,6 +20,10 @@ interface Window {
 		reveal?(path: string): Promise<boolean>;
 		/** The appearance choice, so the window material matches the page. */
 		setTheme?(theme: "auto" | "light" | "dark"): void;
+		/** Close the window (⌘W with no pane open). */
+		closeWindow?(): void;
+		/** Full screen on or off: the traffic lights hide in full screen. */
+		onFullscreen?(listener: (on: boolean) => void): () => void;
 		/** Menu bar commands, by id. */
 		onCommand?(listener: (command: string) => void): () => void;
 		/** Real browser views laid over a pane's rectangle (Electron WebContentsView). */

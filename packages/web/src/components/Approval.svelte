@@ -116,9 +116,19 @@
 		background: var(--primary-bg);
 		color: var(--primary-fg);
 	}
+	/* A key cap in the button's own color, so it reads on the filled Allow as well as the plain buttons. */
 	kbd {
-		font-size: 11px;
-		opacity: 0.6;
+		display: inline-grid;
+		place-items: center;
+		min-width: 18px;
+		height: 18px;
+		margin-left: 2px;
+		padding: 0 4px;
+		border-radius: 4px;
+		box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 40%, transparent);
+		color: inherit;
+		font: 600 10.5px var(--font-ui);
+		opacity: 0.85;
 	}
 	@keyframes reveal {
 		from {

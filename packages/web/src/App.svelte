@@ -28,7 +28,12 @@
 		}
 		if (desktop && window.labDesktop?.platform !== "linux") document.documentElement.classList.add("material");
 		void lab.init();
-		return window.labDesktop?.onCommand?.(command);
+		const offFull = window.labDesktop?.onFullscreen?.((on) => document.documentElement.classList.toggle("fullscreen", on));
+		const offCommand = window.labDesktop?.onCommand?.(command);
+		return () => {
+			offFull?.();
+			offCommand?.();
+		};
 	});
 
 	/** The menu bar's commands (and the same shortcuts in a browser, below). */
@@ -43,7 +48,8 @@
 		else if (id === "new-terminal") lab.current && lab.openPane("terminal");
 		else if (id === "close-pane") {
 			const active = groups(lab.layout).find((g) => g.tabs.length)?.active;
-			if (lab.workbench && active) lab.closePane(active);
+			if (lab.workbench && lab.current && active) lab.closePane(active);
+			else window.labDesktop?.closeWindow?.();
 		} else if (id.startsWith("theme-")) void lab.setTheme(id.slice(6) as "auto" | "light" | "dark");
 		else if (id === "rename") lab.current && (lab.renaming = lab.current);
 		else if (id === "stop") lab.busy && lab.cancel();

@@ -171,6 +171,9 @@ async function open(argv) {
 	});
 	guard(window.webContents);
 	window.webContents.on("context-menu", (_event, params) => textMenu(params));
+	// In full screen the traffic lights hide, so the page drops the space it keeps for them.
+	window.on("enter-full-screen", () => window.webContents.send("fullscreen", true));
+	window.on("leave-full-screen", () => window.webContents.send("fullscreen", false));
 	// Links leave the app. A canvas opens in a plain window of its own: no preload, so model-written pages never
 	// reach the shell's bridge, and the same navigation rules.
 	window.webContents.setWindowOpenHandler(({ url: target }) => {
@@ -246,7 +249,7 @@ function appMenu() {
 				item("Add a Lab…", "add-lab"),
 				item("Model Services…", "services"),
 				{ type: "separator" },
-				item("Close Pane", "close-pane", "CmdOrCtrl+W"),
+				item("Close", "close-pane", "CmdOrCtrl+W"),
 				...(mac ? [] : [{ type: "separator" }, item("Settings…", "settings", "CmdOrCtrl+,"), { role: "quit" }]),
 			],
 		},
@@ -351,6 +354,11 @@ ipcMain.handle("menu:popup", (event, entries) => {
 			);
 		Menu.buildFromTemplate(build(entries)).popup({ window, callback: () => resolve(chosen) });
 	});
+});
+
+// ⌘W closes the open pane first; with none open the page asks for the window to close, as Mac apps do.
+ipcMain.on("window:close", (event) => {
+	if (event.sender === window?.webContents) window.close();
 });
 
 ipcMain.handle("reveal", (event, path) => {

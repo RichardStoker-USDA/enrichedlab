@@ -9,6 +9,12 @@ contextBridge.exposeInMainWorld("labDesktop", {
 	menu: (entries) => ipcRenderer.invoke("menu:popup", entries),
 	reveal: (path) => ipcRenderer.invoke("reveal", path),
 	setTheme: (theme) => ipcRenderer.send("theme", theme),
+	closeWindow: () => ipcRenderer.send("window:close"),
+	onFullscreen: (listener) => {
+		const handler = (_event, on) => listener(Boolean(on));
+		ipcRenderer.on("fullscreen", handler);
+		return () => ipcRenderer.removeListener("fullscreen", handler);
+	},
 	onCommand: (listener) => {
 		const handler = (_event, command) => listener(command);
 		ipcRenderer.on("command", handler);

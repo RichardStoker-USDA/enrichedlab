@@ -9,7 +9,7 @@
 	import Approval from "./Approval.svelte";
 	import Composer from "./Composer.svelte";
 	import { mac } from "../lib/places.ts";
-	import { separator, showMenu, type MenuAction } from "../lib/menu.svelte.ts";
+	import { contextMenu, separator, showMenu, type MenuAction } from "../lib/menu.svelte.ts";
 	import Step from "./Step.svelte";
 
 	let { onMenu }: { onMenu: () => void } = $props();
@@ -76,6 +76,11 @@
 		if (keep && titleDraft.trim() && titleDraft !== lab.summary?.title) await lab.rename(titleDraft);
 	}
 	const desktop = typeof window !== "undefined" && Boolean(window.labDesktop);
+	/** Right-click on a message: copy it whole. With text selected, the system's own menu (Copy, Look Up) shows. */
+	function messageActions(text: string, what: string): MenuAction[] {
+		if (window.getSelection()?.toString().trim()) return [];
+		return [{ label: `Copy ${what}`, run: () => lab.copy(text, `the ${what.toLowerCase()}`) }];
+	}
 	function sessionMenu(): MenuAction[] {
 		const s = lab.summary;
 		if (!s) return [];
@@ -146,7 +151,7 @@
 		{/if}
 		{#each items as item (item.id)}
 			{#if item.kind === "prompt"}
-				<h3 class="prompt" class:enter={!lab.openedAt}>{item.text}{#if item.images}<span class="attached"> · {item.images} image{item.images === 1 ? "" : "s"}</span>{/if}</h3>
+				<h3 class="prompt" class:enter={!lab.openedAt} use:contextMenu={() => messageActions(item.text, "Prompt")}>{item.text}{#if item.images}<span class="attached"> · {item.images} image{item.images === 1 ? "" : "s"}</span>{/if}</h3>
 			{:else if item.kind === "thinking"}
 				<div class="thought">
 					<button class="thought-line" onclick={() => (thinkingOpen[item.id] = !thinkingOpen[item.id])} aria-expanded={Boolean(thinkingOpen[item.id])}>
@@ -158,7 +163,7 @@
 				<Activity steps={item.steps} live={lab.busy && item.id === lastActivity} />
 			{:else if item.kind === "answer"}
 				{#if item.text}
-					<div class="prose answer" use:codeBlocks={item.text}>{@html renderMarkdown(item.text)}</div>
+					<div class="prose answer" use:codeBlocks={item.text} use:contextMenu={() => messageActions(item.text, "Answer")}>{@html renderMarkdown(item.text)}</div>
 				{/if}
 				{#if item.stop === "error"}
 					<p class="mark-line bad">The model stopped with an error: {item.error}</p>
@@ -212,7 +217,7 @@
 	}
 	/* With the sidebar hidden, the traffic lights sit in this row. */
 	:global(.shell.mac.desktop) .head.inset {
-		padding-left: 84px;
+		padding-left: var(--traffic-inset, 84px);
 	}
 	.head.inset {
 		padding-left: 10px;

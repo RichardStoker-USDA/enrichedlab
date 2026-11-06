@@ -674,3 +674,8 @@ dialog.sheet[open] {
 	font-weight: 500;
 	box-shadow: 0 0 0 0.5px var(--rule-strong), 0 1px 3px var(--shadow-color);
 }
+
+/* Full screen hides the traffic lights: the rows that make room for them don't need to. */
+:root.fullscreen {
+	--traffic-inset: 12px;
+}
