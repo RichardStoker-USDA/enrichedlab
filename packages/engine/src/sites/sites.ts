@@ -475,6 +475,11 @@ export class Sites {
 						state.warning = `Bundles from ${name} weren't installed: ${redact(errorText(error))}`;
 					}
 				}
+				// A lab that says it keeps data inside is isolated from then on, also while it can't be reached.
+				if (adapter.descriptor?.policy?.keep_data_inside && !config.isolated) {
+					config.isolated = true;
+					this.saveConfigs(this.configs().map((c) => (c.name === name ? { ...c, isolated: true } : c)));
+				}
 				const note = route !== first && state.error ? `Browser sign-in refused; using the LAN key. ${state.error}` : adapter.warning;
 				Object.assign(state, { route, who: adapter.who, models: adapter.models, tools: adapter.tools, sandbox: adapter.sandboxOn, error: undefined, warning: note ?? state.warning, describe: adapter.describe() });
 				break;
@@ -501,7 +506,7 @@ export class Sites {
 			title: state.config.title ?? state.config.name,
 			url: state.config.url,
 			kind: state.config.kind,
-			isolated: state.config.isolated,
+			isolated: this.isolated(state.config.name) || undefined,
 			signedIn: Boolean(state.route && !state.error),
 			who: state.who,
 			via: state.route?.via,
@@ -542,7 +547,7 @@ export class Sites {
 
 	/** The sites a session sees: the one it is bound to, or every site that isn't isolated. */
 	private visible(site?: string): SiteState[] {
-		return [...this.states.values()].filter((s) => (site ? s.config.name === site : !s.config.isolated));
+		return [...this.states.values()].filter((s) => (site ? s.config.name === site : !this.isolated(s.config.name)));
 	}
 
 	tools(site?: string): Tool[] {
@@ -570,8 +575,9 @@ export class Sites {
 		return Object.fromEntries(this.configs().flatMap((c) => (c.formerNames ?? []).map((f) => [f, c.name])));
 	}
 
+	/** Whether a lab keeps its sessions to itself: joined that way, or the lab says it keeps data inside. */
 	isolated(name: string): boolean {
-		return this.configs().find((c) => c.name === name)?.isolated === true;
+		return this.configs().find((c) => c.name === name)?.isolated === true || this.adapters.get(name)?.descriptor?.policy?.keep_data_inside === true;
 	}
 
 	exists(name: string): boolean {

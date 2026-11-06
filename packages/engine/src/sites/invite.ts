@@ -8,7 +8,7 @@ export interface Invite {
 	isolated?: boolean;
 }
 
-/** A short lab name from an address: gate.whnrc.example.edu becomes whnrc, gate.enrichedlab.com enrichedlab. */
+/** A short lab name from an address: gate.whnrc.example.edu becomes whnrc, gate.fieldlab.example.org fieldlab. */
 export function nameFromHost(host: string): string {
 	const labels = host.toLowerCase().split(".").filter(Boolean);
 	const meaningful = labels.slice(0, -1).filter((label) => !["gate", "lab", "www", "api", "app"].includes(label));

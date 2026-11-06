@@ -277,6 +277,26 @@ describe("sites", () => {
 		expect(sites.allows({ source: "local", provider: "ollama" } as never, "research")).toBe(false);
 		expect(sites.allows({ source: "local", provider: "ollama" } as never, "home")).toBe(true);
 	});
+
+	test("a lab that says it keeps data inside is isolated, however it was joined, and stays so while offline", async () => {
+		const { SITE_KINDS } = await import("../packages/engine/src/sites/adapter.ts");
+		const home = scratch("sites-inside");
+		writeFileSync(join(home, "lab.key"), "k");
+		const p = { home, run: join(home, "run"), sites: join(home, "sites.json"), credentials: join(home, "credentials") } as never;
+		SITE_KINDS.inside = () =>
+			({ descriptor: { contract: "2026-11", name: "research", title: "Research Lab", policy: { keep_data_inside: true } }, models: [], tools: [], sandboxOn: false, connect: async () => undefined, describe: () => "Research Lab", detach: async () => undefined, close: async () => undefined }) as never;
+		try {
+			const sites = new Sites(p, () => undefined);
+			sites.add({ name: "research", url: "https://research.example.org", kind: "inside", lan: { url: "https://10.0.0.9", keyFile: join(home, "lab.key") } });
+			expect(sites.isolated("research")).toBe(false);
+			expect((await sites.connect("research")).isolated).toBe(true);
+			expect(sites.allows({ source: "local", provider: "ollama" } as never, "research")).toBe(false);
+			// A later start that can't reach the lab still treats it as isolated.
+			expect(new Sites(p, () => undefined).isolated("research")).toBe(true);
+		} finally {
+			delete SITE_KINDS.inside;
+		}
+	});
 });
 
 describe("checkpoints", () => {
@@ -526,17 +546,17 @@ describe("lab invites", () => {
 	test("an invite link from a lab's /join page gives its address, short name and title", async () => {
 		const { parseInvite } = await import("../packages/engine/src/sites/invite.ts");
 		// Gate encodes the title with the url crate: spaces as +, & as %26.
-		expect(parseInvite("enrichedlab://join?url=https%3A%2F%2Fgate.enrichedlab.com&name=enrichedlab&title=Test+%26+Lab")).toEqual({ url: "https://gate.enrichedlab.com", name: "enrichedlab", title: "Test & Lab", isolated: undefined });
+		expect(parseInvite("enrichedlab://join?url=https%3A%2F%2Fgate.fieldlab.example.org&name=fieldlab&title=Test+%26+Lab")).toEqual({ url: "https://gate.fieldlab.example.org", name: "fieldlab", title: "Test & Lab", isolated: undefined });
 		expect(parseInvite("enrichedlab://join?url=https://gate.whnrc.example.edu/join&name=WHNRC Lab&isolated=1")).toEqual({ url: "https://gate.whnrc.example.edu", name: "whnrc-lab", title: undefined, isolated: true });
 	});
 
 	test("a lab's own address works too, named from its host; anything not https is refused", async () => {
 		const { parseInvite } = await import("../packages/engine/src/sites/invite.ts");
 		expect(parseInvite("https://gate.whnrc.example.edu/join")).toEqual({ url: "https://gate.whnrc.example.edu", name: "whnrc" });
-		expect(parseInvite("https://gate.enrichedlab.com")).toEqual({ url: "https://gate.enrichedlab.com", name: "enrichedlab" });
-		expect(parseInvite("http://gate.enrichedlab.com")).toBeUndefined();
+		expect(parseInvite("https://gate.fieldlab.example.org")).toEqual({ url: "https://gate.fieldlab.example.org", name: "fieldlab" });
+		expect(parseInvite("http://gate.fieldlab.example.org")).toBeUndefined();
 		expect(parseInvite("enrichedlab://join?url=http://evil.example")).toBeUndefined();
-		expect(parseInvite("enrichedlab://open?url=https://gate.enrichedlab.com")).toBeUndefined();
+		expect(parseInvite("enrichedlab://open?url=https://gate.fieldlab.example.org")).toBeUndefined();
 		expect(parseInvite("not a link")).toBeUndefined();
 	});
 });
