@@ -1,4 +1,9 @@
 <script lang="ts">
+	/** The project folder's last two parts, as the new-session screen shows it; the whole path is on hover. */
+	const folderTail = (path: string) => {
+		const parts = path.split(/[\\/]/).filter(Boolean);
+		return parts.length > 2 ? `…/${parts.slice(-2).join("/")}` : path;
+	};
 	import { tick } from "svelte";
 	import { lab } from "../lib/store.svelte.ts";
 	import { renderMarkdown, renderPartial, splitBlocks } from "../lib/markdown.ts";
@@ -128,7 +133,7 @@
 		{#if !items.length && !lab.busy}
 			<div class="blank">
 				<p class="blank-title">{lab.model ? lab.model.id : "No model yet"}</p>
-				<p class="blank-text">{lab.place.id === "local" ? `Works in ${lab.summary?.cwd ?? ""} on ${lab.place.title}, contained by the operating system.` : `Works in the ${lab.place.title} sandbox; code and files stay there.`}</p>
+				<p class="blank-text" title={lab.summary?.cwd}>{lab.place.id === "local" ? `Works in ${folderTail(lab.summary?.cwd ?? "")} on ${lab.place.title}, contained by the operating system.` : `Works in the ${lab.place.title} sandbox; code and files stay there.`}</p>
 			</div>
 		{/if}
 		{#each items as item (item.id)}
@@ -341,6 +346,7 @@
 	.blank-text {
 		margin: 0 auto;
 		max-width: 46ch;
+		overflow-wrap: anywhere;
 		color: var(--text-muted);
 		font-size: 13.5px;
 	}
