@@ -75,8 +75,9 @@ describe("contained commands", () => {
 	});
 
 	test("printenv in a contained shell doesn't show a token the engine has", async () => {
+		// Seatbelt and bubblewrap: Windows contains writes only, and its shell has no printenv.
 		const ws = new LocalWorkspace(scratch("env"), "workspace");
-		if (!ws.sandboxed) return;
+		if (!ws.sandboxed || process.platform === "win32") return;
 		process.env.ENRICHED_TEST_TOKEN = "never-shown";
 		try {
 			const result = await ws.exec("printenv", { timeoutMs: 10_000, signal: new AbortController().signal });
