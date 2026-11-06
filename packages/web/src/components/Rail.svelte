@@ -2,6 +2,7 @@
 	// The sidebar: where this person can work (places), and their sessions by project. Its top row is the window's
 	// title bar beside the traffic lights. Every row acts on click, and offers its other actions on right-click and
 	// on its "More" button.
+	import { untrack } from "svelte";
 	import type { SessionSummary } from "@enrichedlab/protocol";
 	import { lab } from "../lib/store.svelte.ts";
 	import { ago, folderName } from "../lib/format.ts";
@@ -42,8 +43,7 @@
 	}
 
 	function fresh(place?: string) {
-		lab.newPlace = place;
-		lab.startNew();
+		lab.beginNew({ place });
 		open = false;
 	}
 
@@ -106,7 +106,7 @@
 					]
 				: []),
 			separator,
-			{ label: `New Session in ${folderName(project)}`, run: () => lab.startIn(project) },
+			{ label: `New Session in ${folderName(project)}`, run: () => lab.beginNew({ folder: project }) },
 			...(desktop ? [{ label: mac ? "Show in Finder" : "Show in Folder", run: () => lab.reveal(s.cwd) }] : []),
 			{ label: "Copy Folder Path", run: () => lab.copy(s.cwd, "the folder path") },
 			separator,
@@ -116,7 +116,7 @@
 
 	function projectActions(path: string): MenuAction[] {
 		return [
-			{ label: "New Session Here", run: () => lab.startIn(path) },
+			{ label: "New Session Here", run: () => lab.beginNew({ folder: path }) },
 			...(desktop ? [{ label: mac ? "Show in Finder" : "Show in Folder", run: () => lab.reveal(path) }] : []),
 			{ label: "Copy Folder Path", run: () => lab.copy(path, "the folder path") },
 		];
@@ -126,15 +126,22 @@
 		lab.startRename(s.id);
 	}
 	// However renaming starts (this row, the menu bar, the session's More menu), the draft starts from the title.
+	// Only a new rename starts it: a session list update while the person types leaves their text alone.
 	$effect(() => {
 		const id = lab.renaming;
-		if (id) draft = lab.sessions.find((s) => s.id === id)?.title ?? "";
+		if (id) untrack(() => (draft = lab.sessions.find((s) => s.id === id)?.title ?? ""));
 	});
 
 	async function finishRename(s: SessionSummary, keep: boolean) {
 		if (lab.renaming !== s.id) return;
+		const title = draft.trim();
 		lab.renaming = undefined;
-		if (keep && draft.trim() && draft.trim() !== s.title) await lab.rename(draft, s.id);
+		if (!keep || !title || title === s.title) return;
+		// A rename that doesn't save opens again with what was typed.
+		if (!(await lab.rename(title, s.id))) {
+			lab.renaming = s.id;
+			draft = title;
+		}
 	}
 
 	function focusInput(node: HTMLInputElement) {

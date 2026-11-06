@@ -496,7 +496,8 @@ export interface Requests {
 	};
 	"session.close": { params: { sessionId: string }; result: { ok: true } };
 	"session.prompt": { params: { sessionId: string; text: string; images?: Part[] }; result: { queued: boolean } };
-	"session.cancel": { params: { sessionId: string }; result: { ok: true } };
+	/** Stops the turn. Messages that were waiting to join it come back (`returned`), for the person to send again. */
+	"session.cancel": { params: { sessionId: string }; result: { ok: true; returned?: string[] } };
 	"session.model": { params: { sessionId: string; model?: string; effort?: string }; result: SessionStatus };
 	"session.compact": { params: { sessionId: string }; result: { ok: boolean; detail: string } };
 	"session.undo": { params: { sessionId: string }; result: { ok: boolean; files: string[]; detail: string } };

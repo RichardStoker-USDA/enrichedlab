@@ -24,15 +24,16 @@
 	$effect(() => {
 		if (!folder && recent[0]) folder = recent[0];
 	});
-	// New Session chosen again (menu, ⌘N, the sidebar): start the form over, on the place it names. Only the count
-	// starts it over; starting a session clears `newPlace`, and that must not empty the task being sent.
+	// New Session chosen again (lab.beginNew): the form moves to the place and project it names, and keeps a task
+	// already typed. Only the count does this; starting a session clears the hints, which must change nothing here.
 	$effect(() => {
 		void lab.startCount;
 		untrack(() => {
 			place = lab.newPlace ?? "local";
+			if (lab.newFolder) folder = lab.newFolder;
 			model = undefined;
-			task = "";
 			worktree = false;
+			field?.focus({ preventScroll: true });
 		});
 	});
 	$effect(() => {
@@ -81,6 +82,7 @@
 		if (!folder.trim() || starting) return;
 		starting = true;
 		lab.newPlace = undefined;
+		lab.newFolder = undefined;
 		const common = { worktree, model: chosenModel?.ref, prompt: task.trim() || undefined, progress: (to: string) => (movingTo = to) };
 		// A lab that keeps data in place binds the session to it; other labs take the session (and its repository) along.
 		await lab.create(folder.trim(), isolated ? { ...common, site: place } : { ...common, place });

@@ -587,9 +587,10 @@ export class Engine {
 					return { ok: true };
 				case "session.prompt":
 					return this.session(need("sessionId")).prompt(String(p.text ?? ""), p.images as never);
-				case "session.cancel":
-					this.session(need("sessionId")).cancel();
-					return { ok: true };
+				case "session.cancel": {
+					const returned = this.session(need("sessionId")).cancel();
+					return returned.length ? { ok: true, returned } : { ok: true };
+				}
 				case "session.model": {
 					const session = this.session(need("sessionId"));
 					session.setModel(p.model as string | undefined, p.effort as string | undefined);

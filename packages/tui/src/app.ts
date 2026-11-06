@@ -128,6 +128,17 @@ export async function runTui(options: TuiOptions): Promise<void> {
 		render();
 	};
 	const say = (text: string, level: "info" | "warn" | "error" = "info") => add(noticeView(t, { t: "notice", id: "", at: "", level, text }));
+	/** Stop the turn; messages that were waiting to join it come back into the editor, ahead of anything typed since. */
+	const stop = () =>
+		void client
+			.call("session.cancel", { sessionId })
+			.then((result) => {
+				if (!result.returned?.length) return;
+				const typed = editor.getText();
+				editor.setText([...result.returned, typed].filter(Boolean).join("\n\n"));
+				say(`${result.returned.length === 1 ? "The waiting message is" : `${result.returned.length} waiting messages are`} back in the editor.`);
+			})
+			.catch((error: Error) => say(`Couldn't stop it: ${error.message}`, "error"));
 
 	function viewFor(event: SessionEvent): Component | undefined {
 		switch (event.t) {
@@ -524,7 +535,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
 			return { consume: true };
 		}
 		if (matchesKey(data, "escape") && status && status.activity !== "idle" && !editor.isShowingAutocomplete()) {
-			void client.call("session.cancel", { sessionId });
+			stop();
 			return { consume: true };
 		}
 		if (matchesKey(data, "ctrl+c")) {
@@ -532,7 +543,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
 				editor.setText("");
 				render();
 			} else if (status && status.activity !== "idle") {
-				void client.call("session.cancel", { sessionId });
+				stop();
 			} else if (Date.now() - lastCtrlC < 1_500) {
 				quit();
 			} else {

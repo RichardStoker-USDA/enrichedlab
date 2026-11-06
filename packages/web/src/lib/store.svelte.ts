@@ -240,6 +240,19 @@ class Lab {
 	/** Bumped each time New Session is chosen, so the new-session screen starts over even when it's already showing. */
 	startCount = $state(0);
 
+	/** The project the new-session screen starts on, when the command named one ("New Session in <project>"). */
+	newFolder = $state<string | undefined>();
+
+	/**
+	 * Every New Session command goes through here (⌘N, the sidebar, a place's or a project's menu, the palette): the
+	 * same screen opens on the place and project it names, and a task already typed there stays.
+	 */
+	beginNew(options: { place?: string; folder?: string } = {}): void {
+		this.newPlace = options.place;
+		this.newFolder = options.folder;
+		this.startNew();
+	}
+
 	/** The new-session screen. */
 	startNew(): void {
 		this.startCount++;
@@ -596,8 +609,16 @@ class Lab {
 		await rpc.call("session.prompt", { sessionId, text, images });
 	}
 
+	/** Stop the turn; messages that were waiting to join it go back into the composer. */
 	cancel(): void {
-		if (this.current) void rpc.call("session.cancel", { sessionId: this.current });
+		const sessionId = this.current;
+		if (!sessionId) return;
+		void rpc
+			.call("session.cancel", { sessionId })
+			.then((result) => {
+				if (result.returned?.length) this.returned = { sessionId, text: result.returned.join("\n\n") };
+			})
+			.catch((error: Error) => this.say(`Couldn't stop it: ${error.message}`));
 	}
 
 	/** Answer a permission request. If the answer doesn't reach the engine, the request comes back to answer again. */
@@ -627,11 +648,18 @@ class Lab {
 		this.say(result.detail);
 	}
 
-	async rename(title: string, sessionId = this.current): Promise<void> {
-		if (!sessionId || !title.trim()) return;
-		await rpc.call("session.rename", { sessionId, title: title.trim() });
+	/** Rename a session; false (with the reason said) when it didn't save. */
+	async rename(title: string, sessionId = this.current): Promise<boolean> {
+		if (!sessionId || !title.trim()) return false;
+		try {
+			await rpc.call("session.rename", { sessionId, title: title.trim() });
+		} catch (error) {
+			this.say(`The new name didn't save: ${(error as Error).message}`);
+			return false;
+		}
 		const summary = this.sessions.find((s) => s.id === sessionId);
 		if (summary) this.upsert({ ...summary, title: title.trim() });
+		return true;
 	}
 
 	/** Ask first, then delete a session's record from this computer. Its project folder isn't touched. */
@@ -736,12 +764,6 @@ class Lab {
 			this.ui = before;
 			this.say(`Couldn't save that setting: ${(error as Error).message}`);
 		}
-	}
-
-	/** Start a session in a folder right away, on a place (the rail's "New session here"). */
-	async startIn(cwd: string, place = "local"): Promise<void> {
-		const target = this.places.find((p) => p.id === place);
-		await this.create(cwd, target?.site?.isolated ? { site: place } : { place });
 	}
 
 	private upsert(summary: SessionSummary): void {

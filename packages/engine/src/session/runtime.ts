@@ -316,10 +316,13 @@ export class SessionRuntime {
 		});
 	}
 
-	cancel(): void {
-		this.queue = [];
+	/** Stop the turn. Messages still waiting to join it are handed back, never dropped. */
+	cancel(): string[] {
+		const waiting = this.queue.splice(0).map((m) => m.text);
 		this.abort?.abort(new Error("Cancelled by the person."));
 		this.deps.cancelChildren(this.id);
+		this.deps.notify("session.status", this.status());
+		return waiting;
 	}
 
 	/** Where the session stands, for a lead agent waiting on it. */

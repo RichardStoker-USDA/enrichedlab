@@ -28,7 +28,7 @@
 	let input: HTMLInputElement | undefined = $state();
 
 	const items = $derived.by(() => {
-		const list: Item[] = [{ id: "new", label: "New session", group: "Actions", run: () => lab.startNew() }];
+		const list: Item[] = [{ id: "new", label: "New Session", group: "Actions", run: () => lab.beginNew() }];
 		if (lab.current) {
 			list.push(
 				{ id: "bench", label: lab.workbench ? "Close the workbench" : "Open the workbench", shortcut: mac ? "⌘\\" : "Ctrl \\", group: "Actions", run: () => lab.toggleWorkbench() },

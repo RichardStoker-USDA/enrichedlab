@@ -37,7 +37,7 @@
 
 	/** The menu bar's commands (and the same shortcuts in a browser, below). */
 	function command(id: string) {
-		if (id === "new-session") (lab.newPlace = undefined), lab.startNew();
+		if (id === "new-session") lab.beginNew();
 		else if (id === "palette") lab.palette = !lab.palette;
 		else if (id === "settings") lab.settings = true;
 		else if (id === "services") lab.services = true;

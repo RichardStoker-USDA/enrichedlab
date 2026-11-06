@@ -138,11 +138,15 @@
 			for (const i of sent) URL.revokeObjectURL(i.url);
 		} catch (error) {
 			lab.say((error as Error).message);
-			// The message goes back into the session it was written for, attachments included.
+			// The message goes back into the session it was written for, attachments included, ahead of anything
+			// written there since.
 			if (sessionId === lab.current) {
-				text = value;
-				images = sent;
-			} else if (sessionId) saveDraft(sessionId, value, sent);
+				text = text.trim() ? `${value}\n\n${text}` : value;
+				images = [...sent, ...images];
+			} else if (sessionId) {
+				const kept = loadDraft(sessionId);
+				saveDraft(sessionId, kept?.text.trim() ? `${value}\n\n${kept.text}` : value, [...sent, ...(kept?.images ?? [])]);
+			}
 		}
 	}
 
@@ -156,19 +160,31 @@
 		}
 	}
 
+	/** Attach images to the session they were dropped on, even when the person has moved on before they're read. */
 	async function addFiles(files: Iterable<File>) {
+		const sessionId = lab.current;
 		for (const file of files) {
 			if (!file.type.startsWith("image/")) continue;
 			if (file.size > 12 * 1024 * 1024) {
 				lab.say(`${file.name} is larger than 12 MB.`);
 				continue;
 			}
-			const data = await new Promise<string>((resolve) => {
+			const data = await new Promise<string | undefined>((resolve) => {
 				const reader = new FileReader();
 				reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
+				reader.onerror = () => resolve(undefined);
 				reader.readAsDataURL(file);
 			});
-			images = [...images, { name: file.name, part: { type: "image", mime: file.type, data }, url: URL.createObjectURL(file) }];
+			if (data === undefined) {
+				lab.say(`${file.name} couldn't be read.`);
+				continue;
+			}
+			const image: Image = { name: file.name, part: { type: "image", mime: file.type, data }, url: URL.createObjectURL(file) };
+			if (sessionId === lab.current) images = [...images, image];
+			else if (sessionId) {
+				const kept = loadDraft(sessionId);
+				saveDraft(sessionId, kept?.text ?? "", [...(kept?.images ?? []), image]);
+			}
 		}
 		if (images.length && lab.model && !lab.model.vision) lab.say(`${lab.model.id} can't see images; choose a vision model.`);
 	}
