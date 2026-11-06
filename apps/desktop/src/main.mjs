@@ -438,6 +438,16 @@ function browserView(id) {
 		return { action: "deny" };
 	});
 	contents.on("will-navigate", (event, target) => !browsable(target) && event.preventDefault());
+	// Right-click in the page: the system's text and link items, then Back, Forward and Reload.
+	contents.on("context-menu", (_event, params) => {
+		const items = [];
+		if (params.linkURL && /^https?:/.test(params.linkURL)) items.push({ label: "Open Link Here", click: () => void contents.loadURL(params.linkURL) }, { label: "Open Link in Browser", click: () => shell.openExternal(params.linkURL) }, { label: "Copy Link", click: () => clipboard.writeText(params.linkURL) }, { type: "separator" });
+		if (params.isEditable) items.push({ role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" }, { type: "separator" });
+		else if (params.selectionText.trim()) items.push({ role: "copy" }, { type: "separator" });
+		const history = contents.navigationHistory;
+		items.push({ label: "Back", enabled: history.canGoBack(), click: () => history.goBack() }, { label: "Forward", enabled: history.canGoForward(), click: () => history.goForward() }, { label: "Reload", click: () => contents.reload() });
+		Menu.buildFromTemplate(items).popup({ window });
+	});
 	for (const name of ["did-navigate", "did-navigate-in-page", "page-title-updated", "did-start-loading", "did-stop-loading"]) contents.on(name, () => report(id, view));
 	views.set(id, view);
 	return view;

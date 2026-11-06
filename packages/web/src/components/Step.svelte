@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { contextMenu, type MenuAction } from "../lib/menu.svelte.ts";
 	import type { FileRef } from "@enrichedlab/protocol";
 	import { rpc } from "../lib/rpc.ts";
 	import type { SessionEvent } from "@enrichedlab/protocol";
@@ -23,6 +24,15 @@
 	const marks: Record<string, string> = { ok: "✓", failed: "✕", denied: "■", running: "●", waiting: "▲" };
 	const words: Record<string, string> = { ok: "done", failed: "failed", denied: "declined", running: "running", waiting: "waiting for you" };
 	const result = $derived(running ? (running.writing ? "writing" : running.waiting ? "waiting for you" : "running") : (event?.view?.result ?? words[kind]));
+	/** Right-click on a step: copy what it ran or touched, and its output, whole, however the line was cut. */
+	function stepActions(): MenuAction[] {
+		if (window.getSelection()?.toString().trim()) return [];
+		const entries: MenuAction[] = [];
+		if (view.target) entries.push({ label: "Copy Command or Path", run: () => lab.copy(view.target, "the command") });
+		const output = event?.view?.detail ?? event?.content;
+		if (output) entries.push({ label: "Copy Output", run: () => lab.copy(output, "the output") });
+		return entries;
+	}
 	const hasDetail = $derived(Boolean(event?.view?.diff || event?.view?.detail || (event && !event.ok && event.content)));
 	const diffLines = $derived(
 		(event?.view?.diff ?? "")
@@ -51,7 +61,7 @@
 	}
 </script>
 
-<div class="step" class:enter={!event || Date.parse(event.at) > lab.openedAt} class:live class:failed={kind === "failed"} class:waiting={kind === "waiting"} data-state={kind}>
+<div class="step" use:contextMenu={stepActions} class:enter={!event || Date.parse(event.at) > lab.openedAt} class:live class:failed={kind === "failed"} class:waiting={kind === "waiting"} data-state={kind}>
 	<button class="line" onclick={() => hasDetail && (open = !open)} aria-expanded={hasDetail ? open : undefined} disabled={!hasDetail}>
 		<span class="verb">{view.verb}</span>
 		<span class="target" title={view.target}>{view.target}</span>
