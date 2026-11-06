@@ -7,11 +7,23 @@ export interface Column {
 	name: string;
 	type: "number" | "text" | "boolean";
 	values: Cell[];
+	/**
+	 * Each number as the file wrote it, where the file had text: shown and exported as is, so "1.50" stays "1.50" and
+	 * an integer past 2^53 keeps its digits. `values` holds the number for sorting, filtering and plotting.
+	 */
+	text?: (string | null)[];
 }
 
 export interface Table {
 	columns: Column[];
 	rows: number;
+	/** What reading changed or couldn't keep, said in the pane. */
+	notes?: string[];
+}
+
+/** A cell as the file has it: the source text for numbers read from text, otherwise the value formatted. */
+export function cellText(column: Column, row: number): string {
+	return column.text?.[row] ?? formatCell(column.values[row] ?? null);
 }
 
 /** RFC 4180 fields: quotes, doubled quotes, separators and newlines inside quotes. */
@@ -49,14 +61,24 @@ export function parseDelimited(text: string, separator: string): string[][] {
 }
 
 const NUMBER = /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/;
+/** A leading zero before another digit ("007", "-01"): an identifier such as a plot or sample code, kept as text. */
+const IDENTIFIER = /^[-+]?0\d/;
 const MISSING = new Set(["", "NA", "NaN", "null", "NULL", "None", "nan", "N/A"]);
 
-/** Columns from rows of strings: numbers become numbers when every present value is one. */
+/**
+ * Columns from rows of strings: numbers become numbers when every present value is one (and none is an identifier
+ * with a leading zero), keeping their source text. A row with more fields than the header gets columns for them.
+ */
 function typed(header: string[], body: string[][]): Table {
-	const columns: Column[] = header.map((name, c) => {
+	const notes: string[] = [];
+	const width = body.reduce((most, r) => Math.max(most, r.length), header.length);
+	const longer = body.filter((r) => r.length > header.length).length;
+	if (longer) notes.push(`${longer.toLocaleString("en-US")} ${longer === 1 ? "row has" : "rows have"} more fields than the header; ${width - header.length === 1 ? `the extra field is column ${width}` : `the extra fields are columns ${header.length + 1} to ${width}`}.`);
+	const columns: Column[] = Array.from({ length: width }, (_, c) => {
+		const name = header[c] ?? "";
 		const raw = body.map((r) => r[c] ?? "");
 		const present = raw.filter((v) => !MISSING.has(v.trim()));
-		const numeric = present.length > 0 && present.every((v) => NUMBER.test(v.trim()));
+		const numeric = present.length > 0 && present.every((v) => NUMBER.test(v.trim()) && !IDENTIFIER.test(v.trim()));
 		const bool = !numeric && present.length > 0 && present.every((v) => /^(true|false|TRUE|FALSE)$/.test(v.trim()));
 		const values: Cell[] = raw.map((v) => {
 			const t = v.trim();
@@ -65,27 +87,35 @@ function typed(header: string[], body: string[][]): Table {
 			if (bool) return /^true$/i.test(t);
 			return v;
 		});
-		return { name: name || `column ${c + 1}`, type: numeric ? "number" : bool ? "boolean" : "text", values };
+		const column: Column = { name: name || `column ${c + 1}`, type: numeric ? "number" : bool ? "boolean" : "text", values };
+		if (numeric) column.text = raw.map((v) => (MISSING.has(v.trim()) ? null : v.trim()));
+		return column;
 	});
-	return { columns, rows: body.length };
+	return { columns, rows: body.length, ...(notes.length ? { notes } : {}) };
 }
 
 function fromRecords(records: Record<string, unknown>[]): Table {
 	const names: string[] = [];
 	const seen = new Set<string>();
-	for (const r of records.slice(0, 1000)) for (const k of Object.keys(r ?? {})) if (!seen.has(k)) seen.add(k), names.push(k);
+	// Every record: a field that first appears late is still a column.
+	for (const r of records) for (const k of Object.keys(r ?? {})) if (!seen.has(k)) seen.add(k), names.push(k);
 	const columns: Column[] = names.map((name) => {
-		const values = records.map((r) => {
+		let text: (string | null)[] | undefined;
+		const values = records.map((r, i) => {
 			const v = r?.[name];
 			if (v === undefined || v === null) return null;
 			if (typeof v === "number" || typeof v === "boolean" || typeof v === "string") return v;
-			if (typeof v === "bigint") return Number(v);
+			if (typeof v === "bigint") {
+				// Past 2^53 a number can't hold every digit: the digits are kept as text beside it.
+				if (v > BigInt(Number.MAX_SAFE_INTEGER) || v < BigInt(-Number.MAX_SAFE_INTEGER)) (text ??= new Array(records.length).fill(null))[i] = v.toString();
+				return Number(v);
+			}
 			if (v instanceof Date) return v.toISOString();
 			return JSON.stringify(v);
 		});
 		const present = values.filter((v) => v !== null);
 		const type = present.length && present.every((v) => typeof v === "number") ? "number" : present.length && present.every((v) => typeof v === "boolean") ? "boolean" : "text";
-		return { name, type, values } as Column;
+		return { name, type, values, ...(text && type === "number" ? { text } : {}) } as Column;
 	});
 	return { columns, rows: records.length };
 }
@@ -117,10 +147,14 @@ export interface Stats {
 	present: number;
 	missing: number;
 	distinct: number;
+	/** Counting stopped at DISTINCT_CAP: there are at least that many. */
+	distinctCapped: boolean;
 	min?: number;
 	max?: number;
 	mean?: number;
 }
+
+const DISTINCT_CAP = 100_000;
 
 export function stats(column: Column): Stats {
 	let present = 0;
@@ -131,7 +165,7 @@ export function stats(column: Column): Stats {
 	for (const v of column.values) {
 		if (v === null) continue;
 		present++;
-		if (distinct.size < 100_000) distinct.add(v);
+		if (distinct.size < DISTINCT_CAP) distinct.add(v);
 		if (typeof v === "number") {
 			sum += v;
 			if (v < min) min = v;
@@ -139,7 +173,7 @@ export function stats(column: Column): Stats {
 		}
 	}
 	const numeric = column.type === "number" && present > 0;
-	return { present, missing: column.values.length - present, distinct: distinct.size, ...(numeric ? { min, max, mean: sum / present } : {}) };
+	return { present, missing: column.values.length - present, distinct: distinct.size, distinctCapped: distinct.size >= DISTINCT_CAP, ...(numeric ? { min, max, mean: sum / present } : {}) };
 }
 
 /** A filter typed in a column's filter box: "> 5", "<= 2.5", "= x", "!= x", or text to search for. */
@@ -172,6 +206,7 @@ export function toCsv(table: Table, order: number[]): string {
 		return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 	};
 	const lines = [table.columns.map((c) => quote(c.name)).join(",")];
-	for (const r of order) lines.push(table.columns.map((c) => quote(c.values[r] ?? null)).join(","));
+	// Values as the file had them: an export of an unchanged table matches its source.
+	for (const r of order) lines.push(table.columns.map((c) => quote(c.values[r] === null || c.values[r] === undefined ? null : (c.text?.[r] ?? c.values[r]!))).join(","));
 	return `${lines.join("\n")}\n`;
 }

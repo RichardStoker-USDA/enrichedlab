@@ -2,7 +2,7 @@
 	import { lab } from "../../lib/store.svelte.ts";
 	import { rpc } from "../../lib/rpc.ts";
 	import { contextMenu, separator, type MenuAction } from "../../lib/menu.svelte.ts";
-	import { type Column, formatCell, matcher, readTable, stats, type Table, toCsv } from "../../lib/data.ts";
+	import { cellText as sourceText, type Column, formatCell, matcher, readTable, stats, type Table, toCsv } from "../../lib/data.ts";
 
 	let { id }: { id: string } = $props();
 	const view = $derived(lab.canvases.find((c) => c.id === id));
@@ -38,7 +38,7 @@
 		// Widths from the header and a sample of values, within readable bounds.
 		widths = table.columns.map((c) => {
 			let longest = c.name.length + 3;
-			for (let r = 0; r < Math.min(table!.rows, 200); r++) longest = Math.max(longest, formatCell(c.values[r] ?? null).length);
+			for (let r = 0; r < Math.min(table!.rows, 200); r++) longest = Math.max(longest, sourceText(c, r).length);
 			return Math.min(320, Math.max(72, longest * 7.4 + 24));
 		});
 		filters = {};
@@ -110,7 +110,7 @@
 		handle.addEventListener("pointerup", () => handle.removeEventListener("pointermove", move), { once: true });
 	}
 
-	const cellText = (row: number, col: number) => formatCell(table!.columns[col]!.values[row] ?? null);
+	const cellText = (row: number, col: number) => sourceText(table!.columns[col]!, row);
 
 	/** Bring a cell into view inside the scroller, below the sticky header and right of the row numbers. */
 	function reveal(index: number, col: number) {
@@ -235,6 +235,7 @@
 		<span class="count">
 			{#if table}
 				{order.length.toLocaleString()}{order.length < table.rows ? ` of ${table.rows.toLocaleString()}` : ""} rows · {table.columns.length} columns
+				{#if table.notes?.length}<span class="note" title={table.notes.join(" ")}>· {table.notes.join(" ")}</span>{/if}
 			{/if}
 		</span>
 		<div class="plot-menu">
@@ -282,7 +283,7 @@
 							{#each table.columns as col, c (c)}
 								<!-- svelte-ignore a11y_click_events_have_key_events -->
 								<div class="td" id={`cell-${id}-${r}-${c}`} class:num={col.type === "number"} class:null={col.values[r] === null} class:sel={selected?.row === r && selected.col === c} style:width={`${widths[c]}px`} role="gridcell" aria-selected={selected?.row === r && selected.col === c} tabindex="-1" onclick={() => ((selected = { row: r, col: c }), (focusCol = c), scroller?.focus({ preventScroll: true }))} use:contextMenu={() => cellActions(r, c)}>
-									{col.values[r] === null ? "—" : formatCell(col.values[r] ?? null)}
+									{col.values[r] === null ? "—" : sourceText(col, r)}
 								</div>
 							{/each}
 						</div>
@@ -297,7 +298,7 @@
 				<span>{focusStats.col.type}</span>
 				<span>{focusStats.s.present.toLocaleString()} present</span>
 				{#if focusStats.s.missing}<span>{focusStats.s.missing.toLocaleString()} missing</span>{/if}
-				<span>{focusStats.s.distinct.toLocaleString()} distinct</span>
+				<span>{focusStats.s.distinct.toLocaleString()}{focusStats.s.distinctCapped ? "+" : ""} distinct</span>
 				{#if focusStats.s.mean !== undefined}
 					<span>min {formatCell(focusStats.s.min!)}</span>
 					<span>mean {formatCell(focusStats.s.mean)}</span>
@@ -341,9 +342,15 @@
 	}
 	.count {
 		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
 		color: var(--text-faint);
 		font-variant-numeric: tabular-nums;
 		white-space: nowrap;
+	}
+	.note {
+		color: var(--text-muted);
 	}
 	.tools .btn {
 		height: 28px;

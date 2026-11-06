@@ -68,3 +68,24 @@ describe("data", () => {
 		expect(y.values.filter(matcher(y, "> 2")!)).toEqual([3.5]);
 	});
 });
+
+describe("tables keep the data as the file has it", () => {
+	test("identifiers, long integers, decimals and extra fields survive reading and export", async () => {
+		const { readTable, toCsv, cellText } = await import("../packages/web/src/lib/data.ts");
+		const csv = "plot,count,ratio\n00123,9007199254740993,1.50\n00124,2,0.25,extra\n";
+		const t = await readTable({ name: "data.csv", text: csv });
+		expect(t.columns.map((c) => [c.name, c.type])).toEqual([["plot", "text"], ["count", "number"], ["ratio", "number"], ["column 4", "text"]]);
+		expect(t.notes?.[0]).toContain("1 row has more fields than the header");
+		expect(cellText(t.columns[1]!, 0)).toBe("9007199254740993");
+		expect(cellText(t.columns[2]!, 0)).toBe("1.50");
+		expect(toCsv(t, [0, 1])).toBe("plot,count,ratio,column 4\n00123,9007199254740993,1.50,\n00124,2,0.25,extra\n");
+	});
+
+	test("a JSON field that first appears late is still a column", async () => {
+		const { readTable } = await import("../packages/web/src/lib/data.ts");
+		const records = Array.from({ length: 1500 }, (_, i) => (i === 1200 ? { a: i, late: "here" } : { a: i }));
+		const t = await readTable({ name: "data.json", text: JSON.stringify(records) });
+		expect(t.columns.map((c) => c.name)).toEqual(["a", "late"]);
+		expect(t.columns[1]!.values[1200]).toBe("here");
+	});
+});

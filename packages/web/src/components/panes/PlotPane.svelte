@@ -3,7 +3,7 @@
 	import { onDestroy } from "svelte";
 	import { lab } from "../../lib/store.svelte.ts";
 	import { rpc } from "../../lib/rpc.ts";
-	import { formatCell, readTable, type Table } from "../../lib/data.ts";
+	import { cellText, formatCell, readTable, type Table } from "../../lib/data.ts";
 	import { CATEGORY, createRenderer, hex, NearestIndex, ramp, type Renderer, ticks, type View } from "../../lib/plot.ts";
 
 	let { id, active }: { id: string; active: boolean } = $props();
@@ -21,8 +21,11 @@
 	let hover = $state<{ x: number; y: number; text: string } | undefined>();
 	let range: View = { x0: 0, x1: 1, y0: 0, y1: 1 };
 	let home: View = range;
-	let xs = new Float32Array();
-	let ys = new Float32Array();
+	// Measurements stay in double precision here (domains, hover, nearest point); only the GPU gets 32-bit floats,
+	// as offsets from `origin`, so values like 1700000000 and 1700000001 stay apart.
+	let xs = new Float64Array();
+	let ys = new Float64Array();
+	let origin = { x: 0, y: 0 };
 	let rows = $state.raw<number[]>([]);
 	let index: NearestIndex | undefined;
 	const pad = { left: 56, right: 16, top: 14, bottom: 36 };
@@ -63,8 +66,8 @@
 		if (!kept.length) throw new Error(`No rows have numbers in both ${spec.x} and ${spec.y}, so there is nothing to draw.`);
 		if (spec.type === "line") kept.sort((a, b) => (cx.values[a] as number) - (cx.values[b] as number));
 		rows = kept;
-		xs = Float32Array.from(rows, (r) => cx.values[r] as number);
-		ys = Float32Array.from(rows, (r) => cy.values[r] as number);
+		xs = Float64Array.from(rows, (r) => cx.values[r] as number);
+		ys = Float64Array.from(rows, (r) => cy.values[r] as number);
 		const color = new Float32Array(rows.length * 4);
 		const alpha = rows.length > 200_000 ? 0.45 : rows.length > 20_000 ? 0.7 : 0.9;
 		const accent = hex(CATEGORY[0]!);
@@ -112,7 +115,8 @@
 		const my = (y1 - y0 || 1) * 0.06;
 		home = range = { x0: x0 - mx, x1: x1 + mx, y0: y0 - my, y1: y1 + my };
 		index = new NearestIndex(xs, ys, home);
-		renderer!.setData({ x: xs, y: ys, color, line: spec.type === "line" });
+		origin = { x: (x0 + x1) / 2, y: (y0 + y1) / 2 };
+		renderer!.setData({ x: Float32Array.from(xs, (v) => v - origin.x), y: Float32Array.from(ys, (v) => v - origin.y), color, line: spec.type === "line" });
 	}
 
 	function layout() {
@@ -133,7 +137,7 @@
 		cancelAnimationFrame(frame);
 		frame = requestAnimationFrame(() => {
 			if (!renderer || !overlay || !box) return;
-			renderer.draw(range, rows.length > 100_000 ? 2 : rows.length > 10_000 ? 3 : 4.5);
+			renderer.draw({ x0: range.x0 - origin.x, x1: range.x1 - origin.x, y0: range.y0 - origin.y, y1: range.y1 - origin.y }, rows.length > 100_000 ? 2 : rows.length > 10_000 ? 3 : 4.5);
 			axes();
 		});
 	}
@@ -218,8 +222,14 @@
 		if (i === undefined || !table) return void (hover = undefined);
 		const row = rows[i]!;
 		const spec = view!.plot!;
-		const parts = [`${spec.x} ${formatCell(xs[i]!)}`, `${spec.y} ${formatCell(ys[i]!)}`];
-		if (spec.color) parts.push(`${spec.color} ${formatCell(table.columns.find((c) => c.name === spec.color)?.values[row] ?? null)}`);
+		// From the row itself, as the file wrote it.
+		const named = (name: string) => table!.columns.find((c) => c.name === name);
+		const shown = (name: string) => {
+			const c = named(name);
+			return c ? cellText(c, row) : "";
+		};
+		const parts = [`${spec.x} ${shown(spec.x)}`, `${spec.y} ${shown(spec.y)}`];
+		if (spec.color) parts.push(`${spec.color} ${shown(spec.color)}`);
 		hover = { x: e.clientX - r.left + pad.left + 12, y: e.clientY - r.top + pad.top - 8, text: `row ${row + 1} · ${parts.join(" · ")}` };
 	}
 

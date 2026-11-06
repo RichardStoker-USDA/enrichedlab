@@ -239,8 +239,8 @@ export class NearestIndex {
 	private ch: number;
 
 	constructor(
-		private x: Float32Array,
-		private y: Float32Array,
+		private x: ArrayLike<number>,
+		private y: ArrayLike<number>,
 		view: View,
 	) {
 		this.cw = (view.x1 - view.x0) / 64 || 1;
