@@ -2,7 +2,7 @@
 	// A new session, as one composer: say what to do, then where (the project folder and the place its commands run)
 	// and with which model, in one row under the text. Everything has a sensible default, so Enter starts.
 	import { lab } from "../lib/store.svelte.ts";
-	import { mac, SANDBOX_NOTE } from "../lib/places.ts";
+	import { allowedModels, mac, SANDBOX_NOTE } from "../lib/places.ts";
 	import { folderName, shortPath, tokens } from "../lib/format.ts";
 	import { separator, showMenu, type MenuAction } from "../lib/menu.svelte.ts";
 
@@ -21,8 +21,13 @@
 	$effect(() => {
 		if (!folder && recent[0]) folder = recent[0];
 	});
+	// New Session chosen again (menu, ⌘N, the sidebar): start the form over, on the place it names.
 	$effect(() => {
-		if (lab.newPlace) place = lab.newPlace;
+		void lab.startCount;
+		place = lab.newPlace ?? "local";
+		model = undefined;
+		task = "";
+		worktree = false;
 	});
 	$effect(() => {
 		field?.focus({ preventScroll: true });
@@ -30,7 +35,10 @@
 
 	const chosen = $derived(lab.places.find((p) => p.id === place) ?? lab.places[0]!);
 	const isolated = $derived(Boolean(chosen?.site?.isolated));
-	const chosenModel = $derived(lab.models.find((m) => m.ref === model));
+	// The models a session there may use; a model chosen for another place is dropped when the place changes.
+	const offered = $derived(allowedModels(lab.models, lab.sites, isolated ? place : undefined));
+	const chosenModel = $derived(offered.find((m) => m.ref === model));
+	const fallback = $derived(offered.find((m) => m.ref === lab.defaultModel) ?? offered.find((m) => m.source === "site") ?? offered[0]);
 	const named = (m: { id: string; label: string }) => m.label.split(" · ")[0] || m.id;
 
 	async function pickFolder() {
@@ -50,9 +58,9 @@
 	function modelMenu(): MenuAction[] {
 		const labTitle = (provider: string) => lab.sites.find((s) => s.name === provider)?.title ?? provider;
 		const sections: [string, typeof lab.models][] = [];
-		for (const provider of new Set(lab.models.filter((m) => m.source === "site").map((m) => m.provider))) sections.push([`From ${labTitle(provider)}`, lab.models.filter((m) => m.source === "site" && m.provider === provider)]);
-		sections.push(["Your plans and keys", lab.models.filter((m) => m.source === "config")], ["On this computer", lab.models.filter((m) => m.source === "local")]);
-		const entries: MenuAction[] = [{ label: "Default model", checked: !model, run: () => (model = undefined) }];
+		for (const provider of new Set(offered.filter((m) => m.source === "site").map((m) => m.provider))) sections.push([`From ${labTitle(provider)}`, offered.filter((m) => m.source === "site" && m.provider === provider)]);
+		sections.push(["Your plans and keys", offered.filter((m) => m.source === "config")], ["On this computer", offered.filter((m) => m.source === "local")]);
+		const entries: MenuAction[] = [{ label: fallback ? `Default (${named(fallback)})` : "Default model", checked: !model, run: () => (model = undefined) }];
 		for (const [label, models] of sections) {
 			if (!models.length) continue;
 			entries.push(separator, { label, disabled: true });
@@ -68,7 +76,7 @@
 		starting = true;
 		lab.newPlace = undefined;
 		// A lab that keeps data in place binds the session to it; other labs take the session (and its repository) along.
-		const id = await lab.create(folder.trim(), isolated ? { site: place, worktree, model } : { place, worktree, model });
+		const id = await lab.create(folder.trim(), isolated ? { site: place, worktree, model: chosenModel?.ref } : { place, worktree, model: chosenModel?.ref });
 		if (id && task.trim()) await lab.send(task.trim());
 		starting = false;
 	}
@@ -97,7 +105,7 @@
 </header>
 
 <form class="start" onsubmit={start}>
-	<h1>What should we work on?</h1>
+	<h1>New Session</h1>
 
 	<div class="card">
 		<label class="visually-hidden" for="task-field">Task</label>
@@ -109,12 +117,13 @@
 			{:else}
 				<button type="button" class="chip" onclick={(e) => (recent.length || !window.labDesktop ? showMenu(folderMenu(), e.currentTarget as HTMLElement) : pickFolder())} title={folder || "Choose the project folder"}>
 					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5A1.5 1.5 0 0 1 4 3h2.6l1.4 1.5h4A1.5 1.5 0 0 1 13.5 6v5.5A1.5 1.5 0 0 1 12 13H4a1.5 1.5 0 0 1-1.5-1.5Z" /></svg>
-					<span class="label">{folder ? folderName(folder) : "Choose a folder"}</span>
+					<span class="label"><span class="what">Project</span> {folder ? folderName(folder) : "Choose a folder"}</span>
 					<svg class="caret" viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4.5 3 3 3-3" /></svg>
 				</button>
 			{/if}
 
-			<div class="segmented places" role="radiogroup" aria-label="Runs on">
+			<span class="what runs" aria-hidden="true">Runs on</span>
+			<div class="segmented places" role="radiogroup" aria-label="Files and commands run on">
 				{#each lab.places as p (p.id)}
 					<button type="button" role="radio" aria-checked={place === p.id} class:on={place === p.id} disabled={!p.ready} onclick={() => (place = p.id)} title={p.ready ? "" : p.site?.signedIn ? `${p.title} has no sandbox for you yet` : `Sign in to ${p.title} first`}>
 						<span class="place-dot" class:local={p.id === "local"} style:--dot={`var(${p.color})`}></span>
@@ -125,7 +134,7 @@
 
 			<button type="button" class="chip" onclick={(e) => showMenu(modelMenu(), e.currentTarget as HTMLElement)} title="Choose the model">
 				<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="2.5" /><path d="M6 6.5h4M6 9.5h2.5" /></svg>
-				<span class="label">{chosenModel ? named(chosenModel) : "Default model"}</span>
+				<span class="label"><span class="what">Model</span> {chosenModel ? named(chosenModel) : fallback ? named(fallback) : "None yet"}</span>
 				<svg class="caret" viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4.5 3 3 3-3" /></svg>
 			</button>
 
@@ -251,6 +260,14 @@
 	.chip svg.caret {
 		width: 11px;
 		height: 11px;
+	}
+	.what {
+		color: var(--text-muted);
+		font-weight: 400;
+	}
+	.what.runs {
+		margin-left: 4px;
+		font-size: 12px;
 	}
 	.label {
 		overflow: hidden;

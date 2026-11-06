@@ -1,7 +1,7 @@
 // Places: where a session's files and commands act. This computer, or a lab's sandbox. Each place has a name people
 // read and a marker color (docs/design.md, Places); the color never stands alone.
 
-import type { SiteSummary } from "@enrichedlab/protocol";
+import type { ModelInfo, SiteSummary } from "@enrichedlab/protocol";
 
 export interface Place {
 	id: string;
@@ -53,4 +53,14 @@ export function placeOf(list: Place[], id: string | undefined): Place {
 /** "Runs on This Mac", "Runs in the <lab> sandbox". */
 export function runsOn(place: Place): string {
 	return place.id === "local" ? `Runs on ${place.title}` : `Runs in the ${place.title} sandbox`;
+}
+
+/**
+ * The models a session may use, as the engine decides (sites.ts `allows`): a session bound to a lab that keeps its
+ * data inside uses that lab's models only; other sessions use any model except those labs'.
+ */
+export function allowedModels(models: ModelInfo[], sites: SiteSummary[], site?: string): ModelInfo[] {
+	const isolated = (name: string) => sites.some((s) => s.name === name && s.isolated);
+	if (site && isolated(site)) return models.filter((m) => m.source === "site" && m.provider === site);
+	return models.filter((m) => m.source !== "site" || (site ? m.provider === site : !isolated(m.provider)));
 }

@@ -45,6 +45,8 @@ class Lab {
 	/** Lab apps being installed, by "site/name". */
 	installing = $state(new Set<string>());
 	models = $state<ModelInfo[]>([]);
+	/** The model a new session gets when none is chosen. */
+	defaultModel = $state<string | undefined>();
 	ui = $state<UiPrefs>({ theme: "auto", showReasoning: true });
 	current = $state<string | undefined>();
 	summary = $state<SessionSummary | undefined>();
@@ -73,7 +75,7 @@ class Lab {
 	/** The sidebar, hidden with View > Toggle Sidebar on a wide window. */
 	sidebar = $state(true);
 	/** A question that needs a yes before something that can't be undone. */
-	confirming = $state<{ title: string; detail: string; action: string; run: () => unknown } | undefined>();
+	confirming = $state<{ title: string; detail: string; action: string; tone?: "danger" | "plain"; run: () => unknown } | undefined>();
 	/** The place the new-session screen starts on (the rail's "New session in <place>"). */
 	newPlace = $state<string | undefined>();
 	/** A session whose title is being edited in place, from the rail or the header. */
@@ -148,6 +150,7 @@ class Lab {
 		this.apps = apps;
 		this.ui = ui;
 		this.models = models.models;
+		this.defaultModel = models.default;
 		if (this.current) await this.open(this.current);
 	}
 
@@ -171,8 +174,12 @@ class Lab {
 		location.hash = `#/s/${id}`;
 	}
 
+	/** Bumped each time New Session is chosen, so the new-session screen starts over even when it's already showing. */
+	startCount = $state(0);
+
 	/** The new-session screen. */
 	startNew(): void {
+		this.startCount++;
 		location.hash = "#/new";
 	}
 
@@ -528,7 +535,7 @@ class Lab {
 	async reconnect(name?: string): Promise<void> {
 		try {
 			this.sites = await rpc.call("site.refresh", name ? { name } : {});
-			this.models = (await rpc.call("model.list", { refresh: true })).models;
+			({ models: this.models, default: this.defaultModel } = await rpc.call("model.list", { refresh: true }));
 		} catch (error) {
 			this.say((error as Error).message);
 		}
@@ -547,7 +554,7 @@ class Lab {
 	}
 
 	async refreshModels(): Promise<void> {
-		this.models = (await rpc.call("model.list", { refresh: true })).models;
+		({ models: this.models, default: this.defaultModel } = await rpc.call("model.list", { refresh: true }));
 		this.sites = await rpc.call("site.list", {});
 	}
 
@@ -626,7 +633,7 @@ class Lab {
 			this.sites = before ? this.sites.map((s) => (s.name === site.name ? site : s)) : [...this.sites, site];
 			// A lab that signed in, out, or changed what it grants changes which models are offered.
 			if (!before || before.signedIn !== site.signedIn || before.models !== site.models) {
-				void rpc.call("model.list", {}).then((r) => (this.models = r.models), () => undefined);
+				void rpc.call("model.list", {}).then((r) => ((this.models = r.models), (this.defaultModel = r.default)), () => undefined);
 			}
 		});
 		rpc.on("lab.notice", (notice) => this.say(notice.text, notice.url));

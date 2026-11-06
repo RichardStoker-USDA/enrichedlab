@@ -28,6 +28,7 @@
 	import { lab, USAGE_URL } from "../lib/store.svelte.ts";
 	import { tokens } from "../lib/format.ts";
 	import PlaceSwitch from "./PlaceSwitch.svelte";
+	import { allowedModels } from "../lib/places.ts";
 
 	type Image = { name: string; part: Extract<Part, { type: "image" }>; url: string };
 	let text = $state("");
@@ -51,13 +52,15 @@
 
 	const groups = $derived.by(() => {
 		const plan = (m: { provider: string }) => m.provider === "chatgpt";
+		// Only the models this session may use: a lab that keeps its data inside lends its models to its own sessions.
+		const offered = allowedModels(lab.models, lab.sites, lab.summary?.site);
 		const labTitle = (provider: string) => lab.sites.find((s) => s.name === provider)?.title ?? provider;
-		const labs = [...new Set(lab.models.filter((m) => m.source === "site").map((m) => m.provider))];
+		const labs = [...new Set(offered.filter((m) => m.source === "site").map((m) => m.provider))];
 		return [
-			...labs.map((provider) => ({ label: `From ${labTitle(provider)}`, models: lab.models.filter((m) => m.source === "site" && m.provider === provider) })),
-			{ label: "Your ChatGPT plan", models: lab.models.filter((m) => m.source === "config" && plan(m)) },
-			{ label: "Your keys", models: lab.models.filter((m) => m.source === "config" && !plan(m)) },
-			{ label: "On this computer", models: lab.models.filter((m) => m.source === "local") },
+			...labs.map((provider) => ({ label: `From ${labTitle(provider)}`, models: offered.filter((m) => m.source === "site" && m.provider === provider) })),
+			{ label: "Your ChatGPT plan", models: offered.filter((m) => m.source === "config" && plan(m)) },
+			{ label: "Your keys", models: offered.filter((m) => m.source === "config" && !plan(m)) },
+			{ label: "On this computer", models: offered.filter((m) => m.source === "local") },
 		].filter((g) => g.models.length);
 	});
 	/** OpenAI asks apps to say when requests use the person's ChatGPT plan, with a way to manage it. */

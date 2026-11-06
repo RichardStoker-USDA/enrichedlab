@@ -558,8 +558,17 @@ export class Engine {
 					return { engine: VERSION, protocol: PROTOCOL_VERSION, home: this.paths.home, pid: process.pid };
 				case "session.list":
 					return this.listSessions(p.cwd as string | undefined, (p.limit as number | undefined) ?? 50);
-				case "session.create":
-					return this.createSession(need("cwd"), p.model as string | undefined, p.site as string | undefined, undefined, p.worktree === true).summary();
+				case "session.create": {
+					// A model the person asked for by name is used or refused, never quietly swapped for another.
+					const model = typeof p.model === "string" && p.model ? p.model : undefined;
+					const site = p.site as string | undefined;
+					if (model) {
+						const asked = this.registry.resolve(model);
+						if (!asked) throw new RpcError(-32602, `${model} isn't offered now. Choose another model.`);
+						if (!this.sites.allows(asked, site)) throw new RpcError(-32602, `${model} can't be used in ${site ? `a ${this.sites.title(site)} session` : "a session on this computer"}.`);
+					}
+					return this.createSession(need("cwd"), model, site, undefined, p.worktree === true).summary();
+				}
 				case "session.open": {
 					const id = need("sessionId");
 					const snap = this.session(id).snapshot();
@@ -791,6 +800,10 @@ export class Engine {
 				case "term.close":
 					this.terminals.close(need("termId"));
 					return { ok: true };
+				case "session.moveplan": {
+					const runtime = this.session(need("sessionId"));
+					return { repo: runtime.place === "local" ? repoRoot(runtime.cwd) : undefined };
+				}
 				case "session.place": {
 					const runtime = this.session(need("sessionId"));
 					const detail = await this.movePlace(runtime, need("place"), p.carry !== false);

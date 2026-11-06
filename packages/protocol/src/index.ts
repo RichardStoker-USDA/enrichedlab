@@ -545,6 +545,8 @@ export interface Requests {
 	"term.close": { params: { termId: string }; result: { ok: true } };
 	/** Remove a session and its log; refused while it runs. */
 	"session.delete": { params: { sessionId: string }; result: { ok: true } };
+	/** What moving the session would carry: whether its folder is a git repository (whose work, uncommitted too, goes along). */
+	"session.moveplan": { params: { sessionId: string }; result: { repo?: string } };
 	/** The session in the shared log format v1 (docs/session-log.md), with the bytes of the images it refers to. */
 	"session.export": { params: { sessionId: string }; result: { events: LogV1Event[]; attachments: Record<string, { mime: string; data: string }> } };
 	/** A new session from a v1 log: its context rebuilt as the format says. `cwd` overrides the folder it names. */

@@ -33,7 +33,7 @@
 		<p id="confirm-detail">{lab.confirming.detail}</p>
 		<div class="sheet-foot">
 			<button class="btn" bind:this={cancel} onclick={() => (lab.confirming = undefined)} disabled={working}>Cancel</button>
-			<button class="btn danger" onclick={go} disabled={working}>{working ? `${lab.confirming.action}…` : lab.confirming.action}</button>
+			<button class="btn" class:danger={lab.confirming.tone !== "plain"} class:primary={lab.confirming.tone === "plain"} onclick={go} disabled={working}>{working ? `${lab.confirming.action}…` : lab.confirming.action}</button>
 		</div>
 	{/if}
 </dialog>

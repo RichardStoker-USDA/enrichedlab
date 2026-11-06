@@ -3,28 +3,73 @@
 	// the composer because the two together answer "how will the next thing be done". A move carries the session's
 	// repository and happens between turns.
 	import { lab } from "../lib/store.svelte.ts";
-	import { SANDBOX_NOTE } from "../lib/places.ts";
+	import { tick } from "svelte";
+	import { computerName, SANDBOX_NOTE } from "../lib/places.ts";
+	import { rpc } from "../lib/rpc.ts";
 
 	let open = $state(false);
 	let root: HTMLDivElement | undefined = $state();
+	let chip: HTMLButtonElement | undefined = $state();
 
-	function choose(id: string) {
+	async function toggle() {
+		open = !open;
+		if (!open) return;
+		await tick();
+		root?.querySelector<HTMLButtonElement>(".menu-item[aria-checked='true'], .menu-item:not(:disabled)")?.focus();
+	}
+
+	function close(refocus = true) {
 		open = false;
-		if (id !== lab.place.id) void lab.movePlace(id);
+		if (refocus) chip?.focus();
+	}
+
+	/** Moving is a transfer, so it's reviewed first: what goes along, where it runs, and how work comes back. */
+	async function choose(id: string) {
+		close();
+		const target = lab.places.find((p) => p.id === id);
+		if (!target || id === lab.place.id) return;
+		if (target.site && !target.site.signedIn) return void lab.login(id);
+		const from = lab.place;
+		let detail: string;
+		if (id === "local") {
+			detail = from.site
+				? `Files and commands act in ${lab.summary?.cwd ?? "the project folder"} again. New commits from the ${from.title} sandbox come back as a branch for you to merge; changes it didn't commit stay there.`
+				: "Files and commands act on this computer again.";
+		} else {
+			const plan = lab.current ? await rpc.call("session.moveplan", { sessionId: lab.current }).catch(() => ({ repo: undefined })) : { repo: undefined };
+			detail = plan.repo
+				? `The git repository at ${plan.repo} goes along, uncommitted changes included (files that look like secrets stay here). The session then runs on Linux in the ${target.title} sandbox, with no network. Moving back brings its new commits home as a branch.`
+				: `This folder isn't a git repository, so its files stay here and the ${target.title} sandbox starts empty. Make it a repository first to take the files along.`;
+		}
+		lab.confirming = { title: id === "local" ? `Move back to ${target.title}?` : `Move this session to the ${target.title} sandbox?`, detail, action: "Move", tone: "plain", run: () => lab.movePlace(id) };
+	}
+
+	function keys(e: KeyboardEvent) {
+		if (!open || !root) return;
+		if (e.key === "Escape") {
+			e.preventDefault();
+			close();
+			return;
+		}
+		if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+		const items = [...root.querySelectorAll<HTMLButtonElement>(".menu-item:not(:disabled)")];
+		const at = items.indexOf(document.activeElement as HTMLButtonElement);
+		e.preventDefault();
+		items[(at + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
 	}
 
 	function outside(e: PointerEvent) {
-		if (open && root && !root.contains(e.target as Node)) open = false;
+		if (open && root && !root.contains(e.target as Node)) close(false);
 	}
 
 	const site = $derived(lab.summary?.site ? lab.sites.find((s) => s.name === lab.summary!.site) : undefined);
 	const movingTo = $derived(lab.moving ? (lab.places.find((p) => p.id === lab.moving)?.title ?? lab.moving) : "");
 </script>
 
-<svelte:window onpointerdown={outside} onkeydown={(e) => e.key === "Escape" && (open = false)} />
+<svelte:window onpointerdown={outside} />
 
-<div class="switch" bind:this={root}>
-	<button type="button" class="chip" onclick={() => (open = !open)} aria-haspopup="menu" aria-expanded={open} disabled={Boolean(lab.moving)} title="Where this session's files and commands run">
+<div class="switch" bind:this={root} onkeydown={keys} role="none">
+	<button type="button" class="chip" bind:this={chip} onclick={toggle} aria-haspopup="menu" aria-expanded={open} disabled={Boolean(lab.moving)} title="Where this session's files and commands run">
 		<span class="place-dot" class:local={lab.place.id === "local"} style:--dot={`var(${lab.place.color})`}></span>
 		<span class="label">{lab.moving ? `Moving to ${movingTo}…` : lab.place.id === "local" ? lab.place.title : `${lab.place.title} sandbox`}</span>
 		<svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 7.5 3-3 3 3" /></svg>
@@ -36,7 +81,9 @@
 			{:else}
 				<p class="menu-label">Run files and commands on</p>
 				{#each lab.places as place (place.id)}
-					{@const unavailable = !place.ready || Boolean(place.site?.isolated) || lab.busy}
+					{@const needsSignIn = Boolean(place.site && !place.site.signedIn)}
+					{@const labToLab = place.id !== "local" && lab.place.id !== "local" && place.id !== lab.place.id}
+					{@const unavailable = (!place.ready && !needsSignIn) || Boolean(place.site?.isolated) || lab.busy || labToLab}
 					<button type="button" class="menu-item" role="menuitemradio" aria-checked={place.id === lab.place.id} disabled={unavailable && place.id !== lab.place.id} onclick={() => choose(place.id)}>
 						<span class="check" aria-hidden="true">{place.id === lab.place.id ? "✓" : ""}</span>
 						<span>
@@ -46,8 +93,10 @@
 									Your files, with the operating system's containment
 								{:else if place.site?.isolated}
 									Start a new {place.title} session to work there
-								{:else if !place.site?.signedIn}
-									Sign in to {place.title} first
+								{:else if needsSignIn}
+									Not signed in: choose to sign in
+								{:else if labToLab}
+									Move back to {computerName()} first; the work comes home as a branch
 								{:else if !place.ready}
 									{place.title} has no sandbox for you yet
 								{:else if lab.busy}
@@ -60,7 +109,7 @@
 						<span></span>
 					</button>
 				{/each}
-				<p class="foot">The model is a separate choice: any of your models can work in any place.</p>
+				<p class="foot">The model is chosen beside this and stays the same when the session moves.</p>
 			{/if}
 		</div>
 	{/if}
@@ -106,6 +155,8 @@
 		left: -4px;
 		bottom: calc(100% + 10px);
 		width: min(340px, 86vw);
+		max-height: min(60vh, 420px);
+		overflow-y: auto;
 		transform-origin: bottom left;
 	}
 	.line {
