@@ -114,7 +114,7 @@
 				<button class="back" onclick={() => lab.go(lab.summary!.parent!)}>Subagent of the lead session</button>
 			{:else}
 				<span class="place-dot" class:local={lab.place.id === "local"} style:--dot={`var(${lab.place.color})`}></span>
-				<span>{lab.place.id === "local" ? lab.place.title : `${lab.place.title} sandbox`}</span>
+				<span>{lab.place.id === "local" ? lab.place.title : lab.place.missing ? `${lab.place.title} (not one of your labs now)` : `${lab.place.title} sandbox`}</span>
 				<span class="sep">·</span>
 				<span class="folder" title={lab.summary?.cwd}>{project}{branch ? ` · ${branch}` : ""}</span>
 			{/if}

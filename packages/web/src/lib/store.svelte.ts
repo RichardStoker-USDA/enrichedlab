@@ -261,6 +261,9 @@ class Lab {
 
 	private leave(): void {
 		if (this.current) void rpc.call("session.close", { sessionId: this.current }).catch(() => undefined);
+		// A slow open still on its way must not bring back the session the person just left.
+		this.openGeneration++;
+		this.opening = undefined;
 		this.current = undefined;
 		this.summary = undefined;
 		this.events = [];
@@ -352,6 +355,13 @@ class Lab {
 	/** Open a pane (or bring it forward) and show the workbench. */
 	openPane(kind: PaneKind, ref?: string, title?: string): string {
 		const view = ref ? this.canvases.find((c) => c.id === ref) : undefined;
+		// A session drives one sandbox browser page: a pane for another lab's browser replaces the one open.
+		if (kind === "screen") {
+			const other = groups(this.layout)
+				.flatMap((g) => g.tabs)
+				.find((t) => t.kind === "screen" && t.ref !== ref);
+			if (other) this.setLayout(closeTab(this.layout, other.id));
+		}
 		// Files, and each lab's sandbox browser, are one pane each: opening again brings it forward.
 		const openFiles = (kind === "files" && !ref) || kind === "screen" ? groups(this.layout).flatMap((g) => g.tabs).find((t) => t.kind === kind && (kind === "files" || t.ref === ref)) : undefined;
 		if (openFiles) {
@@ -492,9 +502,12 @@ class Lab {
 	}
 
 	async openFile(path: string): Promise<void> {
-		if (!this.current) return;
+		const sessionId = this.current;
+		if (!sessionId) return;
 		try {
-			const view = await rpc.call("view.open", { sessionId: this.current, path });
+			const view = await rpc.call("view.open", { sessionId, path });
+			// Opened for a session the person has since left: it's in that session's views when they go back.
+			if (this.current !== sessionId) return;
 			this.upsertView(view);
 			this.showView(view.id);
 		} catch (error) {
@@ -564,8 +577,12 @@ class Lab {
 
 	async undo(): Promise<void> {
 		if (!this.current) return;
-		const result = await rpc.call("session.undo", { sessionId: this.current });
-		this.say(result.detail);
+		try {
+			const result = await rpc.call("session.undo", { sessionId: this.current });
+			this.say(result.detail);
+		} catch (error) {
+			this.say(`Undo didn't work: ${(error as Error).message}`);
+		}
 	}
 
 	/** Text a send couldn't deliver, for the composer of the session it was written for to show again. */
@@ -634,9 +651,11 @@ class Lab {
 	}
 
 	async setModel(model?: string, effort?: string): Promise<void> {
-		if (!this.current) return;
+		const sessionId = this.current;
+		if (!sessionId) return;
 		try {
-			this.status = await rpc.call("session.model", { sessionId: this.current, model, effort });
+			const status = await rpc.call("session.model", { sessionId, model, effort });
+			if (this.current === sessionId) this.status = status;
 		} catch (error) {
 			this.say((error as Error).message);
 		}
@@ -644,8 +663,12 @@ class Lab {
 
 	async compact(): Promise<void> {
 		if (!this.current) return;
-		const result = await rpc.call("session.compact", { sessionId: this.current });
-		this.say(result.detail);
+		try {
+			const result = await rpc.call("session.compact", { sessionId: this.current });
+			this.say(result.detail);
+		} catch (error) {
+			this.say(`Summarizing didn't work: ${(error as Error).message}`);
+		}
 	}
 
 	/** Rename a session; false (with the reason said) when it didn't save. */

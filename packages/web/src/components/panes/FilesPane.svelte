@@ -14,9 +14,13 @@
 	let preview = $state<{ path: string; html?: string; text?: string; note?: string } | undefined>();
 
 	async function load(path: string) {
-		if (!lab.current) return;
+		const sessionId = lab.current;
+		const place = lab.place.id;
+		if (!sessionId) return;
 		try {
-			const listed = await rpc.call("fs.list", { sessionId: lab.current, path });
+			const listed = await rpc.call("fs.list", { sessionId, path });
+			// A listing for another session, or from before a move, is dropped.
+			if (lab.current !== sessionId || lab.place.id !== place) return;
 			listings[path] = listed.entries;
 			root = listed.root;
 			error = "";

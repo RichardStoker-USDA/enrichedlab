@@ -832,8 +832,15 @@ export class Engine {
 				case "site.add": {
 					const url = new URL(need("url"));
 					if (url.protocol !== "https:") throw new RpcError(-32602, "A site's address must start with https://.");
-					const name = need("name");
-					if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(name)) throw new RpcError(-32602, "A lab's short name uses lowercase letters, digits and dashes.");
+					const wanted = need("name");
+					if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(wanted)) throw new RpcError(-32602, "A lab's short name uses lowercase letters, digits and dashes.");
+					// The same address again is the same lab: its sign-in resumes. A different lab never takes an existing
+					// lab's name (that would drop its sign-in): it gets the next free one.
+					const known = this.sites.configs();
+					const same = known.find((c) => c.url === url.origin);
+					if (same) return this.sites.connect(same.name);
+					let name = wanted;
+					for (let n = 2; known.some((c) => c.name === name); n++) name = `${wanted}-${n}`;
 					this.sites.add({ name, url: url.origin, kind: "gate", title: typeof p.title === "string" ? p.title.slice(0, 40) : undefined, isolated: p.isolated === true || undefined });
 					return this.sites.connect(name);
 				}
@@ -893,7 +900,11 @@ export class Engine {
 					// The person can start the session's sandbox browser from the window; the agent then keeps using it.
 					const id = need("sessionId");
 					const site = typeof p.site === "string" ? p.site : undefined;
-					const page = this.browsers.current(id) ?? (site && this.sites.sandbox(site)?.browser?.() ? await this.browsers.page(id, site) : undefined);
+					// A session drives one sandbox page. Asked for another lab's, it opens there (closing the old one) rather
+					// than steering the page the session has elsewhere.
+					const current = this.browsers.current(id);
+					let page = current && (!site || current.site === site) ? current : undefined;
+					if (!page && site && this.sites.sandbox(site)?.browser?.()) page = await this.browsers.page(id, site);
 					if (!page) throw new RpcError(-32602, "No sandbox browser page is open in this session.");
 					if (site) this.browsers.remember(id, "sandbox", page.site);
 					const step = p.step === "back" || p.step === "forward" || p.step === "reload" ? p.step : undefined;

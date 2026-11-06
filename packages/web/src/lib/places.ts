@@ -14,6 +14,8 @@ export interface Place {
 	/** Can sessions work there now? */
 	ready: boolean;
 	site?: SiteSummary;
+	/** A lab a session still names that isn't among this person's labs now (removed, or renamed elsewhere). */
+	missing?: boolean;
 }
 
 const platform = typeof navigator === "undefined" ? "" : ((navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform);
@@ -46,8 +48,14 @@ export function places(sites: SiteSummary[]): Place[] {
 	return [local, ...labs];
 }
 
+/**
+ * The place a session names. A lab that's no longer listed stays itself, marked missing: a session that ran there
+ * never reads as running on this computer.
+ */
 export function placeOf(list: Place[], id: string | undefined): Place {
-	return list.find((p) => p.id === (id ?? "local")) ?? list[0]!;
+	const found = list.find((p) => p.id === (id ?? "local"));
+	if (found) return found;
+	return { id: id!, title: id!, detail: "not connected", color: "--place-local", ready: false, missing: true };
 }
 
 /** "Runs on This Mac", "Runs in the <lab> sandbox". */

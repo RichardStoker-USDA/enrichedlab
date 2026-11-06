@@ -42,10 +42,15 @@
 		failed = false;
 		message = "Adding the lab…";
 		try {
-			const id = name.trim() || slug(title || host.split(".")[0] || "lab");
-			await rpc.call("site.add", { name: id, url: address.trim(), title: title.trim() || undefined, isolated: isolated || undefined });
+			// The engine may give it another name (another lab has this one) or find it's a lab already added.
+			const added = await rpc.call("site.add", { name: name.trim() || slug(title || host.split(".")[0] || "lab"), url: address.trim(), title: title.trim() || undefined, isolated: isolated || undefined });
+			if (added.signedIn) {
+				lab.say(`${added.title} is already one of your labs, signed in as ${added.who ?? "you"}.`);
+				dialog?.close();
+				return;
+			}
 			message = "Finish signing in in your browser. The first time, the lab may ask you to set up a passkey, a security key or an authenticator app.";
-			const result = await lab.login(id);
+			const result = await lab.login(added.name);
 			if (result.ok) dialog?.close();
 			else {
 				// The lab is added; the sign-in can be tried again from here (or from the sidebar later).

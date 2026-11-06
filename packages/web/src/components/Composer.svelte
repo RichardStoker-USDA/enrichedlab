@@ -124,7 +124,17 @@
 	});
 
 	/** Why Send is off now, if it is. */
-	const blocked = $derived(lab.lost ? "Reconnecting to the engine…" : lab.moving ? "The session is moving; send when it arrives." : missing ? "Choose a model first." : "");
+	const blocked = $derived(
+		lab.lost
+			? "Reconnecting to the engine…"
+			: lab.moving
+				? "The session is moving; send when it arrives."
+				: lab.place.missing
+					? `This session works in ${lab.place.title}, which isn't one of your labs now. Add it again to keep going here.`
+					: missing
+						? "Choose a model first."
+						: "",
+	);
 
 	async function send() {
 		const value = text.trim();
@@ -255,6 +265,7 @@
 				{/each}
 			</div>
 		{/if}
+		{#if lab.place.missing}<p class="held">{blocked}</p>{/if}
 		<label class="visually-hidden" for="composer-field">Message</label>
 		<textarea
 			id="composer-field"
@@ -364,6 +375,12 @@
 	}
 	.composer:focus-within {
 		border-color: var(--focus-inner);
+	}
+	.held {
+		margin: 0 0 6px;
+		font-size: 12.5px;
+		line-height: 1.45;
+		color: var(--text-muted);
 	}
 	textarea {
 		width: 100%;
