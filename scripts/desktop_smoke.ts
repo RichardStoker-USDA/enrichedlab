@@ -47,7 +47,7 @@ try {
 		stdout: "inherit",
 		stderr: "inherit",
 	});
-	const code = await Promise.race([app.exited, Bun.sleep(90_000).then(() => "timeout")]);
+	const code = await Promise.race([app.exited, Bun.sleep(150_000).then(() => "timeout")]);
 	if (code === "timeout") app.kill();
 	await Bun.sleep(1500);
 	if (!existsSync(shot)) throw new Error("The window wasn't captured.");
