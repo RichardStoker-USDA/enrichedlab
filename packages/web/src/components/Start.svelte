@@ -80,6 +80,13 @@
 		<label class="check"><input type="checkbox" bind:checked={worktree} /> Work on its own git branch, away from your checkout</label>
 	</fieldset>
 
+	{#if !lab.models.length}
+		<div class="no-model" role="note">
+			<p>No model yet. Sign in to a lab, use your ChatGPT plan or a key, or run an open model on this computer.</p>
+			<button type="button" class="btn" onclick={() => (lab.services = true)}>Set up a model</button>
+		</div>
+	{/if}
+
 	<fieldset>
 		<legend>First task <span class="optional">optional</span></legend>
 		<textarea class="field task" bind:value={task} onkeydown={keys} rows="4" placeholder="What should the agent do?"></textarea>
@@ -120,6 +127,29 @@
 		font-size: 12.5px;
 		font-weight: 600;
 		color: var(--text-muted);
+	}
+	.no-model {
+		display: flex;
+		align-items: center;
+		gap: 16px;
+		margin: 0 0 22px;
+		padding: 12px 0;
+		border-top: 1px solid var(--rule);
+		border-bottom: 1px solid var(--rule);
+	}
+	.no-model p {
+		flex: 1;
+		margin: 0;
+		font-size: 13px;
+		line-height: 1.5;
+		color: var(--text-muted);
+	}
+	@media (max-width: 520px) {
+		.no-model {
+			flex-direction: column;
+			align-items: flex-start;
+			gap: 10px;
+		}
 	}
 	.optional {
 		font-weight: 400;

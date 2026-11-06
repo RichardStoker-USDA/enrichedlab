@@ -11,6 +11,6 @@
 		{ "model": "nemotron-3.5-lightning:30b", "label": "Nemotron 3.5 Lightning", "sizeGB": 19, "traits": ["tools", "thinking"], "about": "30B mixture of experts with 3B active: quick for always-on agents." },
 		{ "model": "flint:40b", "label": "Flint 40B", "sizeGB": 23, "traits": ["tools", "thinking"], "about": "A 40B mixture of experts built for coding agents." },
 		{ "model": "ornith-1.5:35b", "label": "Ornith 1.5 35B", "sizeGB": 23, "traits": ["vision", "tools", "thinking"], "about": "A self-improving model family for agentic coding." },
-		{ "model": "ornith-1.5:122b", "label": "Ornith 1.5 122B", "sizeGB": 73, "traits": ["vision", "tools", "thinking"], "about": "The largest here; needs a machine with lots of memory." }
+		{ "model": "ornith-1.5:122b", "label": "Ornith 1.5 122B", "sizeGB": 73, "traits": ["vision", "tools", "thinking"], "about": "The largest Ornith 1.5, for workstations with plenty of memory." }
 	]
 }

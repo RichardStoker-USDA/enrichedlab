@@ -6,6 +6,7 @@
 	import { lab, USAGE_URL } from "../lib/store.svelte.ts";
 	import { rpc } from "../lib/rpc.ts";
 	import ChatGptMark from "./ChatGptMark.svelte";
+	import LocalModels from "./LocalModels.svelte";
 
 	let { open = $bindable(false) }: { open: boolean } = $props();
 
@@ -108,10 +109,7 @@
 		<h2 id="services-title">Model services</h2>
 		<button class="close" aria-label="Close">×</button>
 	</form>
-	<p class="lead">
-		Your lab's models appear when you sign in to it. Models on this computer (Ollama, LM Studio) appear while they run; Gemma and Qwen run well
-		in LM Studio on Apple silicon.
-	</p>
+	<p class="lead">Your lab's models appear when you sign in to it. Models on this computer appear while their server runs.</p>
 
 	<section class="plan" aria-labelledby="plan-title">
 		<h3 id="plan-title">Your ChatGPT plan</h3>
@@ -143,6 +141,8 @@
 		</div>
 		<p class="status" class:failed={planFailed} role="status" aria-live="polite">{planMessage}</p>
 	</section>
+
+	<LocalModels active={open} />
 
 	<h3>Your own key</h3>
 	<form class="add" onsubmit={add}>

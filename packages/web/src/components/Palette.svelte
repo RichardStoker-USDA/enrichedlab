@@ -27,8 +27,6 @@
 				{ id: "term", label: "Open a terminal", shortcut: mac ? "⌃`" : "Ctrl `", group: "Actions", run: () => lab.openPane("terminal") },
 				{ id: "browser", label: "Open a browser", group: "Actions", run: () => lab.openPane("browser") },
 				{ id: "compact", label: "Summarize older turns now", group: "Actions", run: () => void lab.compact() },
-				{ id: "services", label: "Model services", hint: "ChatGPT plan, keys", group: "Actions", run: () => (lab.services = true) },
-				{ id: "join", label: "Add a lab", group: "Actions", run: () => (lab.join = {}) },
 			);
 			if (!lab.pinned && !lab.busy) {
 				for (const place of lab.places) {
@@ -37,6 +35,10 @@
 				}
 			}
 		}
+		list.push(
+			{ id: "services", label: "Model services", hint: "ChatGPT plan, keys, models on this computer", group: "Actions", run: () => (lab.services = true) },
+			{ id: "join", label: "Add a lab", group: "Actions", run: () => (lab.join = {}) },
+		);
 		for (const theme of ["auto", "light", "dark"] as const) {
 			if (lab.ui.theme !== theme) list.push({ id: `theme-${theme}`, label: theme === "auto" ? "Match the system's light or dark mode" : `Use ${theme} mode`, group: "Appearance", run: () => void lab.setTheme(theme) });
 		}
