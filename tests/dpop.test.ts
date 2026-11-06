@@ -13,7 +13,11 @@ import { GateSite } from "../packages/engine/src/sites/gate.ts";
 process.env.EL_KEYSTORE = "file";
 const PUBLIC = "https://lab.example.org";
 const TOKEN = "lab-token";
+/** The token after a refresh. */
+const REFRESHED = "lab-token-refreshed";
 const lab = {
+	/** Each nonce is good for one sign-in only, as Gate binds its nonce to the Access assertion. */
+	bound: false,
 	devices: new Map<string, { id: string; thumbprint: string; revoked: boolean; status?: string }>(),
 	jtis: new Set<string>(),
 	nonce: undefined as string | undefined,
@@ -33,6 +37,9 @@ const lab = {
 };
 let next = 1;
 
+const bearerOf = (request: Request) => request.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
+/** The nonce the lab hands this request's sign-in. */
+const nonceFor = (request: Request) => (lab.nonce && lab.bound ? `${lab.nonce}.${bearerOf(request)}` : lab.nonce);
 const decode = (part: string) => JSON.parse(Buffer.from(part, "base64url").toString("utf8")) as Record<string, unknown>;
 const refuse = (code: string) => new Response(JSON.stringify({ error: { message: code } }), { status: 401, headers: { "www-authenticate": `DPoP error="${code}"` } });
 
@@ -46,11 +53,11 @@ async function verify(request: Request, url: URL): Promise<{ thumb: string; jwk:
 	if (header.typ !== "dpop+jwt" || header.alg !== "ES256" || "d" in header.jwk) return { code: "invalid_dpop_proof" };
 	const key = await crypto.subtle.importKey("jwk", header.jwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
 	const signed = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, Buffer.from(signature, "base64url"), new TextEncoder().encode(`${h}.${p}`));
-	const bearer = request.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
+	const bearer = bearerOf(request);
 	const fresh = typeof claims.iat === "number" && Math.abs(Date.now() / 1000 - claims.iat) < 120;
 	if (!signed || claims.htm !== request.method || claims.htu !== `${PUBLIC}${url.pathname}` || (!lab.access && claims.ath !== tokenHash(bearer)) || !fresh || !claims.jti || lab.jtis.has(claims.jti)) return { code: "invalid_dpop_proof" };
 	// As Gate does: a missing or stale nonce is refused before the jti is spent, so the retry may reuse nothing.
-	if (lab.nonce && claims.nonce !== lab.nonce) return { code: "use_dpop_nonce" };
+	if (lab.nonce && claims.nonce !== nonceFor(request)) return { code: "use_dpop_nonce" };
 	lab.jtis.add(claims.jti);
 	return { thumb: thumbprint(header.jwk), jwk: header.jwk };
 }
@@ -61,7 +68,7 @@ const server = Bun.serve({
 	async fetch(request) {
 		const response = await answer(request);
 		// While the lab uses nonces, every response carries the current one.
-		if (lab.nonce && !response.headers.has("dpop-nonce")) response.headers.set("dpop-nonce", lab.nonce);
+		if (lab.nonce && !response.headers.has("dpop-nonce")) response.headers.set("dpop-nonce", nonceFor(request)!);
 		return response;
 	},
 });
@@ -69,7 +76,7 @@ const server = Bun.serve({
 async function answer(request: Request): Promise<Response> {
 	{
 		const url = new URL(request.url);
-		if (request.headers.get("authorization") !== `Bearer ${TOKEN}`) return new Response("", { status: 401 });
+		if (![TOKEN, REFRESHED].includes(bearerOf(request))) return new Response("", { status: 401 });
 		if (url.pathname === "/.well-known/enrichedlab-lab") {
 			return Response.json({ contract: "2026-11", name: "devlab", title: "Dev Lab", endpoints: { devices: true, models: true }, sign_in: { kind: lab.access ? "cloudflare-access-oauth" : "key" }, policy: { device_proof: lab.optional ? "optional" : "required" } });
 		}
@@ -85,7 +92,7 @@ async function answer(request: Request): Promise<Response> {
 			const refused = refuse(proof.code);
 			if (proof.code === "use_dpop_nonce") {
 				lab.challenges++;
-				refused.headers.set("dpop-nonce", lab.nonce!);
+				refused.headers.set("dpop-nonce", nonceFor(request)!);
 			}
 			return refused;
 		}
@@ -146,6 +153,7 @@ const me = (s: GateSite) => (s as unknown as { json(method: string, path: string
 describe("device-bound lab tokens", () => {
 	beforeEach(() => {
 		lab.nonce = undefined;
+		lab.bound = false;
 		lab.approval = false;
 		lab.optional = false;
 		lab.access = false;
@@ -279,6 +287,29 @@ describe("device-bound lab tokens", () => {
 		const call = (s as unknown as { call(m: string, p: string, i: object): Promise<Response> }).call.bind(s);
 		const response = await call("POST", "/v1/echo", { body, headers: { "content-type": "text/csv" } });
 		expect(await response.text()).toBe("plot,yield\n");
+	});
+
+	test("after the sign-in is refreshed, an upload that can't be sent twice gets a nonce for the new token first", async () => {
+		lab.nonce = "n-g";
+		lab.bound = true;
+		let token = TOKEN;
+		const s = new GateSite({ name: "devlab", url: PUBLIC, kind: "gate" }, { base, via: "oauth", headers: async () => ({ authorization: `Bearer ${token}` }) }, undefined, file);
+		await s.connect();
+		// A recent nonce, but for the old token: the lab refuses it for the new one.
+		token = REFRESHED;
+		const body = new ReadableStream({
+			start(c) {
+				c.enqueue(new TextEncoder().encode("plot,yield\n"));
+				c.close();
+			},
+		});
+		const call = (s as unknown as { call(m: string, p: string, i: object): Promise<Response> }).call.bind(s);
+		const response = await call("POST", "/v1/echo", { body, headers: { "content-type": "text/csv" } });
+		expect(await response.text()).toBe("plot,yield\n");
+		// Ordinary requests carry the new token's nonce from then on.
+		const before = lab.challenges;
+		expect((await me(s)).handle).toBe("pat");
+		expect(lab.challenges).toBe(before);
 	});
 
 	test("an MCP response's nonce challenge is answered by sending again", () => {

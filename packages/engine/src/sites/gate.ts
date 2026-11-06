@@ -65,6 +65,9 @@ interface Made {
 
 const title = (entry: LabAppEntry) => `${entry.title || entry.name} ${entry.version}`;
 
+/** The token in a request's sign-in header. */
+const bearerOf = (headers: Record<string, string>) => /^(?:Bearer|DPoP)\s+(.+)$/i.exec(headers.authorization ?? "")?.[1];
+
 /** Minutes a served app goes unused (no requests, no open WebSockets) before its server stops until the next visit. */
 const SERVE_IDLE_MINUTES = 15;
 
@@ -185,10 +188,16 @@ export class GateSite implements SiteAdapter, SandboxApi {
 
 	/** This computer's key for the lab, when the lab binds tokens to devices (dpop.ts). */
 	private device?: DeviceKey;
-	/** The latest DPoP nonce the lab handed out, if it uses them, and when it came. */
+	/**
+	 * The latest DPoP nonce the lab handed out, if it uses them, when it came, and the token of the request it answered.
+	 * A lab may bind its nonce to the sign-in, so a refreshed token needs a nonce of its own.
+	 */
 	private nonce?: string;
 	private nonceAt = 0;
+	private nonceToken?: string;
 	private nonceRefresh?: Promise<void>;
+	/** The token the latest request was signed in with. */
+	private signedWith?: string;
 	/** Plain-language notices for the person (a sandbox restored or replaced); Sites passes them to every surface. */
 	onNotice?: (text: string) => void;
 	/** Sandbox ports opened on this computer, by container and port. */
@@ -213,21 +222,26 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	}
 
 	/** Keep the lab's latest DPoP nonce (RFC 9449 section 8); every response may carry one. */
-	private noteNonce(response: Response): string | undefined {
+	private noteNonce(response: Response, token = this.signedWith): string | undefined {
 		const nonce = response.headers.get("dpop-nonce") ?? undefined;
 		if (nonce) {
 			this.nonce = nonce;
 			this.nonceAt = Date.now();
+			this.nonceToken = token;
 		}
 		return nonce;
 	}
 
 	/**
 	 * Before a request that can't be sent twice (a streamed upload, a WebSocket, a page's request through a port), make
-	 * sure the nonce is recent: a lab keeps one valid 5 to 10 minutes, so past 4 a cheap read fetches a fresh one.
+	 * sure the nonce is recent and for the current token: a lab keeps one valid 5 to 10 minutes, so past 4, or once the
+	 * token was refreshed, a cheap read fetches a fresh one.
 	 */
 	private async freshNonce(): Promise<void> {
-		if (!this.device || this.device.revoked || !this.nonce || Date.now() - this.nonceAt < 240_000) return;
+		if (!this.device || this.device.revoked || !this.nonce) return;
+		// Reading the sign-in is also what refreshes an expired token, so the request that follows uses this one.
+		const token = bearerOf(await this.route.headers().catch(() => ({}) as Record<string, string>));
+		if (token === this.nonceToken && Date.now() - this.nonceAt < 240_000) return;
 		this.nonceRefresh ??= this.call("GET", "/v1/me", { signal: AbortSignal.timeout(10_000) })
 			.then((r) => r.arrayBuffer())
 			.then(
@@ -249,10 +263,13 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	/** The route's sign-in, plus a proof for this request when the lab binds tokens to devices. */
 	private async authHeaders(method: string, url: string): Promise<Record<string, string>> {
 		const headers = await this.route.headers();
+		const bearer = bearerOf(headers);
+		this.signedWith = bearer;
 		// A pending key can't sign yet: until another device approves it, requests go as they would without one.
 		if (!this.device || this.device.revoked || this.device.pending) return headers;
-		const bearer = /^(?:Bearer|DPoP)\s+(.+)$/i.exec(headers.authorization ?? "")?.[1];
-		return { ...headers, dpop: await this.device.proof(method, this.publicUrl(url), bearer, this.nonce) };
+		// A nonce from an earlier token is refused; sent without one, the lab answers with a nonce for this token.
+		const nonce = this.nonceToken === bearer ? this.nonce : undefined;
+		return { ...headers, dpop: await this.device.proof(method, this.publicUrl(url), bearer, nonce) };
 	}
 
 	/** Register this computer's key with the lab, once; the lab registers the key that signed the request. */

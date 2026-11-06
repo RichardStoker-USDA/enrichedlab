@@ -126,9 +126,12 @@ from copying it. The lab makes a copied token worth little:
   once the person has an approved device) the client registers a new key, which waits for approval when the person has
   another device; on `device_revoked` it stops until the person signs in again, so revoking a lost laptop sticks; on
   `device_mismatch` or `signin_stale` it asks for a new sign-in. A lab that issues nonces (RFC 9449 section 8) sends
-  `DPoP-Nonce` on its responses: the client puts the latest one in every proof and answers `use_dpop_nonce` by sending
-  once more. Before a request it can't send twice (an upload, a WebSocket, a page's request through a port), it
-  fetches a fresh nonce if its own is over 4 minutes old. When the person already has a device, a new one registers as
+  `DPoP-Nonce` on its responses: the client puts the latest one it got under the current token in every proof, and
+  answers `use_dpop_nonce` by sending once more. Before a request it can't send twice (an upload, a WebSocket, a page's
+  request through a port), it fetches a fresh nonce if its own is over 4 minutes old or came with an earlier token. A
+  lab that ties its nonce to the sign-in has to tie it to something that stays the same for the whole sign-in, such
+  as the identity Access verified: Cloudflare Access can deliver more than one assertion for one token, so a nonce
+  bound to the whole assertion is refused at random. When the person already has a device, a new one registers as
   pending (202, `device_approval_needed`); only one waits at a time (`409 device_pending_exists`). Once a person has
   an approved device the lab wants proofs even where they're optional, so the pending computer says "approve this
   computer from one of your other devices" and tries a signed read every 5 seconds until it's approved or the request
