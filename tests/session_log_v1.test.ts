@@ -153,3 +153,17 @@ describe("session log v1 import from someone else", () => {
 		expect(importProblem([], many)).toContain("images");
 	});
 });
+
+describe("session log v1 from Rein", () => {
+	test("a title after the final event, as the log's last record, names the session", () => {
+		const v1 = [
+			{ v: 1 as const, seq: 1, time: at(0), kind: "user", data: { text: "Run uname" } },
+			{ v: 1 as const, seq: 2, time: at(1), kind: "assistant", data: { text: "Linux.", stop: "end" } },
+			{ v: 1 as const, seq: 3, time: at(2), kind: "x-title", data: { title: "uname and pwd Shell Commands" } },
+		];
+		const { events } = fromV1(v1);
+		expect(events.map((e) => e.t)).toEqual(["user", "assistant", "title"]);
+		expect(events.findLast((e) => e.t === "title")).toMatchObject({ title: "uname and pwd Shell Commands" });
+		expect(importProblem(v1, {})).toBeUndefined();
+	});
+});
