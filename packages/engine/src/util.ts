@@ -3,10 +3,11 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "n
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-export const VERSION = "0.2.11";
+export const VERSION = "0.2.12";
 
 /** What changed in this version, one line each, newest first. Surfaces show the first lines when a session opens. */
 export const NEWS = [
+	"0.2.12: the window rebuilt to feel like a Mac app: a native menu bar and right-click menus everywhere, title bars you can drag, AA contrast in light and dark, and where a session runs chosen beside its model, with a review before a move; Remove Lab, Jump to Latest and per-session drafts; hiding the workbench no longer stops its terminals; Foundry Local is found on its own; sessions export and import in the log format Gate also reads (el session export); Windows signing is ready for an Azure Artifact Signing account.",
 	"0.2.11: sessions started before a lab was renamed find its models again.",
 	"0.2.10: the terminal inside the window draws its text everywhere; its GPU renderer could leave it blank.",
 	"0.2.9: models on this computer are found by how their server answers (Ollama, LM Studio, llama.cpp, MLX, oMLX, vLLM, SGLang), and each gets the context its server holds; Ollama models get their full planned context instead of Ollama's 4K default; el local and Model services suggest open models that fit your computer and download them (el model pull); el join adds a lab from its invite; a session whose model goes away stops and says so instead of switching models.",
