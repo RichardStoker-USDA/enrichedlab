@@ -510,6 +510,12 @@ export class SessionRuntime {
 	private async turn(signal: AbortSignal): Promise<void> {
 		for (let step = 0; step < MAX_STEPS; step++) {
 			if (signal.aborted) return;
+			// The session's model gone (its server stopped, or a lab took it away): stop and say so. Moving the
+			// conversation to another model on its own could send it somewhere the person never chose.
+			if (this.modelRef && !this.model()) {
+				this.notice("error", `${this.modelRef} isn't available now: its server may have stopped, or your access to it changed. Pick another model to go on.`);
+				return;
+			}
 			const model = this.model() ?? this.fallbackModel();
 			if (!model) {
 				this.notice("error", "No model is available. Start a local model server, add a provider to ~/.el/config.json, or sign in to a site with el login.");
@@ -633,6 +639,10 @@ export class SessionRuntime {
 						break;
 					}
 					continue;
+				} else if (caught instanceof ModelHttpError && caught.status === 404 && caught.code === "model_not_found" && model.source === "site") {
+					// A lab answers a model outside the person's grant as absent: their access changed since it was listed.
+					stop = "error";
+					error = `${model.provider} no longer offers ${model.id} to you; your access changed. Pick another model to go on.`;
 				} else {
 					stop = "error";
 					error = redact(errorText(caught));

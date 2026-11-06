@@ -420,6 +420,49 @@ export interface ServiceAccount {
 }
 
 /** What `update.check` found. `kind` is how this copy was installed. */
+/** A model server found on this computer, named by how it answered (llama.cpp and mlx_lm.server share 8080). */
+export interface LocalServerInfo {
+	name: string;
+	kind: string;
+	label: string;
+	port: number;
+	version?: string;
+	models: string[];
+}
+
+/** An open model the app suggests downloading, and whether it fits this computer's memory. */
+export interface SuggestedModel {
+	model: string;
+	label: string;
+	sizeGB: number;
+	traits: string[];
+	about: string;
+	fits: boolean;
+	installed: boolean;
+}
+
+/** One download's progress, summed over its layers; `done` with no `error` means it's ready to use. */
+export interface LocalPullProgress {
+	model: string;
+	status: string;
+	completed?: number;
+	total?: number;
+	done?: boolean;
+	error?: string;
+}
+
+export interface LocalModelsStatus {
+	memoryGiB: number;
+	appleSilicon: boolean;
+	servers: LocalServerInfo[];
+	/** Present when Ollama runs here. `mlx`: it runs models on MLX; `updateForMlx`: a newer Ollama would. */
+	ollama?: { name: string; version?: string; mlx: boolean; updateForMlx: boolean };
+	suggestions: SuggestedModel[];
+	/** When the suggestions were last checked against the Ollama library. */
+	checked: string;
+	pulls: LocalPullProgress[];
+}
+
 export interface UpdateStatus {
 	current: string;
 	latest?: string;
@@ -518,6 +561,13 @@ export interface Requests {
 	/** Check a key against the service, keep it in the OS credential store, and offer the service's models. */
 	"provider.add": { params: { preset: string; key: string; name?: string; baseUrl?: string }; result: { name: string; models: number } };
 	"provider.remove": { params: { name: string }; result: { ok: true } };
+	/** Model servers on this computer, and open models to download that fit it. */
+	"local.models": { params: Record<string, never>; result: LocalModelsStatus };
+	/** Start downloading an open model through Ollama; local.pull.progress follows it. */
+	"local.pull": { params: { model: string }; result: { ok: true } };
+	"local.pull.cancel": { params: { model: string }; result: { ok: true } };
+	/** Delete a downloaded model from Ollama. */
+	"local.remove": { params: { model: string }; result: { ok: true } };
 	/** Whether a newer release is out (checked at most daily unless `force`). */
 	"update.check": { params: { force?: boolean }; result: UpdateStatus };
 	/** Download, verify and install the newer release. `restart` means the app should quit and start again. */
@@ -629,6 +679,7 @@ export interface Notifications {
 	"lab.notice": LabNotice;
 	/** Open this sign-in page in the system browser (it comes back to the engine on 127.0.0.1). */
 	"provider.auth": { service: string; url: string };
+	"local.pull.progress": LocalPullProgress;
 	"term.output": { termId: string; data: string };
 	"term.exit": { termId: string; code: number | null };
 	"site.updated": SiteSummary;

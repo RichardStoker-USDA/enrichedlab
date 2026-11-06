@@ -29,12 +29,15 @@ Updates are signed and install themselves the same way: the app offers them, `el
 ## First run
 
 - **Your lab sends an invite link.** Open it; EnrichedLab adds the lab and opens the lab's sign-in page. Its models,
-  tools and sandbox appear once you're signed in.
+  tools and sandbox appear once you're signed in. In a terminal, `el join '<invite link>'` does the same. The first
+  sign-in may ask you to set up a second step: a passkey, a security key or an authenticator app.
 - **Your ChatGPT plan.** Choose *Continue with ChatGPT* under *Model services* in the model menu (or run
   `el service add chatgpt`). Requests then use the usage included in your plan.
 - **Your own key.** Add an OpenAI, Anthropic, Google Gemini or OpenRouter key in the same place. Keys go to your
   computer's credential store.
-- **On this computer.** Models running in Ollama or LM Studio appear on their own.
+- **On this computer.** Models running in Ollama, LM Studio, llama.cpp, MLX, oMLX, vLLM or SGLang appear on their
+  own. With Ollama installed, `el local` suggests open models that fit your computer and `el model pull <name>`
+  downloads one (the window does the same under *On this computer*).
 
 ## What it does
 
@@ -58,7 +61,9 @@ Updates are signed and install themselves the same way: the app offers them, `el
 el                       # a session in this folder; the window opens when the agent shows something
 el app                   # open the window
 el run "task"            # one task, no interface; --allow lets it edit and run commands
+el join '<invite link>'  # add a lab from its invite and sign in
 el login <lab>           # sign in to a lab you've added
+el local                 # model servers here, and open models that fit this computer
 el service add chatgpt   # use your ChatGPT plan; or add a key: el service add gemini
 el doctor                # check the setup
 ```

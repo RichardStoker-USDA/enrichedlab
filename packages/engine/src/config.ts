@@ -7,7 +7,8 @@ import type { SearchConfig } from "./tools/search.ts";
 import type { Paths } from "./paths.ts";
 import { readJson, writeJson } from "./util.ts";
 
-export type ApiKind = "openai-chat" | "openai-responses" | "anthropic";
+/** `ollama` is Ollama's own chat API, which can set the context window (its OpenAI endpoint can't). */
+export type ApiKind = "openai-chat" | "openai-responses" | "anthropic" | "ollama";
 
 export interface ProviderConfig {
 	api: ApiKind;
@@ -66,7 +67,8 @@ export interface LabConfig {
 	mcpServers: Record<string, McpServerConfig>;
 	/** sandbox "workspace" (the default): local commands run contained (macOS Seatbelt, Linux bubblewrap) and don't ask. */
 	permissions: { mode: PermissionMode; allowCommands: string[]; sandbox?: SandboxMode };
-	discovery: { local: boolean };
+	/** Look for model servers on this computer; `ports` replaces the default list (11434, 1234, 8080, 8000, 30000). */
+	discovery: { local: boolean; ports?: number[] };
 	instructions: { global: string[] };
 	/** Skill folders: absolute or ~ paths, or paths inside the project. */
 	skills: { dirs: string[] };

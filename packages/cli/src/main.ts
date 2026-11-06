@@ -15,6 +15,7 @@ import {
 	installBundle,
 	listBundles,
 	packApp,
+	parseInvite,
 	paths,
 	PUSH_REASON,
 	readManifest,
@@ -44,6 +45,8 @@ const HELP = `EnrichedLab ${VERSION}
       --push                      let it push to a remote (refused otherwise, even with --allow)
   el worktrees [--prune]          worktrees sessions made in this repository; --prune removes merged ones
 
+  el join <invite link | https address> [--name <short name>]
+                                  add a lab from its invite (its /join page has the link) and sign in
   el login <site>                 sign in to a site in your browser
   el logout <site>
   el site add <name> <https://address> [--title "<Lab name>"] [--lan <https://address> --key <file> --ca <file>] [--isolated]
@@ -76,6 +79,8 @@ const HELP = `EnrichedLab ${VERSION}
 
   el models [--refresh]           models you can use now
   el model <ref> [effort]         set the default model
+  el local                        model servers on this computer, and open models that fit it
+  el model pull|remove <name>     download an open model through Ollama, or delete one
   el sessions                     recent sessions in this folder (--all for every folder)
   el service add chatgpt          use your ChatGPT plan (sign in in the browser; --new adds another account)
   el service add <service>        use your own key: openai, anthropic, gemini, openrouter, custom --address <url>
@@ -201,6 +206,21 @@ async function connect(name = "el"): Promise<EngineClient> {
 	return client;
 }
 
+/** Sign in to a lab in the browser, where the lab may also ask for a second step (a passkey, key or code app). */
+async function login(name: string): Promise<void> {
+	const client = await connect();
+	client.on("site.auth", (auth) => {
+		if (auth.name !== name) return;
+		out(`Opening your browser to sign in to ${name}. The first time, it may ask you to set up a second step: a passkey, a security key or an authenticator app. If the browser doesn't open, visit:\n${auth.url}`);
+		openBrowser(auth.url);
+	});
+	const site = await client.call("site.login", { name });
+	if (site.signedIn && site.via === "oauth") out(`Signed in to ${name} as ${site.who ?? "you"}: ${site.models} models, ${site.tools} tools${site.sandbox ? ", sandbox" : ""}.`);
+	else if (site.signedIn) out(`${site.warning ?? "The browser sign-in wasn't used."}\nConnected to ${name} as ${site.who ?? "you"} with the LAN key.`);
+	else out(`The browser sign-in finished, but ${name} can't be reached with it: ${site.error ?? "no answer"}`);
+	client.close();
+}
+
 async function runHeadless(prompt: string, flags: Flags): Promise<void> {
 	const allow = flags.allow === true;
 	const push = flags.push === true;
@@ -293,19 +313,27 @@ async function main(): Promise<void> {
 			client.close();
 			return;
 		}
+		case "join": {
+			const invite = parseInvite(rest[0] ?? fail("el join <invite link | https address>")) ?? fail("That isn't an invite link or an https address.");
+			const sites = new Sites(paths(), () => undefined);
+			const known = sites.configs().find((c) => c.url === invite.url);
+			const name = known?.name ?? (typeof flags.name === "string" ? flags.name : invite.name);
+			if (!known) {
+				if (sites.configs().some((c) => c.name === name)) fail(`You already have a lab named ${name}. Pick another short name: el join ${rest[0]} --name <name>`);
+				sites.add({ name, title: invite.title, url: invite.url, kind: "gate", isolated: invite.isolated });
+				out(`Added ${invite.title ?? name} (${invite.url}) as ${name}.`);
+			}
+			const running = await findEngine();
+			if (running) {
+				const client = new EngineClient(running, "el");
+				await client.call("site.refresh", { name });
+				client.close();
+			}
+			await login(name);
+			return;
+		}
 		case "login": {
-			const name = rest[0] ?? fail("which site? el login <site>");
-			const client = await connect();
-			client.on("site.auth", (auth) => {
-				if (auth.name !== name) return;
-				out(`Opening your browser to sign in to ${name}. If it doesn't open, visit:\n${auth.url}`);
-				openBrowser(auth.url);
-			});
-			const site = await client.call("site.login", { name });
-			if (site.signedIn && site.via === "oauth") out(`Signed in to ${name} as ${site.who ?? "you"}: ${site.models} models, ${site.tools} tools${site.sandbox ? ", sandbox" : ""}.`);
-			else if (site.signedIn) out(`${site.warning ?? "The browser sign-in wasn't used."}\nConnected to ${name} as ${site.who ?? "you"} with the LAN key.`);
-			else out(`The browser sign-in finished, but ${name} can't be reached with it: ${site.error ?? "no answer"}`);
-			client.close();
+			await login(rest[0] ?? fail("which site? el login <site>"));
 			return;
 		}
 		case "logout": {
@@ -523,7 +551,7 @@ async function main(): Promise<void> {
 		case "models": {
 			const client = await connect();
 			const { models, default: preferred } = await client.call("model.list", { refresh: flags.refresh === true });
-			if (!models.length) out("No models found. Sign in to your lab (el login <lab>), start Ollama or LM Studio, or el service add <service>.");
+			if (!models.length) out("No models found. Sign in to your lab (el login <lab>), el service add <service>, or el local to run an open model here.");
 			for (const m of models) {
 				const tags = [`${Math.round(m.context / 1024)}k`, m.vision ? "vision" : "", m.efforts.length ? `effort ${m.efforts.join("/")}` : ""].filter(Boolean).join(", ");
 				out(`${m.ref === preferred ? "*" : " "} ${m.ref}  (${m.source}; ${tags})`);
@@ -531,8 +559,53 @@ async function main(): Promise<void> {
 			client.close();
 			return;
 		}
+		case "local": {
+			const client = await connect();
+			const local = await client.call("local.models", {});
+			out(`This computer: ${local.memoryGiB} GB of memory${local.appleSilicon ? ", Apple silicon" : ""}.`);
+			for (const server of local.servers) out(`  ${server.label} on port ${server.port}${server.version ? ` (${server.version})` : ""}: ${server.models.length ? server.models.join(", ") : "no models yet"}`);
+			if (!local.servers.length) out("  No model server is running here.");
+			if (!local.ollama) out("\nTo download open models, install Ollama from https://ollama.com/download and open it.");
+			else if (local.ollama.updateForMlx) out(`\nOllama ${local.ollama.version} runs models on llama.cpp here; Ollama 0.40 or later runs them on MLX on Apple silicon, which is faster.`);
+			else if (local.ollama.mlx) out("\nOllama runs models on MLX here.");
+			out(`\nOpen models that call tools (checked ${local.checked}); el model pull <name> gets one:`);
+			for (const m of local.suggestions) {
+				const mark = m.installed ? "have it" : m.fits ? "fits" : "too big";
+				out(`  ${m.model.padEnd(28)} ${`${m.sizeGB} GB`.padStart(7)}  ${mark.padEnd(8)} ${m.about}`);
+			}
+			client.close();
+			return;
+		}
 		case "model": {
 			const client = await connect();
+			if (rest[0] === "pull" || rest[0] === "remove") {
+				const name = rest[1] ?? fail(`el model ${rest[0]} <name>`);
+				if (rest[0] === "remove") {
+					await client.call("local.remove", { model: name });
+					out(`Removed ${name}.`);
+					client.close();
+					return;
+				}
+				const gb = (n?: number) => (n ? (n / 1e9).toFixed(1) : "?");
+				const finished = new Promise<void>((resolve, reject) => {
+					client.on("local.pull.progress", (p) => {
+						if (p.model !== name) return;
+						if (p.done) {
+							if (process.stdout.isTTY) process.stdout.write("\r\x1b[K");
+							return p.error || p.status === "cancelled" ? reject(new Error(p.error ?? "Cancelled.")) : resolve();
+						}
+						const line = p.total ? `${name}: ${gb(p.completed)} of ${gb(p.total)} GB (${Math.floor(((p.completed ?? 0) / p.total) * 100)}%)` : `${name}: ${p.status}`;
+						if (process.stdout.isTTY) process.stdout.write(`\r\x1b[K${line}`);
+					});
+				});
+				process.on("SIGINT", () => void client.call("local.pull.cancel", { model: name }).finally(() => process.exit(130)));
+				await client.call("local.pull", { model: name });
+				await finished.catch((error: Error) => fail(`Couldn't get ${name}: ${error.message}`));
+				const ollamaName = (await client.call("local.models", {})).ollama?.name ?? "ollama";
+				out(`${name} is ready: el model ${ollamaName}/${name}`);
+				client.close();
+				return;
+			}
 			await client.call("model.default", { model: rest[0] ?? fail("el model <ref> [effort]"), effort: rest[1] });
 			out(`Default model: ${rest[0]}${rest[1] ? ` at ${rest[1]}` : ""}.`);
 			client.close();

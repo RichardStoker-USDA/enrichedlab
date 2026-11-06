@@ -25,6 +25,7 @@ import { applyBundles, listBundles } from "./bundles.ts";
 import { type LabConfig, loadConfig, type ProviderConfig, saveConfig } from "./config.ts";
 import { McpManager } from "./mcp.ts";
 import { ModelRegistry } from "./models/registry.ts";
+import { LocalModels } from "./models/local_service.ts";
 import { ensureHome, type Paths, paths as labPaths } from "./paths.ts";
 import { projectRoot, systemPrompt } from "./prompt.ts";
 import { listSessions, SessionLog, toSummary } from "./session/log.ts";
@@ -52,7 +53,7 @@ import { SandboxBrowsers } from "./sites/sandbox_browser.ts";
 import { pdfFieldsTool, pdfFillTool } from "./tools/pdf.ts";
 import { forgetKey, PROVIDER_PRESETS, storeKey, testProvider } from "./models/providers.ts";
 import { RESOURCE as CHATGPT_API, signIn as chatgptSignIn, signOut as chatgptSignOut, summaries as chatgptAccounts, useAccount as useChatgpt } from "./models/chatgpt.ts";
-import { newId, readJson, sleep, VERSION, writeJson } from "./util.ts";
+import { errorText, newId, readJson, sleep, VERSION, writeJson } from "./util.ts";
 
 export const BUILT_IN_TOOLS: Tool[] = [readTool, writeTool, editTool, lsTool, globTool, grepTool, shellTool, fetchTool, showTool, recallTool, planTool, agentStartTool, agentWaitTool, rememberTool, skillCreateTool, appCreateTool, appOpenTool, pdfFieldsTool, pdfFillTool, ...BROWSER_TOOLS];
 
@@ -89,6 +90,7 @@ export class Engine {
 	readonly paths: Paths;
 	config: LabConfig;
 	readonly registry: ModelRegistry;
+	private localModels: LocalModels;
 	readonly mcp = new McpManager();
 	readonly sites: Sites;
 	readonly canvas: CanvasStore;
@@ -120,6 +122,7 @@ export class Engine {
 		ensureHome(this.paths);
 		this.config = this.loadAll();
 		this.registry = new ModelRegistry(() => this.config, this.paths.credentials);
+		this.localModels = new LocalModels(this.registry, (progress) => this.emit("local.pull.progress", progress));
 		this.origin = options.origin ?? (() => "http://127.0.0.1");
 		this.sites = new Sites(this.paths, (summary) => {
 			// A connect may have brought new or changed bundles from the site.
@@ -716,6 +719,19 @@ export class Engine {
 					await this.registry.refresh();
 					return { ok: true };
 				}
+				case "local.models":
+					return this.localModels.status();
+				case "local.pull":
+					await this.localModels.pull(need("model")).catch((error) => {
+						throw new RpcError(-32602, errorText(error));
+					});
+					return { ok: true };
+				case "local.pull.cancel":
+					this.localModels.cancel(need("model"));
+					return { ok: true };
+				case "local.remove":
+					await this.localModels.remove(need("model"));
+					return { ok: true };
 				case "update.check":
 					return checkForUpdate(this.paths.update, p.force === true);
 				case "update.apply":

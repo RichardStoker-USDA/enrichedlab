@@ -1,0 +1,16 @@
+{
+	"checked": "2026-11-06",
+	"source": "https://ollama.com/search?c=tools",
+	"note": "Open models from the Ollama library that call tools, smallest first. sizeGB is the download for that tag, from its tags page. Update this list with a release; anyone can still pull any model by name.",
+	"models": [
+		{ "model": "lfm3:1.7b", "label": "LFM3 1.7B", "sizeGB": 1.1, "traits": ["tools", "thinking"], "about": "A small model for local agents." },
+		{ "model": "bonsai-2:4b", "label": "Bonsai 2 4B", "sizeGB": 1.6, "traits": ["vision", "tools", "thinking"], "about": "Vision in a small download, with ternary weights." },
+		{ "model": "mimo-v2.6:9b", "label": "MiMo V2.6 9B", "sizeGB": 6.6, "traits": ["vision", "tools", "thinking"], "about": "Xiaomi's 9B model for code and agent work." },
+		{ "model": "nemotron-3.5-bolt:e4b", "label": "Nemotron 3.5 Bolt", "sizeGB": 7.2, "traits": ["vision", "tools", "thinking"], "about": "NVIDIA's compact vision model for coding, reasoning and tool use." },
+		{ "model": "qwen3.8:27b", "label": "Qwen3.8 27B", "sizeGB": 18, "traits": ["vision", "tools", "thinking"], "about": "Strong at coding, research and long agent tasks." },
+		{ "model": "nemotron-3.5-lightning:30b", "label": "Nemotron 3.5 Lightning", "sizeGB": 19, "traits": ["tools", "thinking"], "about": "30B mixture of experts with 3B active: quick for always-on agents." },
+		{ "model": "flint:40b", "label": "Flint 40B", "sizeGB": 23, "traits": ["tools", "thinking"], "about": "A 40B mixture of experts built for coding agents." },
+		{ "model": "ornith-1.5:35b", "label": "Ornith 1.5 35B", "sizeGB": 23, "traits": ["vision", "tools", "thinking"], "about": "A self-improving model family for agentic coding." },
+		{ "model": "ornith-1.5:122b", "label": "Ornith 1.5 122B", "sizeGB": 73, "traits": ["vision", "tools", "thinking"], "about": "The largest here; needs a machine with lots of memory." }
+	]
+}

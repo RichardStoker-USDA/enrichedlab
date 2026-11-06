@@ -5,6 +5,7 @@ export { labHome, paths, ensureHome } from "./paths.ts";
 export { loadConfig, saveConfig, type LabConfig } from "./config.ts";
 export { NEWS, VERSION, readJson, writeJson, expandHome } from "./util.ts";
 export { Sites, type SiteConfig } from "./sites/sites.ts";
+export { parseInvite, type Invite } from "./sites/invite.ts";
 export { createWorktree, removeWorktree, repoRoot } from "./git.ts";
 export { PUSH_REASON } from "./permissions.ts";
 export { installBundle, listBundles, readBundle, removeBundle } from "./bundles.ts";

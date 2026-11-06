@@ -39,6 +39,8 @@ export interface ModelProfile {
 	ca?: string;
 	/** Group the tools under this name in the request (routes that want tools grouped). */
 	toolNamespace?: string;
+	/** Run before each request, e.g. to load a local model with the context planned for it. */
+	prepare?: (signal: AbortSignal) => Promise<void>;
 }
 
 export interface ModelRequest {
@@ -73,6 +75,8 @@ export class ModelHttpError extends Error {
 		readonly retryable: boolean,
 		readonly retryAfterMs?: number,
 		readonly contextOverflow = false,
+		/** The service's `error.code`, when it gave one (Gate: model_not_found for a model outside the grant). */
+		readonly code?: string,
 	) {
 		super(message);
 	}

@@ -474,3 +474,22 @@ describe("memory", () => {
 		}
 	});
 });
+
+describe("lab invites", () => {
+	test("an invite link from a lab's /join page gives its address, short name and title", async () => {
+		const { parseInvite } = await import("../packages/engine/src/sites/invite.ts");
+		// Gate encodes the title with the url crate: spaces as +, & as %26.
+		expect(parseInvite("enrichedlab://join?url=https%3A%2F%2Fgate.enrichedlab.com&name=enrichedlab&title=Test+%26+Lab")).toEqual({ url: "https://gate.enrichedlab.com", name: "enrichedlab", title: "Test & Lab", isolated: undefined });
+		expect(parseInvite("enrichedlab://join?url=https://gate.whnrc.example.edu/join&name=WHNRC Lab&isolated=1")).toEqual({ url: "https://gate.whnrc.example.edu", name: "whnrc-lab", title: undefined, isolated: true });
+	});
+
+	test("a lab's own address works too, named from its host; anything not https is refused", async () => {
+		const { parseInvite } = await import("../packages/engine/src/sites/invite.ts");
+		expect(parseInvite("https://gate.whnrc.example.edu/join")).toEqual({ url: "https://gate.whnrc.example.edu", name: "whnrc" });
+		expect(parseInvite("https://gate.enrichedlab.com")).toEqual({ url: "https://gate.enrichedlab.com", name: "enrichedlab" });
+		expect(parseInvite("http://gate.enrichedlab.com")).toBeUndefined();
+		expect(parseInvite("enrichedlab://join?url=http://evil.example")).toBeUndefined();
+		expect(parseInvite("enrichedlab://open?url=https://gate.enrichedlab.com")).toBeUndefined();
+		expect(parseInvite("not a link")).toBeUndefined();
+	});
+});

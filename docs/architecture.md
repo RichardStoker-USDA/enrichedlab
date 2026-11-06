@@ -83,13 +83,25 @@ Anthropic API the system prompt carries a cache breakpoint and the conversation 
 thinking blocks before a point stop being replayed, which the API allows for a leading run. A site can name a
 separate summary model; otherwise the session's model writes it. Nobody has to run a command.
 
-**Models.** A model reference is `<provider>/<model>`. Providers come from three places: local servers found on
-their usual ports (Ollama 11434, LM Studio 1234, llama.cpp 8080, vLLM 8000), services the person added with a key
+**Models.** A model reference is `<provider>/<model>`. Providers come from three places: model servers on this
+computer, services the person added with a key
 (`provider.add`: OpenAI, Anthropic, Gemini, OpenRouter or any OpenAI-compatible address, the key in the OS
 credential store) or listed in `config.json`, and signed-in labs. A model profile holds its context window, output cap, vision,
 reasoning levels and where the level is sent (`reasoning_effort` or `chat_template_kwargs`), and whether reasoning
 is replayed inside a turn. Gate reports all of this in `/v1/models`; local models get conservative defaults that
 `config.json` can override per model.
+
+**Models on this computer** (`models/local.ts`). The engine probes ports 11434, 1234, 8080, 8000 and 30000
+(`discovery.ports` replaces the list) and names each server by its answer, since llama.cpp and mlx_lm.server share
+8080 and vLLM and oMLX share 8000: `owned_by` (llamacpp, vllm, sglang, omlx), Ollama's `/api/version`, LM Studio's
+`/api/v1/models`, and Python's `Server` header for mlx_lm.server. Each model gets the context its server will hold,
+capped by memory (16K under 32 GB, 32K under 64 GB, 64K above). Ollama is reached through `/api/chat`, because its
+OpenAI endpoint can't set `num_ctx` and would cut prompts to its 4,096-token default; LM Studio loads a model with
+the planned `context_length` before its first request. `el local` and the window's *On this computer* list what
+runs here and suggest open models that fit (`models/suggested_models.json`); `el model pull` downloads through
+Ollama, which since 0.40.0 runs models on MLX on Apple silicon. Apple's on-device Foundation Model is left out: its
+4,096-token window can't hold an agent's instructions and tools. A session whose model goes away stops and says so;
+it never moves the conversation to another model on its own.
 
 **Tools.** `read`, `write`, `edit`, `ls`, `glob`, `grep`, `shell` (bash or zsh on macOS and Linux, PowerShell on
 Windows), `fetch`, `show`, `recall`, `plan`, `agent_start` and `agent_wait` (subagents: child sessions in the same

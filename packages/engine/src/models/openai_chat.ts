@@ -1,4 +1,4 @@
-// OpenAI Chat Completions with streaming. This one protocol reaches Gate, vLLM, SGLang, llama.cpp, Ollama, LM Studio,
+// OpenAI Chat Completions with streaming. This one protocol reaches Gate, vLLM, SGLang, llama.cpp, oMLX, MLX, LM Studio,
 // DeepSeek, OpenRouter and most hosted APIs. Reasoning arrives as `reasoning_content` or `reasoning` depending on the
 // server; both are read. The reasoning level goes where the model's profile says.
 
@@ -96,6 +96,7 @@ interface ChunkChoice {
 export const openaiChat: ModelAdapter = {
 	async *stream(request: ModelRequest, signal: AbortSignal): AsyncGenerator<StreamEvent> {
 		const { model } = request;
+		await model.prepare?.(signal);
 		const response = await labFetch(`${model.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
 			method: "POST",
 			headers: { "content-type": "application/json", accept: "text/event-stream", ...(await model.headers()) },

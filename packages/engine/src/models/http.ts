@@ -63,12 +63,14 @@ const OVERFLOW = /context|too long|maximum.*tokens|max_model_len|prompt is too l
 /** Turn a non-2xx response into a ModelHttpError with a short, secret-free message. */
 export async function httpError(response: Response, who: string): Promise<ModelHttpError> {
 	let message = "";
+	let code: string | undefined;
 	try {
 		const text = await response.text();
 		try {
-			const parsed = JSON.parse(text) as { error?: { message?: string } | string; message?: string; detail?: string };
+			const parsed = JSON.parse(text) as { error?: { message?: string; code?: string } | string; message?: string; detail?: string };
 			const error = parsed.error;
 			message = (typeof error === "string" ? error : error?.message) ?? parsed.message ?? parsed.detail ?? text;
+			if (typeof error === "object" && typeof error?.code === "string") code = error.code;
 		} catch {
 			message = text;
 		}
@@ -86,5 +88,6 @@ export async function httpError(response: Response, who: string): Promise<ModelH
 		retryable,
 		Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : undefined,
 		overflow,
+		code,
 	);
 }
