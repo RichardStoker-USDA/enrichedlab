@@ -63,6 +63,10 @@ export interface SiteAdapter {
 	fetchFile?(uri: string, signal: AbortSignal): Promise<Uint8Array>;
 	/** Use by lab and group over a window. */
 	usage?(window: "7d" | "30d"): Promise<unknown>;
+	/** The lab's web harness (Rein): a session in the shared log format (one v1 record per line) goes in. */
+	reinImport?(lines: string, title: string): Promise<unknown>;
+	/** ... and comes out, as the same lines. */
+	reinExport?(id: string): Promise<string>;
 	/** Exercise every endpoint the lab lists, for `el lab check`. */
 	check?(): Promise<CheckRow[]>;
 }

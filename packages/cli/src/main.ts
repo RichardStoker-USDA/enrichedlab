@@ -84,6 +84,8 @@ const HELP = `EnrichedLab ${VERSION}
   el sessions                     recent sessions in this folder (--all for every folder)
   el session export <id> [folder] a session in the shared log format (v1), to open elsewhere
   el session import <folder>      a new session from a v1 log [--cwd <folder>]
+  el session push <id> <lab>      send a session to the lab's Rein, to go on in the browser [--title <title>]
+  el session pull <lab> <id>      a Rein session back here as a new session [--cwd <folder>]
   el service add chatgpt          use your ChatGPT plan (sign in in the browser; --new adds another account)
   el service add <service>        use your own key: openai, anthropic, gemini, openrouter, custom --address <url>
   el doctor                       check the setup
@@ -634,6 +636,25 @@ async function main(): Promise<void> {
 				writeFileSync(join(folder, "session.jsonl"), events.map((e) => JSON.stringify(e)).join("\n") + "\n");
 				for (const [sha, image] of Object.entries(attachments)) writeFileSync(join(folder, "images", `${sha}.${image.mime.split("/")[1] ?? "bin"}`), Buffer.from(image.data, "base64"));
 				return out(`Exported ${events.length} events to ${folder}`);
+			}
+			if (verb === "push") {
+				// A session to a lab's Rein, its web harness, to go on with it in the browser.
+				const id = target ?? fail("el session push <session id> <lab> [--title <title>]");
+				const site = rest[2] ?? fail("el session push <session id> <lab> [--title <title>]");
+				const client = await connect();
+				const pushed = await client.call("session.push", { sessionId: id, site, title: typeof flags.title === "string" ? flags.title : undefined });
+				client.close();
+				out(`Sent ${pushed.records} records to ${site}'s Rein.`);
+				return out(JSON.stringify(pushed.result, null, 2));
+			}
+			if (verb === "pull") {
+				// A Rein session back here, as a new session working in this folder (or --cwd).
+				const site = target ?? fail("el session pull <lab> <rein session id> [--cwd <folder>]");
+				const id = rest[2] ?? fail("el session pull <lab> <rein session id> [--cwd <folder>]");
+				const client = await connect();
+				const pulled = await client.call("session.pull", { site, id, cwd: resolve(typeof flags.cwd === "string" ? flags.cwd : process.cwd()) });
+				client.close();
+				return out(`Brought ${pulled.records} records from ${site}'s Rein into session ${pulled.summary.id} ("${pulled.summary.title}").`);
 			}
 			if (verb === "import") {
 				const folder = resolve(target ?? fail("el session import <folder> [--cwd <folder>]"));

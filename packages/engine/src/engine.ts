@@ -312,6 +312,21 @@ export class Engine {
 		return `/sandbox/work/${basename(cwd).replace(/[^\w.-]/g, "_") || "work"}-${sessionTail}`;
 	}
 
+	/** A new session from shared-log records, held to the import limits; the conversation only (log_v1.ts). */
+	private importLog(input: unknown[], attachments: Attachments, cwd: string | undefined, model: string | undefined): SessionSummary {
+		const problem = importProblem(input, attachments);
+		if (problem) throw new RpcError(-32602, problem);
+		const { events, cwd: written } = fromV1(input as LogV1Event[], attachments);
+		const folder = cwd || written;
+		if (!folder) throw new RpcError(-32602, "The log doesn't say which folder it worked in: pass cwd.");
+		const session = this.createSession(folder, model ?? events.findLast((e) => e.t === "model")?.model);
+		for (const event of events) session.append(event);
+		const title = events.findLast((e) => e.t === "title");
+		session.meta = { ...session.meta, title: title?.t === "title" ? title.title : "Imported session", turns: events.filter((e) => e.t === "user").length, updated: new Date().toISOString() };
+		session.log.writeMeta(session.meta);
+		return session.summary();
+	}
+
 	/** Move a session between this computer and a site's sandbox; a git repository comes along unless `carry` is false. */
 	async movePlace(runtime: SessionRuntime, place: string, carry = true): Promise<string> {
 		if (runtime.isRunning) throw new RpcError(-32010, "Wait for the current turn to finish, or cancel it.");
@@ -668,19 +683,23 @@ export class Engine {
 				}
 				case "session.import": {
 					if (!Array.isArray(p.events)) throw new RpcError(-32602, "events must be a list of v1 session events.");
-					const attachments = (p.attachments ?? {}) as Attachments;
-					const problem = importProblem(p.events, attachments);
-					if (problem) throw new RpcError(-32602, problem);
-					const { events, cwd } = fromV1(p.events as LogV1Event[], attachments);
-					const folder = typeof p.cwd === "string" && p.cwd ? p.cwd : cwd;
-					if (!folder) throw new RpcError(-32602, "The log doesn't say which folder it worked in: pass cwd.");
-					const model = typeof p.model === "string" ? p.model : events.findLast((e) => e.t === "model")?.model;
-					const session = this.createSession(folder, model);
-					for (const event of events) session.append(event);
-					const title = events.findLast((e) => e.t === "title");
-					session.meta = { ...session.meta, title: title?.t === "title" ? title.title : "Imported session", turns: events.filter((e) => e.t === "user").length, updated: new Date().toISOString() };
-					session.log.writeMeta(session.meta);
-					return session.summary();
+					return this.importLog(p.events, (p.attachments ?? {}) as Attachments, typeof p.cwd === "string" ? p.cwd : undefined, typeof p.model === "string" ? p.model : undefined);
+				}
+				case "session.push": {
+					// A session to the lab's Rein, as the shared log's lines; Rein answers with the session it made.
+					const session = this.session(need("sessionId"));
+					const { events } = toV1(session.log.read());
+					const rein = await this.sites.rein(need("site"));
+					const result = await rein.reinImport(`${events.map((e) => JSON.stringify(e)).join("\n")}\n`, typeof p.title === "string" && p.title ? p.title : session.meta.title);
+					return { records: events.length, result };
+				}
+				case "session.pull": {
+					// A Rein session back into a new local session, through the same checks as an import.
+					const rein = await this.sites.rein(need("site"));
+					const text = await rein.reinExport(need("id"));
+					const lines = text.split("\n").filter((l) => l.trim());
+					const events = lines.map((l) => JSON.parse(l) as LogV1Event);
+					return { records: lines.length, summary: this.importLog(events, {}, typeof p.cwd === "string" ? p.cwd : undefined, undefined) };
 				}
 				case "session.delete": {
 					const id = need("sessionId");

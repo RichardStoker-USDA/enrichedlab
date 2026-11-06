@@ -549,6 +549,10 @@ export interface Requests {
 	"term.close": { params: { termId: string }; result: { ok: true } };
 	/** Remove a session and its log; refused while it runs. */
 	"session.delete": { params: { sessionId: string }; result: { ok: true } };
+	/** Send a session to a lab's Rein (its web harness) in the shared log format; `result` is Rein's answer. */
+	"session.push": { params: { sessionId: string; site: string; title?: string }; result: { records: number; result: unknown } };
+	/** Bring a Rein session back as a new session here, working in `cwd`. */
+	"session.pull": { params: { site: string; id: string; cwd?: string }; result: { records: number; summary: SessionSummary } };
 	/** What moving the session would carry: whether its folder is a git repository (whose work, uncommitted too, goes along). */
 	"session.moveplan": { params: { sessionId: string }; result: { repo?: string } };
 	/** The session in the shared log format v1 (docs/session-log.md), with the bytes of the images it refers to. */

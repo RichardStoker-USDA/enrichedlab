@@ -268,6 +268,14 @@ export class Sites {
 		return adapter.check();
 	}
 
+	/** The lab's Rein, for moving a session there and back. */
+	async rein(name: string): Promise<{ reinImport(lines: string, title: string): Promise<unknown>; reinExport(id: string): Promise<string> }> {
+		if (!this.adapters.has(name)) await this.connect(name);
+		const adapter = this.adapters.get(name);
+		if (!adapter?.reinImport || !adapter.reinExport) throw new Error(`${this.title(name)} has no web harness to share sessions with.`);
+		return adapter as Required<Pick<typeof adapter, "reinImport" | "reinExport">>;
+	}
+
 	async usage(name: string, window: "7d" | "30d"): Promise<unknown> {
 		if (!this.adapters.has(name)) await this.connect(name);
 		const adapter = this.adapters.get(name);

@@ -761,6 +761,17 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		}
 	}
 
+	/** POST /rein/api/sessions/import: Rein makes a session from the shared log's lines (docs/session-log.md). */
+	async reinImport(lines: string, title: string): Promise<unknown> {
+		return this.json("POST", `/rein/api/sessions/import?title=${encodeURIComponent(title)}`, { body: lines, headers: { "content-type": "application/x-ndjson", "x-rein": "1" }, signal: AbortSignal.timeout(120_000) });
+	}
+
+	/** GET /rein/api/sessions/{id}/export: a Rein session as the shared log's lines. */
+	async reinExport(id: string): Promise<string> {
+		const response = await this.call("GET", `/rein/api/sessions/${encodeURIComponent(id)}/export`, { headers: { accept: "application/x-ndjson, application/jsonl" }, signal: AbortSignal.timeout(120_000) });
+		return response.text();
+	}
+
 	/** Use by lab and group (GET /v1/usage). */
 	async usage(window: "7d" | "30d"): Promise<unknown> {
 		if (!this.offers("usage")) throw new Error(`${this.title} doesn't report usage.`);

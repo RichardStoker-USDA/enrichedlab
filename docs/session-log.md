@@ -58,8 +58,8 @@ Rein (Gate's web harness) serves v1 as files rather than through its event strea
 - `GET /rein/api/sessions/{id}/export` answers `application/jsonl`, one `{v, seq, time, kind, data}` per line.
   Rein's own decision bases map to v1 (`owner_earlier` and `owner_lease` become `owner` with a basis); kinds v1
   lacks go out as `x-rein-<kind>`.
-- `POST /rein/api/sessions/import?title=&model=` takes a v1 JSONL body (an `x-rein` header line, up to 16 MiB and
-  20,000 events) and answers `{session, events, skipped}`. It renumbers from 1 and remaps `compaction.through`,
+- `POST /rein/api/sessions/import?title=&model=` takes a v1 JSONL body with the request header `X-Rein: 1` (lines up
+  to 256 KiB, 20,000 records) and answers `{session, skipped}`. It renumbers from 1 and remaps `compaction.through`,
   skips `x-*` and unknown kinds, drops hold ids and keeps images by reference. Imported decisions allow nothing.
 - Rein rebuilds the context with the engine's summary prefix as the first user turn.
 - Import limits, which every writer keeps to: a compaction's `through` names an earlier event (`0 <= through < seq`)
@@ -73,6 +73,6 @@ Rein (Gate's web harness) serves v1 as files rather than through its event strea
 
 ## Status
 
-Format agreed; the engine side is built (`el session export` and `el session import`). Rein's side is built and in
-review as Gate publication 60. Once it is live, one engine export goes through Rein's import and export and back
-into the engine to confirm the round trip.
+Format agreed and built on both sides: `el session export` and `el session import` for files, and `el session push
+<id> <lab>` and `el session pull <lab> <id>` to move a session to the lab's Rein and back with the person's lab
+sign-in. Rein's side went live with Gate publication 60 (November 6, 2026).
