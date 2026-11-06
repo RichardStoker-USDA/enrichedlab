@@ -7,6 +7,8 @@ interface BrowserState {
 	canGoBack: boolean;
 	canGoForward: boolean;
 	loading: boolean;
+	/** The last page didn't load: where, and why. */
+	failed?: { url: string; reason: string };
 }
 
 interface Window {
@@ -34,7 +36,7 @@ interface Window {
 			bounds(id: string, bounds: { x: number; y: number; width: number; height: number }): void;
 			hide(id: string): void;
 			navigate(id: string, url: string): void;
-			go(id: string, step: "back" | "forward" | "reload"): void;
+			go(id: string, step: "back" | "forward" | "reload" | "stop"): void;
 			close(id: string): void;
 			onState(listener: (id: string, state: BrowserState) => void): () => void;
 			/** Act on the pane's page for the agent: open, read, click, type, shot. */

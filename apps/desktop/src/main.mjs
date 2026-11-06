@@ -439,8 +439,12 @@ function report(id, view) {
 		canGoBack: contents.navigationHistory.canGoBack(),
 		canGoForward: contents.navigationHistory.canGoForward(),
 		loading: contents.isLoading(),
+		failed: failures.get(id),
 	});
 }
+
+/** Why a view's last page didn't load, until the next one starts. */
+const failures = new Map();
 
 function browserView(id) {
 	let view = views.get(id);
@@ -463,7 +467,14 @@ function browserView(id) {
 		items.push({ label: "Back", enabled: history.canGoBack(), click: () => history.goBack() }, { label: "Forward", enabled: history.canGoForward(), click: () => history.goForward() }, { label: "Reload", click: () => contents.reload() });
 		Menu.buildFromTemplate(items).popup({ window });
 	});
-	for (const name of ["did-navigate", "did-navigate-in-page", "page-title-updated", "did-start-loading", "did-stop-loading"]) contents.on(name, () => report(id, view));
+	for (const name of ["did-navigate", "did-navigate-in-page", "page-title-updated", "did-stop-loading"]) contents.on(name, () => report(id, view));
+	contents.on("did-start-loading", () => (failures.delete(id), report(id, view)));
+	// A page that can't load says why (an aborted load, -3, is a person's Stop and isn't a failure).
+	contents.on("did-fail-load", (_event, code, description, url, mainFrame) => {
+		if (!mainFrame || code === -3) return;
+		failures.set(id, { url, reason: description || `error ${code}` });
+		report(id, view);
+	});
 	views.set(id, view);
 	return view;
 }
@@ -488,6 +499,7 @@ ipcMain.on("browser:go", (event, id, step) => {
 	if (!contents) return;
 	if (step === "back") contents.navigationHistory.goBack();
 	else if (step === "forward") contents.navigationHistory.goForward();
+	else if (step === "stop") contents.stop();
 	else contents.reload();
 });
 // ── The agent's hands in the browser pane ────────────────────────────────────────────────────────────────────────
