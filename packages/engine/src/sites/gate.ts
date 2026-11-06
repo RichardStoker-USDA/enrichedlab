@@ -176,7 +176,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	/** Background jobs started in the sandbox, so shutdown never deletes a sandbox while one runs. */
 	private jobs = new Set<string>();
 	/** Repositories sent to the sandbox from this engine: sandbox folder → local repository and the commit sent. */
-	private sent = new Map<string, { repo: string; base: string }>();
+	private sent = new Map<string, { repo: string; base: string; home?: string }>();
 
 	/** This computer's key for the lab, when the lab binds tokens to devices (dpop.ts). */
 	private device?: DeviceKey;
@@ -1581,8 +1581,8 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				const id = randomBytes(4).toString("hex");
 				const dir = `/sandbox/work/${basename(repo).replace(/[^\w.-]/g, "_")}-${id}`;
 				const sent = await sendRepo(this, repo, dir, ctx.signal);
-				this.sent.set(dir, { repo, base: sent.base });
-				const left = sent.skipped.length ? ` Left out as likely secrets: ${sent.skipped.join(", ")}.` : "";
+				this.sent.set(dir, { repo, base: sent.base, home: sent.home });
+				const left = `${sent.skipped.length ? ` Left out as likely secrets: ${sent.skipped.join(", ")}.` : ""}${sent.history ? "" : " Only the current files went: the history has files that look like secrets."}`;
 				return { ok: true, content: `Sent to ${dir} on branch work (${sent.head}).${left}`, view: { result: dir } };
 			},
 		};

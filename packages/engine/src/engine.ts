@@ -19,7 +19,7 @@ import type {
 	UiPrefs,
 } from "@enrichedlab/protocol";
 import { type LogV1Event, PROTOCOL_VERSION } from "@enrichedlab/protocol";
-import { type Attachments, fromV1, toV1 } from "./session/log_v1.ts";
+import { type Attachments, fromV1, importProblem, toV1 } from "./session/log_v1.ts";
 import { AppHost, type AppSession } from "./apps/host.ts";
 import { CanvasStore } from "./canvas.ts";
 import { applyBundles, listBundles } from "./bundles.ts";
@@ -346,12 +346,14 @@ export class Engine {
 		const api = this.sandboxFor(place);
 		const workspace = new SandboxWorkspace(api, this.sandboxRoot(runtime.cwd, `${runtime.id.slice(-6)}-${newId("m").slice(-4)}`));
 		const repo = carry && from === "local" ? repoRoot(runtime.cwd) : undefined;
-		let carried: { repo: string; base: string; id: string } | undefined;
+		let carried: { repo: string; base: string; home?: string; id: string } | undefined;
 		let detail = `Files and commands now act in ${workspace.label}.`;
 		if (repo) {
 			const sent = await sendRepo(api, repo, workspace.root);
-			carried = { repo, base: sent.base, id: sent.id };
-			detail = `The repository moved to ${api.title} (${sent.head})${sent.skipped.length ? `; left here as likely secrets: ${sent.skipped.join(", ")}` : ""}.`;
+			carried = { repo, base: sent.base, home: sent.home, id: sent.id };
+			const left = sent.skipped.length ? `; left here as likely secrets: ${sent.skipped.join(", ")}` : "";
+			const alone = sent.history ? "" : " Its history stayed here, since files that look like secrets are in it; the work comes home on your history all the same.";
+			detail = `The repository moved to ${api.title} (${sent.head})${left}.${alone}`;
 		}
 		runtime.moveTo(workspace, { place, label: workspace.label, root: workspace.root, carried });
 		return detail;
@@ -663,6 +665,8 @@ export class Engine {
 				case "session.import": {
 					if (!Array.isArray(p.events)) throw new RpcError(-32602, "events must be a list of v1 session events.");
 					const attachments = (p.attachments ?? {}) as Attachments;
+					const problem = importProblem(p.events, attachments);
+					if (problem) throw new RpcError(-32602, problem);
 					const { events, cwd } = fromV1(p.events as LogV1Event[], attachments);
 					const folder = typeof p.cwd === "string" && p.cwd ? p.cwd : cwd;
 					if (!folder) throw new RpcError(-32602, "The log doesn't say which folder it worked in: pass cwd.");

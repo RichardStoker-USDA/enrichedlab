@@ -2,9 +2,12 @@
 // EnrichedLab desktop shell when it is installed. Nothing here needs administrator rights.
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { existsSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { paths } from "@enrichedlab/engine";
 
 function run(file: string, args: string[]): boolean {
 	try {
@@ -80,6 +83,23 @@ export function desktopShell(): string | undefined {
 
 export type OpenedWith = "desktop" | "app window" | "browser" | "none";
 
+/**
+ * A page that sends the browser on to `url`, as an owner-only file in the engine's run folder. Other people on a
+ * shared computer can read a program's arguments, so a pairing address never goes on a command line: the browser is
+ * given this file instead. Files from earlier opens are removed after five minutes.
+ */
+function forwardingPage(url: string): string {
+	const dir = paths().run;
+	for (const name of readdirSync(dir)) {
+		const file = join(dir, name);
+		if (name.startsWith("open-") && Date.now() - statSync(file).mtimeMs > 300_000) rmSync(file, { force: true });
+	}
+	const file = join(dir, `open-${randomBytes(8).toString("hex")}.html`);
+	const target = JSON.stringify(url).replace(/</g, "\\u003c");
+	writeFileSync(file, `<!doctype html><meta charset="utf-8"><title>EnrichedLab</title><script>location.replace(${target})</script>`, { mode: 0o600 });
+	return pathToFileURL(file).href;
+}
+
 /** Open the web surface the best way available. `pairUrl` signs the browser in once. */
 export function openSurface(pairUrl: string, sessionId?: string, prefer?: "browser"): OpenedWith {
 	const shell = prefer ? undefined : desktopShell();
@@ -87,7 +107,8 @@ export function openSurface(pairUrl: string, sessionId?: string, prefer?: "brows
 		const args = sessionId ? ["--session", sessionId] : [];
 		if (process.platform === "darwin" ? run("open", ["-a", shell, "--args", ...args]) : run(shell, args)) return "desktop";
 	}
+	const page = forwardingPage(pairUrl);
 	const browser = prefer ? undefined : appBrowser();
-	if (browser && run(browser, [`--app=${pairUrl}`, "--new-window"])) return "app window";
-	return openBrowser(pairUrl) ? "browser" : "none";
+	if (browser && run(browser, [`--app=${page}`, "--new-window"])) return "app window";
+	return openBrowser(page) ? "browser" : "none";
 }

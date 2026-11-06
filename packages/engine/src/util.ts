@@ -134,3 +134,11 @@ export class Emitter<T extends Record<string, unknown>> {
 
 /** File names that usually hold secrets: never uploaded to a site, never sent in a repository handoff. */
 export const SECRET_NAME = /(^|[\\/])(\.env(\..*)?|.*\.pem|.*\.key|id_[a-z0-9]+|credentials(\.json)?|.*\.tfstate|\.netrc|\.npmrc|\.pypirc)$/i;
+
+/** Environment variable names that look like they hold a credential: keys, tokens, passwords, DSNs, agent sockets. */
+export const SECRET_VAR = /(TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|CREDENTIAL|API_?KEY|ACCESS_?KEY|PRIVATE_?KEY|(^|_)AUTH(_|$)|AUTHORIZATION|COOKIE|_KEY$|^KEY$|(^|_)DSN$|DATABASE_URL|CONNECTION_STRING|^AWS_|^AZURE_|^GOOGLE_APPLICATION_CREDENTIALS$|^SSH_AUTH_SOCK$|^GPG_AGENT_INFO$)/i;
+
+/** An environment without the variables that look like credentials. */
+export function withoutSecrets(env: Record<string, string | undefined>): Record<string, string> {
+	return Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined && !SECRET_VAR.test(entry[0])));
+}

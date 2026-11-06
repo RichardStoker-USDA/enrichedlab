@@ -22,6 +22,9 @@ const SUBCOMMANDS = new Set([
 	"make", "just", "brew", "gh", "terraform", "dotnet", "swift", "mvn", "gradle",
 ]);
 
+/** Tools that change files in the project. Other writes (browser actions, apps, memory, PDF forms) are each their own. */
+const FILE_EDITS = new Set(["write", "edit"]);
+
 /** The key an "allow for this session" answer is stored under. */
 export function allowKey(tool: Tool, args: Record<string, unknown>): string {
 	if (tool.kind === "exec") {
@@ -34,7 +37,7 @@ export function allowKey(tool: Tool, args: Record<string, unknown>): string {
 		if (SUBCOMMANDS.has(first) && words[1] && !words[1].startsWith("-")) return `shell:${first} ${words[1]}`;
 		return `shell:${first}`;
 	}
-	if (tool.kind === "write") return "write";
+	if (tool.kind === "write") return FILE_EDITS.has(tool.name) ? "write" : `write:${tool.name}`;
 	if (tool.kind === "net") return `net:${tool.host?.(args) ?? host(args)}`;
 	return `tool:${tool.name}`;
 }
@@ -101,11 +104,12 @@ export function decide(tool: Tool, args: Record<string, unknown>, workspace: Wor
 	if (key === "shell!push") return { action: "ask", reason: PUSH_REASON, key };
 	if (tool.unreviewed) return { action: "ask", reason: "The lab hasn't reviewed this tool yet, so it asks every time.", key: `unreviewed!${tool.name}` };
 	if (mode === "full") return { action: "run" };
-	// An answer about something outside the project is remembered under its own key; "!" keys never are.
-	if (!key.includes("!") && allowed.has(extra ? `${key}:outside` : key)) return { action: "run" };
+	// An answer about something outside the project is remembered for that path only; "!" keys never are.
+	const outside = `${key}:outside:${String(args.path ?? args.url ?? "")}`;
+	if (!key.includes("!") && allowed.has(extra ? outside : key)) return { action: "run" };
 	switch (tool.kind) {
 		case "net": {
-			if (extra) return { action: "ask", reason: extra, key: `${key}:outside` };
+			if (extra) return { action: "ask", reason: extra, key: outside };
 			const name = tool.host?.(args) ?? host(args);
 			const reason = localHost(name) ? `It reaches ${name}, an address on this computer or your network.` : `It sends a request to ${name}.`;
 			return { action: "ask", reason, key };
@@ -114,11 +118,13 @@ export function decide(tool: Tool, args: Record<string, unknown>, workspace: Wor
 		case "local":
 		case "site-read":
 		case "sandbox":
-			return extra ? { action: "ask", reason: extra, key: `${key}:outside` } : { action: "run" };
+			return extra ? { action: "ask", reason: extra, key: outside } : { action: "run" };
 		case "write":
-			if (extra) return { action: "ask", reason: extra, key: `${key}:outside` };
-			// A session's own worktree is its own branch: the person reviews the work when they merge it.
-			return mode === "edits" || ownWorktree(workspace) ? { action: "run" } : { action: "ask", reason: "It changes a file.", key };
+			if (extra) return { action: "ask", reason: extra, key: outside };
+			// File edits in a session's own worktree go to its own branch: the person reviews them when they merge.
+			// Other writes (a click in the browser, a new app) ask in every mode until allowed.
+			if (key === "write" && (mode === "edits" || ownWorktree(workspace))) return { action: "run" };
+			return { action: "ask", reason: key === "write" ? "It changes a file." : `It ${WRITES[tool.name] ?? (tool.name.endsWith("_sandbox_download") ? "copies a file from the sandbox into the project" : "changes something")}.`, key };
 		case "exec": {
 			const command = String(args.command ?? "");
 			// In its own worktree the agent commits to its own branch; the person merges it.
@@ -135,6 +141,16 @@ export function decide(tool: Tool, args: Record<string, unknown>, workspace: Wor
 			return { action: "ask", reason: "The site doesn't mark this tool read-only.", key };
 	}
 }
+
+/** What a write that isn't a file edit does, for its question. */
+const WRITES: Record<string, string> = {
+	browser_click: "clicks in the browser, where you may be signed in",
+	browser_type: "types into a page in the browser, where you may be signed in",
+	app_create: "makes an app in the project",
+	remember: "saves a note to memory that later sessions read",
+	skill_create: "saves a skill that later sessions use",
+	pdf_fill: "fills in a PDF form",
+};
 
 /** True when the session works in a worktree EnrichedLab made for it. */
 function ownWorktree(workspace: Workspace): boolean {

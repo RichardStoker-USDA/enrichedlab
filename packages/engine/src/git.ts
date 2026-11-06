@@ -111,12 +111,36 @@ export function identity(cwd: string): { name: string; email: string } {
 	return { name: read("user.name") || "EnrichedLab", email: read("user.email") || "enrichedlab@localhost" };
 }
 
+/** Git pathspecs for the names SECRET_NAME matches, so history is searched by name without walking every tree. */
+const SECRET_SPECS = [".env", ".env.*", "*.pem", "*.key", "id_*", "credentials", "credentials.json", "*.tfstate", ".netrc", ".npmrc", ".pypirc"].map((g) => `:(glob,icase)**/${g}`);
+
+/** Secret-looking paths anywhere in the history behind `head`, merges included. */
+export function secretsInHistory(repo: string, head: string): string[] {
+	const out = git(repo, ["log", "--full-history", "-m", "--format=", "--name-only", head, "--", ...SECRET_SPECS]);
+	return [...new Set(out.split("\n").filter((f) => f && SECRET_NAME.test(f)))];
+}
+
+export interface Pack {
+	id: string;
+	/** refs/enrichedlab/send/<id>: the commit the bundle carries. */
+	ref: string;
+	/** The commit sent. */
+	commit: string;
+	/** The same work on the person's history, secret-looking files they track included: returned work goes on it. */
+	home: string;
+	/** Secret-looking files left out of the commit sent. */
+	skipped: string[];
+	/** False when the history stayed here because secret-looking files are in it: the commit sent stands alone. */
+	history: boolean;
+}
+
 /**
  * The repository as it is now, ready to send elsewhere: HEAD plus one commit holding uncommitted and untracked
- * (not ignored) files, with secret-looking files left out. Kept on refs/enrichedlab/send/<id>; the person's index and
- * branch are untouched. Writes a bundle of that ref to `bundle`.
+ * (not ignored) files, with secret-looking files left out. When any commit behind HEAD holds a secret-looking file,
+ * only the current files go, as one commit without history: a bundle carries every object its history reaches.
+ * Kept on refs/enrichedlab/send/<id>; the person's index and branch are untouched. Writes the bundle to `bundle`.
  */
-export function packForSend(repo: string, bundle: string): { id: string; ref: string; commit: string; skipped: string[] } {
+export function packForSend(repo: string, bundle: string): Pack {
 	const id = randomBytes(4).toString("hex");
 	const ref = `refs/enrichedlab/send/${id}`;
 	const scratch = mkdtempSync(join(tmpdir(), "enrichedlab-index-"));
@@ -134,23 +158,77 @@ export function packForSend(repo: string, bundle: string): { id: string; ref: st
 		const skipped = files.filter((f) => SECRET_NAME.test(f));
 		for (const file of skipped) git(repo, ["rm", "--cached", "-q", "--", file], env);
 		const tree = git(repo, ["write-tree"], env);
+		// The person's side: the same tree with the secret-looking files they track put back as HEAD has them, so
+		// merging returned work never deletes them. Untracked ones stay untracked.
+		for (const file of head ? skipped : []) {
+			const entry = git(repo, ["ls-tree", head!, "--", file]);
+			const [mode, , blob] = entry.split(/\s+/);
+			if (mode && blob) git(repo, ["update-index", "--add", "--cacheinfo", `${mode},${blob},${file}`], env);
+		}
+		const homeTree = git(repo, ["write-tree"], env);
 		const headTree = head ? git(repo, ["rev-parse", `${head}^{tree}`]) : "";
 		const who = identity(repo);
 		const as = { GIT_AUTHOR_NAME: who.name, GIT_AUTHOR_EMAIL: who.email, GIT_COMMITTER_NAME: who.name, GIT_COMMITTER_EMAIL: who.email };
-		// A clean tree sends HEAD itself; otherwise one commit on top carries the uncommitted work.
-		const commit = head && tree === headTree ? head : git(repo, ["commit-tree", tree, ...(head ? ["-p", head] : []), "-m", "Uncommitted work"], as);
+		// A clean tree is HEAD itself; otherwise one commit on top carries the uncommitted work.
+		const home = head && homeTree === headTree ? head : git(repo, ["commit-tree", homeTree, ...(head ? ["-p", head] : []), "-m", "Uncommitted work"], as);
+		const history = !head || secretsInHistory(repo, head).length === 0;
+		const commit = history ? home : git(repo, ["commit-tree", tree, "-m", `The project at ${head!.slice(0, 7)}, without its history (it has files that look like secrets)`], as);
 		git(repo, ["update-ref", ref, commit]);
+		if (home !== commit) git(repo, ["update-ref", `${ref}-home`, home]);
 		git(repo, ["bundle", "create", "-q", bundle, ref]);
-		return { id, ref, commit, skipped };
+		return { id, ref, commit, home, skipped, history };
 	} finally {
 		rmSync(scratch, { recursive: true, force: true });
 	}
 }
 
-/** Bring commits from a bundle in as a new local branch and list the ones after `base`. Nothing else changes. */
-export function fetchBundle(repo: string, bundle: string, source: string, branch: string, base: string): string[] {
-	git(repo, ["fetch", "-q", bundle, `${source}:refs/heads/${branch}`]);
-	return git(repo, ["log", "--format=%h %s", `${base}..${branch}`]).split("\n").filter(Boolean);
+/**
+ * Bring commits from a bundle in as a new local branch and list the ones after `base`. Nothing else changes. When
+ * the work went out as a commit other than `home` (without history, or without tracked secret-looking files), each
+ * returned commit is made again on `home`: same message, author and dates, with those files as they were.
+ */
+export function fetchBundle(repo: string, bundle: string, source: string, branch: string, base: string, home = base): string[] {
+	const temp = `refs/enrichedlab/fetch/${randomBytes(4).toString("hex")}`;
+	git(repo, ["fetch", "-q", bundle, `${source}:${temp}`]);
+	try {
+		const tip = home === base ? git(repo, ["rev-parse", temp]) : rebuild(repo, base, home, temp);
+		git(repo, ["update-ref", `refs/heads/${branch}`, tip]);
+	} finally {
+		git(repo, ["update-ref", "-d", temp]);
+	}
+	return git(repo, ["log", "--format=%h %s", `${home}..${branch}`]).split("\n").filter(Boolean);
+}
+
+/** The commits `from..tip` made again on `onto`, with the files `onto` has and `from` lacks put back. Returns the new tip. */
+function rebuild(repo: string, from: string, onto: string, tip: string): string {
+	const restore = git(repo, ["diff", "--name-only", "--diff-filter=A", "-z", from, onto]).split("\0").filter(Boolean);
+	const scratch = mkdtempSync(join(tmpdir(), "enrichedlab-rebuild-"));
+	const env = { GIT_INDEX_FILE: join(scratch, "index") };
+	const made = new Map([[from, onto]]);
+	let last = onto;
+	try {
+		for (const line of git(repo, ["rev-list", "--reverse", "--topo-order", "--parents", `${from}..${tip}`]).split("\n").filter(Boolean)) {
+			const [commit, ...parents] = line.split(" ") as [string, ...string[]];
+			let tree = git(repo, ["rev-parse", `${commit}^{tree}`]);
+			if (restore.length) {
+				git(repo, ["read-tree", tree], env);
+				for (const file of restore) {
+					if (git(repo, ["ls-tree", commit, "--", file])) continue;
+					const [mode, , blob] = git(repo, ["ls-tree", onto, "--", file]).split(/\s+/);
+					if (mode && blob) git(repo, ["update-index", "--add", "--cacheinfo", `${mode},${blob},${file}`], env);
+				}
+				tree = git(repo, ["write-tree"], env);
+			}
+			const [an, ae, ad, cn, ce, cd] = git(repo, ["show", "-s", "--format=%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI", commit]).split("\0");
+			const message = git(repo, ["show", "-s", "--format=%B", commit]);
+			const who = { GIT_AUTHOR_NAME: an ?? "", GIT_AUTHOR_EMAIL: ae ?? "", GIT_AUTHOR_DATE: ad ?? "", GIT_COMMITTER_NAME: cn ?? "", GIT_COMMITTER_EMAIL: ce ?? "", GIT_COMMITTER_DATE: cd ?? "" };
+			last = git(repo, ["commit-tree", tree, ...parents.flatMap((p) => ["-p", made.get(p) ?? p]), "-m", message || "Work from the sandbox"], who);
+			made.set(commit, last);
+		}
+		return last;
+	} finally {
+		rmSync(scratch, { recursive: true, force: true });
+	}
 }
 
 /** Files that differ between a snapshot and the working tree now. Nothing in the repository changes. */

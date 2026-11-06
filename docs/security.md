@@ -12,15 +12,44 @@
 | App backends | contained as above | contained as above | run as the person (the consent card says so) |
 
 None of these need administrator rights. Where the facility isn't available (bubblewrap inside a container, a
-locked-down Windows policy), commands run as the person and every one asks first. Hiding reads and blocking the
+locked-down Windows policy), commands run as the person and every one asks first.
+
+Containment governs writes, the network and credential folders. It does not hide the rest of the disk: a contained
+program the project holds can read files outside it that aren't hidden, and what it prints goes to the model. A
+contained command gets the engine's environment without anything that looks like a key, token, password, DSN or
+agent socket (`withoutSecrets` in `util.ts`), so `env` or `printenv` show nothing secret. A command the person
+approves to run uncontained gets the whole environment.
+
+"Allow for this session" covers what was asked about and nothing wider. File edits share one answer; each other
+kind of change (a click or typing in the browser, a new app, a memory or skill, a filled PDF, a sandbox download)
+has its own, and edits mode and a session's own worktree run file edits only. An answer about a path outside the
+project covers that path. Pushes and unreviewed lab tools ask every time.
+
+A lab sandbox is one Linux container per person at that lab, and the sessions moved there share it: a command in one
+project can read the others'. Keep work that must stay apart in different labs or sandboxes (`el sandbox create`). Hiding reads and blocking the
 network on Windows needs a one-time administrator setup (a sandbox account and firewall rules); a lab sandbox is the
 place for that kind of work.
 
-App backends and served apps run under the same facility with the network limited to what the app declared, and app
-pages run in an opaque origin with their own content security policy (docs/apps.md). Lab sandboxes are isolated by
+App backends and served apps run under the same facility, and app pages run in an opaque origin with their own
+content security policy (docs/apps.md). The page reaches only the origins the app names; a program behind it that
+asked for any network reaches all of it, and the consent card says so. Building an app's environment runs contained
+too: pixi may write the app's folder and its own cache under `~/.el/tools`, never the person's shared package caches,
+and gets no keys. The card lists every package (conda, PyPI, other channels and indexes, and anything built from
+source), and a grant covers that exact `pixi.toml`: a change asks again. An app package is checked against its size
+limits before it is unpacked. Lab sandboxes are isolated by
 the lab.
 
 The engine listens on loopback only, checks `Host` and `Origin`, and authenticates every surface (docs/architecture.md).
+`el app` hands a browser its one-time pairing address through an owner-only page in `~/.el/run`, never on a command
+line, where other people on a shared computer could read it.
+
+Moving a session to a lab sends its git repository without secret-looking files. When any commit in its history
+holds one (`.env`, keys, credentials, even a since-deleted one), only the current files go, as one commit, because a
+bundle carries every object its history reaches. Work comes back as a branch on the person's own history either way,
+with the secret-looking files they track kept.
+
+An imported session log (`el session import`) is held to the shared log's limits and brings only conversation:
+records about the computer that wrote it (undo checkpoints, where it worked, local snapshots) are dropped.
 Keys for model services go to the OS credential store; lab tokens are owner-only files, short-lived, and bound to
 the lab that issued them. At a lab that asks for it, every request also carries a DPoP proof signed by a per-lab device
 key whose private half stays in the OS credential store, so a copied token is useless elsewhere ([labs.md](labs.md)).
@@ -45,6 +74,11 @@ revoked at OpenAI on sign-out); windows and the terminal see only the account's 
 Each release publishes `manifest.json` (version, notes, and every file's size and SHA-256) and an Ed25519 signature
 over it. The public key is built into the binary, so a file that doesn't match what the release key signed is never
 installed, wherever it was downloaded from. The private key stays on the release machine.
+
+The first install is the exception. `install.sh` comes from the latest GitHub release and checks the binary against
+that release's `SHA256SUMS`, so its trust rests on the release itself (the GitHub account that publishes it); it can't
+check the manifest signature before `el` exists. The macOS app and package carry Apple's notarization as a second,
+independent check. Every update after that is verified against the release key.
 
 `el update` and the app's update button replace whatever this copy was installed as, without administrator
 rights: the macOS package into `~/Applications`, the Windows setup into `%LOCALAPPDATA%\Programs`, the AppImage in

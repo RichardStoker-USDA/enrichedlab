@@ -55,6 +55,40 @@ export const MAX_DATA = 252 * 1024;
 
 const size = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
 
+/**
+ * Images an import may bring: how many, and how large each and all together are (base64 text). The whole import
+ * travels as one engine message, which is capped at 64 MiB.
+ */
+export const MAX_ATTACHMENTS = 512;
+export const MAX_ATTACHMENT = 16 * 1024 * 1024;
+export const MAX_ATTACHMENTS_TOTAL = 48 * 1024 * 1024;
+
+/** Why an import is refused, when it is: the shared log's limits, checked before anything is read into a session. */
+export function importProblem(input: unknown[], attachments: Attachments): string | undefined {
+	if (input.length > MAX_RECORDS) return `The log has ${input.length.toLocaleString("en-US")} records; the shared log takes ${MAX_RECORDS.toLocaleString("en-US")}.`;
+	for (const e of input) {
+		const data = (e as { data?: unknown } | null)?.data;
+		// A line's data, plus room for the rest of its record.
+		if (data !== undefined && size(data) > MAX_DATA + 4096) return "A record's data is larger than the shared log allows (252 KiB).";
+	}
+	const images = Object.values(attachments);
+	if (images.length > MAX_ATTACHMENTS) return `The log brings ${images.length} images; an import takes ${MAX_ATTACHMENTS}.`;
+	let total = 0;
+	for (const image of images) {
+		const length = typeof image?.data === "string" ? image.data.length : 0;
+		if (length > MAX_ATTACHMENT) return "An image in the log is larger than 16 MB.";
+		total += length;
+	}
+	if (total > MAX_ATTACHMENTS_TOTAL) return "The log's images add up to more than 48 MB.";
+	return undefined;
+}
+
+/**
+ * The engine's own record kinds an import keeps. The rest describe things on the computer that wrote the log (undo
+ * checkpoints, where the session worked, local snapshots): taken from a file, Undo could act on any path it names.
+ */
+const IMPORTED_OWN_KINDS = new Set(["elide", "model", "title", "app_context"]);
+
 /** An event over the data limit: call arguments go to {} first, then the longest strings are cut, marked as cut. */
 function trim(e: V1Event): V1Event {
 	if (size(e.data) <= MAX_DATA) return e;
@@ -163,8 +197,9 @@ function fit(out: V1Event[]): V1Event[] {
 const STOPS = new Set<StopReason>(["end", "tool_use", "length", "error", "cancelled"]);
 
 /**
- * v1 events as engine events to append after a new session's header. Unknown kinds are skipped; the engine's own
- * x- kinds come back as they were. A call left without a result gets the stand-in the format names.
+ * v1 events as engine events to append after a new session's header. Unknown kinds are skipped, and so are the
+ * engine's own x- kinds that describe the computer that wrote the log. A call left without a result gets the
+ * stand-in the format names. Check `importProblem` first.
  */
 export function fromV1(input: LogV1Event[], attachments: Attachments = {}): { events: SessionEvent[]; cwd?: string } {
 	const events: SessionEvent[] = [];
@@ -212,8 +247,8 @@ export function fromV1(input: LogV1Event[], attachments: Attachments = {}): { ev
 			continue;
 		} else if (typeof e.kind === "string" && e.kind.startsWith("x-")) {
 			const t = e.kind.slice(2).replace(/-/g, "_");
-			// The engine's own kinds, as they were; a reader that doesn't know one skips it.
-			if (!["elide", "model", "title", "checkpoint", "undo", "place", "app_context", "local"].includes(t)) continue;
+			// The engine's own kinds that only shape what the model reads; everything else is skipped.
+			if (!IMPORTED_OWN_KINDS.has(t)) continue;
 			events.push({ ...(d as object), t, id, at } as SessionEvent);
 		} else continue;
 		idOfSeq.set(e.seq, id);

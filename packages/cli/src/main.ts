@@ -2,7 +2,7 @@
 // el: the EnrichedLab command. With no arguments it opens the terminal surface for the current folder.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { PermissionRequest, SessionEvent } from "@enrichedlab/protocol";
 import {
@@ -638,6 +638,8 @@ async function main(): Promise<void> {
 			if (verb === "import") {
 				const folder = resolve(target ?? fail("el session import <folder> [--cwd <folder>]"));
 				const file = existsSync(join(folder, "session.jsonl")) ? join(folder, "session.jsonl") : folder;
+				// The import goes to the engine as one message, at most 64 MiB with its images.
+				if (statSync(file).size > 60 * 1024 * 1024) fail("That log is larger than an import takes (60 MB). Export it again with a newer el, which keeps it within the shared log's limits.");
 				const events = readFileSync(file, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
 				const attachments: Record<string, { mime: string; data: string }> = {};
 				const images = join(dirname(file), "images");

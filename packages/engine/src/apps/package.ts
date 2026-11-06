@@ -5,6 +5,7 @@
 // install; the app asks for its permissions when it first opens.
 
 import { createHash } from "node:crypto";
+import { gunzipSync } from "node:zlib";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, normalize, relative, sep } from "node:path";
 import type { Paths } from "../paths.ts";
@@ -13,6 +14,8 @@ import { APP_NAME, readManifest } from "./manifest.ts";
 
 const LOCK = ".lab/lock.json";
 const MAX_TOTAL = 200 * 1024 * 1024;
+/** Files in one package, at most. */
+const MAX_FILES = 20_000;
 const SKIP = /(^|\/)(\.git|node_modules|\.DS_Store|\.lab)(\/|$)/;
 
 interface ArchiveLike {
@@ -123,8 +126,17 @@ export async function installApp(
 	file: string,
 	options: { trust?: boolean; vouched?: { lab: string; signers: { fingerprint: string; publicKey: string }[] }; origin?: Omit<AppOrigin, "signer" | "installed"> } = {},
 ): Promise<{ name: string; version: string; dir: string; fingerprint: string; newSigner: boolean; vouchedBy?: string }> {
-	const archive = new Archive(new Uint8Array(readFileSync(file)));
+	// Sizes are checked before anything is unpacked into memory: a small file can expand without bound.
+	if (statSync(file).size > MAX_TOTAL) throw new Error("This package is larger than an app may be (200 MB).");
+	let tar: Uint8Array;
+	try {
+		tar = gunzipSync(readFileSync(file), { maxOutputLength: MAX_TOTAL + 16 * 1024 * 1024 });
+	} catch (error) {
+		throw new Error((error as { code?: string }).code === "ERR_BUFFER_TOO_LARGE" ? "This package unpacks to more than an app may be (200 MB)." : "This isn't an app package: it doesn't unpack.");
+	}
+	const archive = new Archive(tar);
 	const files = await archive.files();
+	if (files.size > MAX_FILES) throw new Error(`This package has more than ${MAX_FILES.toLocaleString("en-US")} files.`);
 	const lockBlob = files.get(LOCK);
 	if (!lockBlob) throw new Error("This isn't an app package: it has no .lab/lock.json.");
 	const lock = JSON.parse(await lockBlob.text()) as Lock;

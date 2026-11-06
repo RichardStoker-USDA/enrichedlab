@@ -216,8 +216,9 @@ a lab. Details and rules: [bundles.md](bundles.md).
   microphone, camera and notifications only to the app's own top frame.
 - Site tokens are bound to the address they were issued for: pointing a site name at a new address drops them.
 - Secrets are referenced by path or environment variable in `config.json` and read at use. Token-shaped strings are
-  redacted from errors and notices. A command the person approves can still print a secret into the session log
-  (for example `printenv`), which is why commands that read the environment or outside the project ask.
+  redacted from errors and notices. Contained commands run without the variables that look like credentials
+  (`withoutSecrets`), so `printenv` there shows none; a command the person approves to run uncontained gets the whole
+  environment and can still print a secret into the session log.
 - The local shell runs with the person's own rights unless `permissions.sandbox` is `"workspace"`: then commands
   run under Seatbelt (macOS) or bubblewrap (Linux) with writes kept to the project and temp folders, no network,
   credential folders (`~/.ssh`, `~/.secrets`, the engine's keys and others) unreadable, and on Linux every namespace

@@ -6,6 +6,7 @@ import { existsSync, readlinkSync, realpathSync } from "node:fs";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { withoutSecrets } from "../util.ts";
 
 export interface Entry {
 	name: string;
@@ -283,10 +284,13 @@ export class LocalWorkspace implements Workspace {
 	exec(command: string, options: { timeoutMs: number; signal: AbortSignal; onOutput?: (text: string) => void; unsandboxed?: boolean; env?: Record<string, string> }): Promise<ExecResult> {
 		if (options.signal.aborted) return Promise.resolve({ exitCode: null, output: "", timedOut: false });
 		const { file, args } = this.launch(command, !options.unsandboxed);
+		// A contained command runs without asking, so it never sees the engine's keys and tokens: `env` would show them.
+		const base = options.env ?? process.env;
+		const env = this.sandboxed && !options.unsandboxed ? withoutSecrets(base) : base;
 		return new Promise((done) => {
 			const child = spawn(file, args, {
 				cwd: this.root,
-				env: { ...(options.env ?? process.env), LAB_AGENT: "1", PAGER: "cat", GIT_PAGER: "cat", TERM: "dumb", NO_COLOR: "1" },
+				env: { ...env, LAB_AGENT: "1", PAGER: "cat", GIT_PAGER: "cat", TERM: "dumb", NO_COLOR: "1" },
 				stdio: ["ignore", "pipe", "pipe"],
 				windowsHide: true,
 				detached: process.platform !== "win32",

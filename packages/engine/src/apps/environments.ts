@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { contained } from "../tools/workspace.ts";
 
 export const PIXI_VERSION = "0.82.0";
 
@@ -44,16 +45,24 @@ export async function pixi(tools: string, log: (line: string) => void = () => un
 export const hasEnvironment = (dir: string): boolean => existsSync(join(dir, "pixi.toml"));
 
 /**
- * Build (or check) the app's environment and return the command wrapped to run inside it. Installing reaches
- * conda-forge, so it runs before the contained launch; the app itself then runs offline in its sandbox.
+ * Build (or check) the app's environment and return the command wrapped to run inside it. Installing reaches the
+ * package indexes, and a package built from source runs its build scripts, so the install is contained too: it may
+ * write only the app's folder and its own caches under `tools` (never the person's shared pixi or uv caches, which
+ * other projects read), and it gets no keys or tokens. The app itself then runs offline in its sandbox.
  */
 export async function inEnvironment(dir: string, command: string[], tools: string, log: (line: string) => void): Promise<string[]> {
 	const program = await pixi(tools, log);
 	const manifest = join(dir, "pixi.toml");
 	log(existsSync(join(dir, "pixi.lock")) ? "Checking the app's environment" : "Building the app's environment (first run takes a few minutes)");
+	// pixi keeps conda packages, repodata and its uv cache under PIXI_CACHE_DIR.
+	const caches = join(tools, "pixi-cache");
+	mkdirSync(caches, { recursive: true });
+	const env: Record<string, string> = { PIXI_NO_PATH_UPDATE: "1", PIXI_CACHE_DIR: caches, PIXI_HOME: caches };
+	for (const key of ["PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "SYSTEMROOT", "SSL_CERT_FILE", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"]) if (process.env[key]) env[key] = process.env[key]!;
+	const launch = contained(program, ["install", "--manifest-path", manifest], { writable: [dir, caches], readable: [program], network: "all" });
 	// From a scratch folder: some packages' install scripts write test files where they run, and the app's folder
 	// is watched for edits.
-	const install = Bun.spawn([program, "install", "--manifest-path", manifest], { cwd: tmpdir(), stdout: "pipe", stderr: "pipe", env: { ...process.env, PIXI_NO_PATH_UPDATE: "1" } });
+	const install = Bun.spawn([launch.file, ...launch.args], { cwd: tmpdir(), stdout: "pipe", stderr: "pipe", env });
 	const lines = async (stream: ReadableStream<Uint8Array>) => {
 		for await (const chunk of stream) for (const line of new TextDecoder().decode(chunk).split(/\r|\n/)) if (line.trim()) log(line.trim());
 	};
@@ -62,11 +71,55 @@ export async function inEnvironment(dir: string, command: string[], tools: strin
 	return [program, "run", "--manifest-path", manifest, "--frozen", "--", ...command];
 }
 
-/** The packages an environment lists, for the consent card ("installs r-shiny, r-ggplot2 from conda-forge"). */
-export function environmentSummary(dir: string): string | undefined {
+/** What an environment would install, for the consent card, and a digest of its manifest for the grant. */
+export interface EnvironmentPlan {
+	conda: string[];
+	pypi: string[];
+	/** Packages built from a folder, a git repository or an address: their build scripts run at install. */
+	source: string[];
+	/** Channels other than conda-forge, and package indexes other than PyPI. */
+	elsewhere: string[];
+	/** SHA-256 of pixi.toml: a grant covers exactly this manifest; any change asks again. */
+	digest: string;
+}
+
+/** Read every dependency table in pixi.toml: the default one, features, targets, and PyPI's. */
+export function environmentPlan(dir: string): EnvironmentPlan | undefined {
 	if (!hasEnvironment(dir)) return undefined;
 	const text = readFileSync(join(dir, "pixi.toml"), "utf8");
-	const deps = /\[dependencies\]([\s\S]*?)(\n\[|$)/.exec(text)?.[1] ?? "";
-	const names = [...deps.matchAll(/^\s*([A-Za-z0-9_.-]+)\s*=/gm)].map((m) => m[1]);
-	return names.length ? names.join(", ") : undefined;
+	const plan: EnvironmentPlan = { conda: [], pypi: [], source: [], elsewhere: [], digest: createHash("sha256").update(text).digest("hex") };
+	let table = "";
+	for (const raw of text.split(/\r?\n/)) {
+		const line = raw.replace(/\s+#.*$/, "").trim();
+		const header = /^\[([^\]]+)\]$/.exec(line);
+		if (header) {
+			table = header[1]!.trim();
+			continue;
+		}
+		const entry = /^("?)([A-Za-z0-9_.\-[\]]+)\1\s*=\s*(.*)$/.exec(line);
+		if (!entry) continue;
+		const [, , name, value] = entry as unknown as [string, string, string, string];
+		const deps = /(^|\.)(dependencies|host-dependencies|build-dependencies)$/.test(table);
+		const pypi = /(^|\.)pypi-dependencies$/.test(table);
+		if (deps || pypi) {
+			(pypi ? plan.pypi : plan.conda).push(name);
+			if (/\b(path|git|url)\s*=/.test(value)) plan.source.push(name);
+		} else if (name === "channels" && /^(workspace|project)$/.test(table)) {
+			for (const channel of value.matchAll(/"([^"]+)"/g)) if (channel[1] !== "conda-forge") plan.elsewhere.push(`the ${channel[1]} channel`);
+		} else if (/^(index-url|extra-index-urls|find-links)$/.test(name) && /(^|\.)pypi-options$/.test(table)) {
+			for (const index of value.matchAll(/"([^"]+)"/g)) plan.elsewhere.push(index[1]!);
+		}
+	}
+	for (const key of ["conda", "pypi", "source", "elsewhere"] as const) plan[key] = [...new Set(plan[key])];
+	return plan;
+}
+
+/** The consent card's lines for an environment. */
+export function describeEnvironment(plan: EnvironmentPlan): string[] {
+	const lines: string[] = [];
+	if (plan.conda.length) lines.push(`Install ${plan.conda.join(", ")} from conda-forge into the app's folder (no administrator)`);
+	if (plan.pypi.length) lines.push(`Install ${plan.pypi.join(", ")} from PyPI into the app's folder`);
+	if (plan.elsewhere.length) lines.push(`Get packages from ${plan.elsewhere.join(", ")} as well`);
+	if (plan.source.length) lines.push(`Build ${plan.source.join(", ")} from source: their build scripts run on this computer, contained`);
+	return lines;
 }

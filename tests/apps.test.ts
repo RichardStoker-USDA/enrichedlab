@@ -148,3 +148,27 @@ describe("packages", () => {
 		await expect(installApp(reader, tampered)).rejects.toThrow("doesn't match its hash");
 	});
 });
+
+describe("app environments", () => {
+	test("the consent card lists PyPI packages, other sources and source builds; any manifest change asks again", async () => {
+		const { describeEnvironment, environmentPlan } = await import("../packages/engine/src/apps/environments.ts");
+		const dir = scratch("env-plan");
+		const toml = (extra: string) =>
+			writeFileSync(
+				join(dir, "pixi.toml"),
+				`[workspace]\nname = "x"\nchannels = ["conda-forge", "bioconda"]\nplatforms = ["osx-arm64"]\n\n[dependencies]\nr-shiny = "*"\n\n[pypi-dependencies]\npandas = "*"\nhelper = { path = "./helper" }\n\n[feature.dev.dependencies]\npytest = "*"\n\n[pypi-options]\nextra-index-urls = ["https://pkgs.example.org/simple"]\n${extra}`,
+			);
+		toml("");
+		const plan = environmentPlan(dir)!;
+		expect(plan.conda).toEqual(["r-shiny", "pytest"]);
+		expect(plan.pypi).toEqual(["pandas", "helper"]);
+		expect(plan.source).toEqual(["helper"]);
+		expect(plan.elsewhere).toEqual(["the bioconda channel", "https://pkgs.example.org/simple"]);
+		const lines = describeEnvironment(plan);
+		expect(lines.some((l) => l.startsWith("Install pandas, helper from PyPI"))).toBe(true);
+		expect(lines.some((l) => l.startsWith("Build helper from source"))).toBe(true);
+		const before = plan.digest;
+		toml("# a comment changes nothing but the digest\n");
+		expect(environmentPlan(dir)!.digest).not.toBe(before);
+	});
+});

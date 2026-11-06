@@ -146,6 +146,28 @@ describe("permissions", () => {
 	const shell = { name: "shell", kind: "exec" } as unknown as Tool;
 	const fetchT = { name: "fetch", kind: "net" } as unknown as Tool;
 
+	test("a file edit allowed for the session doesn't allow browser actions; edits mode runs file edits only", () => {
+		const edit = { name: "edit", kind: "write" } as unknown as Tool;
+		const click = { name: "browser_click", kind: "write" } as unknown as Tool;
+		expect(allowKey(edit, { path: "a.ts" })).toBe("write");
+		expect(allowKey(click, { ref: "e3" })).toBe("write:browser_click");
+		const allowed = new Set(["write"]);
+		expect(decide(edit, { path: "a.ts" }, ws, config, allowed).action).toBe("run");
+		expect(decide(click, { ref: "e3" }, ws, config, allowed)).toMatchObject({ action: "ask", reason: "It clicks in the browser, where you may be signed in." });
+		const edits = { permissions: { mode: "edits", allowCommands: [] } } as unknown as LabConfig;
+		expect(decide(edit, { path: "a.ts" }, ws, edits, new Set()).action).toBe("run");
+		expect(decide(click, { ref: "e3" }, ws, edits, new Set()).action).toBe("ask");
+	});
+
+	test("an answer about a path outside the project covers that path only", () => {
+		const write = { name: "write", kind: "write", ask: (a: Record<string, unknown>) => (String(a.path).startsWith("/") ? "It writes outside the project." : undefined) } as unknown as Tool;
+		const first = decide(write, { path: "/tmp/one.txt" }, ws, config, new Set());
+		expect(first.action).toBe("ask");
+		const allowed = new Set([(first as { key: string }).key]);
+		expect(decide(write, { path: "/tmp/one.txt" }, ws, config, allowed).action).toBe("run");
+		expect(decide(write, { path: "/Users/someone/.zshrc" }, ws, config, allowed).action).toBe("ask");
+	});
+
 	test("allowing an interpreter for the session allows only that exact command", () => {
 		expect(allowKey(shell, { command: "python3 run.py" })).toBe("shell=python3 run.py");
 		expect(allowKey(shell, { command: "git commit -m x" })).toBe("shell:git commit");
@@ -492,4 +514,56 @@ describe("lab invites", () => {
 		expect(parseInvite("enrichedlab://open?url=https://gate.enrichedlab.com")).toBeUndefined();
 		expect(parseInvite("not a link")).toBeUndefined();
 	});
+});
+
+describe("repository handoff with secret-looking files in the history", () => {
+	test("only the current files go; returned work comes home on the person's history with their tracked files", async () => {
+		const { execFileSync } = await import("node:child_process");
+		const { packForSend, fetchBundle } = await import("../packages/engine/src/git.ts");
+		const git = (cwd: string, ...a: string[]) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...a], { cwd, encoding: "utf8" }).trim();
+		const saved = { global: process.env.GIT_CONFIG_GLOBAL, xdg: process.env.XDG_CONFIG_HOME };
+		process.env.GIT_CONFIG_GLOBAL = "/dev/null";
+		process.env.XDG_CONFIG_HOME = scratch("xdg");
+		const repo = scratch("history");
+		git(repo, "init", "-q", "-b", "main");
+		writeFileSync(join(repo, "a.txt"), "one\n");
+		mkdirSync(join(repo, "keys"));
+		writeFileSync(join(repo, "keys", "id_ed25519"), "PRIVATE KEY\n");
+		git(repo, "add", ".");
+		git(repo, "commit", "-q", "-m", "start, with a key by mistake");
+		git(repo, "rm", "-q", "keys/id_ed25519");
+		writeFileSync(join(repo, ".env.example"), "TOKEN=\n");
+		git(repo, "add", ".");
+		git(repo, "commit", "-q", "-m", "Drop the key, add an example");
+		writeFileSync(join(repo, "a.txt"), "two\n");
+		const bundle = join(scratch("bundle"), "r.bundle");
+		const sent = packForSend(repo, bundle);
+		expect(sent.history).toBe(false);
+		expect(sent.skipped).toEqual([".env.example"]);
+		// Nothing the bundle carries reaches the key or the example.
+		const far = scratch("far-history");
+		git(far, "init", "-q");
+		git(far, "fetch", "-q", bundle, `${sent.ref}:refs/heads/work`);
+		git(far, "checkout", "-q", "work");
+		const objects = git(far, "rev-list", "--objects", "--all");
+		expect(objects).not.toContain("id_ed25519");
+		expect(objects).not.toContain(".env.example");
+		expect(git(far, "rev-list", "--count", "work")).toBe("1");
+		writeFileSync(join(far, "b.txt"), "made far away\n");
+		git(far, "add", ".");
+		git(far, "commit", "-q", "-m", "Add b");
+		const back = join(far, "..", `${sent.id}-h.bundle`);
+		git(far, "bundle", "create", "-q", back, `${sent.commit}..work`);
+		expect(fetchBundle(repo, back, "refs/heads/work", "enrichedlab/far", sent.commit, sent.home).map((l) => l.split(" ").slice(1).join(" "))).toEqual(["Add b"]);
+		// The branch grows from main, keeps the tracked example, and carries the work.
+		expect(git(repo, "merge-base", "--is-ancestor", "main", "enrichedlab/far")).toBe("");
+		expect(git(repo, "show", "enrichedlab/far:.env.example")).toBe("TOKEN=");
+		expect(git(repo, "show", "enrichedlab/far:b.txt")).toBe("made far away");
+		expect(git(repo, "log", "-1", "--format=%s", "enrichedlab/far")).toBe("Add b");
+		expect(git(repo, "branch", "--show-current")).toBe("main");
+		for (const [key, value] of [["GIT_CONFIG_GLOBAL", saved.global], ["XDG_CONFIG_HOME", saved.xdg]] as const) {
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
+	}, 30_000);
 });

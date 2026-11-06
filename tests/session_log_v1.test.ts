@@ -1,7 +1,7 @@
 // The shared session log v1 (docs/session-log.md): engine logs go out and come back with the same model context.
 import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "../packages/protocol/src/index.ts";
-import { MAX_CALLS, MAX_DATA, MAX_RECORDS, fromV1, toV1 } from "../packages/engine/src/session/log_v1.ts";
+import { MAX_ATTACHMENT, MAX_ATTACHMENTS, MAX_CALLS, MAX_DATA, MAX_RECORDS, fromV1, importProblem, toV1 } from "../packages/engine/src/session/log_v1.ts";
 import { derive } from "../packages/engine/src/session/context.ts";
 
 const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex").toString("base64");
@@ -125,5 +125,31 @@ describe("session log v1", () => {
 		for (const e of out) expect(Buffer.byteLength(JSON.stringify(e.data))).toBeLessThanOrEqual(MAX_DATA);
 		expect((out.find((e) => e.kind === "assistant")!.data.calls as { arguments: unknown }[])[0]!.arguments).toEqual({});
 		expect(String(out.find((e) => e.kind === "tool_result")!.data.output)).toEndWith("[cut to fit the shared log]");
+	});
+});
+
+describe("session log v1 import from someone else", () => {
+	test("records about the writer's computer are skipped: an imported checkpoint can't steer Undo", () => {
+		const v1 = [
+			{ v: 1 as const, seq: 1, time: at(0), kind: "user", data: { text: "Hi" } },
+			{ v: 1 as const, seq: 2, time: at(1), kind: "assistant", data: { text: "Hello.", stop: "end" } },
+			{ v: 1 as const, seq: 3, time: at(2), kind: "x-checkpoint", data: { commit: "abc", files: [{ path: "/Users/someone/.ssh/id_ed25519", existed: false }] } },
+			{ v: 1 as const, seq: 4, time: at(3), kind: "x-place", data: { place: "lab", label: "a sandbox", root: "/sandbox/work/x" } },
+			{ v: 1 as const, seq: 5, time: at(4), kind: "x-undo", data: { checkpoint: "e1" } },
+			{ v: 1 as const, seq: 6, time: at(5), kind: "x-local", data: { anything: true } },
+			{ v: 1 as const, seq: 7, time: at(6), kind: "x-title", data: { title: "Greeting" } },
+		];
+		const kinds = fromV1(v1).events.map((e) => e.t);
+		expect(kinds).toEqual(["user", "assistant", "title"]);
+	});
+
+	test("an import over the shared log's limits is refused before it's read", () => {
+		const record = (seq: number, data: Record<string, unknown> = {}) => ({ v: 1 as const, seq, time: at(0), kind: "notice", data });
+		expect(importProblem([record(1)], {})).toBeUndefined();
+		expect(importProblem(Array.from({ length: MAX_RECORDS + 1 }, (_, i) => record(i + 1)), {})).toContain("records");
+		expect(importProblem([record(1, { text: "x".repeat(MAX_DATA + 8192) })], {})).toContain("252 KiB");
+		expect(importProblem([], { a: { mime: "image/png", data: "x".repeat(MAX_ATTACHMENT + 1) } })).toContain("16 MB");
+		const many = Object.fromEntries(Array.from({ length: MAX_ATTACHMENTS + 1 }, (_, i) => [`k${i}`, { mime: "image/png", data: "x" }]));
+		expect(importProblem([], many)).toContain("images");
 	});
 });

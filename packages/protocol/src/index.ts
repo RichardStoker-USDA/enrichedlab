@@ -138,7 +138,7 @@ export type SessionEvent =
 			label: string;
 			root: string;
 			/** The repository came along: the commit sent, so new work can come back as a branch. */
-			carried?: { repo: string; base: string; id: string };
+			carried?: { repo: string; base: string; home?: string; id: string };
 			/** Where the session started (a site that keeps work in its sandbox); the system prompt already says so. */
 			initial?: boolean;
 	  })

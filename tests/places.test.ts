@@ -66,3 +66,24 @@ describe("isolated labs", () => {
 		await expect(showTool.run({ title: "App", url: "https://example.org" }, ctx)).rejects.toThrow("keeps its data inside");
 	});
 });
+
+describe("contained commands", () => {
+	test("run without the engine's keys and tokens in their environment", async () => {
+		const { withoutSecrets } = await import("../packages/engine/src/util.ts");
+		const env = withoutSecrets({ PATH: "/usr/bin", HOME: "/h", OPENAI_API_KEY: "k", GITHUB_TOKEN: "t", AWS_PROFILE: "p", DATABASE_URL: "postgres://", SSH_AUTH_SOCK: "/s", GIT_AUTHOR_NAME: "Pat", LANG: "C", MY_SECRET: "x", HF_TOKEN: "h" });
+		expect(env).toEqual({ PATH: "/usr/bin", HOME: "/h", GIT_AUTHOR_NAME: "Pat", LANG: "C" });
+	});
+
+	test("printenv in a contained shell doesn't show a token the engine has", async () => {
+		const ws = new LocalWorkspace(scratch("env"), "workspace");
+		if (!ws.sandboxed) return;
+		process.env.ENRICHED_TEST_TOKEN = "never-shown";
+		try {
+			const result = await ws.exec("printenv", { timeoutMs: 10_000, signal: new AbortController().signal });
+			expect(result.output).not.toContain("never-shown");
+			expect(result.output).toContain("PATH=");
+		} finally {
+			delete process.env.ENRICHED_TEST_TOKEN;
+		}
+	});
+});

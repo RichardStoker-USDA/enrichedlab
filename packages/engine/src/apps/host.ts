@@ -20,7 +20,7 @@ import type { Workspace } from "../tools/workspace.ts";
 import { readJson, writeJson } from "../util.ts";
 import { type AppOrigin, ORIGIN_FILE } from "./package.ts";
 import { type Backend, type McpBackend, startBackend } from "./backends.ts";
-import { environmentSummary } from "./environments.ts";
+import { describeEnvironment, environmentPlan } from "./environments.ts";
 import { type AppManifest, describePermissions, permissionKey, readManifest } from "./manifest.ts";
 
 /** What the host needs from the session an app opens in. */
@@ -249,12 +249,14 @@ export class AppHost {
 	private asks(m: AppManifest, dir: string): { lines: string[]; key: string } {
 		const lines = describePermissions(m.permissions);
 		const b = m.backend;
-		const packages = b?.runtime === "command" || b?.runtime === "serve" ? environmentSummary(dir) : undefined;
-		if (packages) lines.push(`Install ${packages} from conda-forge into the app's folder (no administrator)`);
+		const plan = b?.runtime === "command" || b?.runtime === "serve" ? environmentPlan(dir) : undefined;
+		if (plan) lines.push(...describeEnvironment(plan));
 		if (b?.runtime === "command" || b?.runtime === "serve") lines.push(`Run ${b.command.join(" ")} on this computer${process.platform === "win32" ? " with your access" : ", contained"}`);
+		// The page is held to the origins it names; the program behind it reaches the network as a whole.
+		if (b && m.permissions.network?.length) lines.push("Let its program reach the network: any address, not only the ones named above");
 		if (b?.runtime === "container") lines.push(`Run the container ${b.image}${b.build !== undefined ? " (built from its folder)" : ""}`);
 		const program = b && b.runtime !== "bun" ? JSON.stringify(b) : "";
-		return { lines, key: `${permissionKey(m.permissions)}|${program}|${packages ?? ""}` };
+		return { lines, key: `${permissionKey(m.permissions)}|${program}|${plan?.digest ?? ""}` };
 	}
 
 	/** An app from a lab that the lab withdrew, or whose signer it revoked, doesn't open or run. Its data stays. */
