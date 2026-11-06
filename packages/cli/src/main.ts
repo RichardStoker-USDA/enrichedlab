@@ -623,6 +623,15 @@ async function main(): Promise<void> {
 			client.close();
 			return;
 		}
+		// Not in el help: a lab grants Discovery mode to chosen people, who type it (docs/research.md).
+		case "discover": {
+			const [id, state] = rest;
+			if (!id) fail("el discover <session id> [off]");
+			const client = await connect();
+			const { detail } = await client.call("session.discovery", { sessionId: id, on: state !== "off" });
+			client.close();
+			return out(detail);
+		}
 		case "session": {
 			// The shared log format v1 (docs/session-log.md): a folder with session.jsonl and the images it refers to.
 			const [verb, target] = rest;

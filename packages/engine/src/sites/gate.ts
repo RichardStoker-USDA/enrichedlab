@@ -168,6 +168,10 @@ export function reprSha256(response: Response): string | undefined {
 
 export class GateSite implements SiteAdapter, SandboxApi {
 	who?: string;
+	/** Named grants this person holds at the lab (GET /v1/me capabilities), such as "discovery". */
+	capabilities: string[] = [];
+	/** Whose agents may use this person's sandboxes here. */
+	sandboxAgents?: SandboxAgents;
 	owner = false;
 	models: ModelProfile[] = [];
 	tools: Tool[] = [];
@@ -622,6 +626,8 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		this.sandboxOn = me.sandboxes?.enabled === true;
 		this.network = { network: me.sandboxes?.network, hosts: me.sandboxes?.hosts };
 		this.networks = me.sandbox_networks;
+		this.capabilities = Array.isArray(me.capabilities) ? me.capabilities.filter((c) => typeof c === "string") : [];
+		this.sandboxAgents = me.sandbox_agents ?? this.descriptor?.policy?.sandbox_agents;
 		const list = await this.cached<{ data?: GateModel[] }>("/v1/models", AbortSignal.timeout(10_000));
 		this.models = (list.data ?? []).filter((m) => !m.gate?.endpoints?.length || m.gate.endpoints.includes("chat")).map((m) => this.profile(m));
 		const tools: Tool[] = [];
@@ -632,7 +638,8 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			this.warning = `Tools unavailable: ${redact(errorText(error))}`;
 		}
 		if (this.sandboxOn) tools.push(...this.sandboxTools());
-		this.tools = tools;
+		// Each tool knows its lab, so a session's Discovery mode applies to this lab's tools only.
+		this.tools = tools.map((tool) => ({ ...tool, site: this.config.name }));
 		// Waiting for approval is what the person has to act on: it leads whatever else went wrong.
 		if (this.device?.pending && !this.warning?.startsWith(this.pendingText)) this.warning = [this.pendingText, this.warning].filter(Boolean).join(" ");
 	}

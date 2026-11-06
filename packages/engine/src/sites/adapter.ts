@@ -37,6 +37,10 @@ export interface SiteAdapter {
 	forget?(): Promise<void>;
 	/** Who the site says the person is. */
 	readonly who?: string;
+	/** Named grants the person holds at the site, such as "discovery". */
+	readonly capabilities?: string[];
+	/** Whose agents may use the person's sandboxes there: only the site's models ("lab"), or any ("any"). */
+	readonly sandboxAgents?: "lab" | "any";
 	/** The models and tools this person was granted, read at connect. */
 	readonly models: ModelProfile[];
 	readonly tools: Tool[];

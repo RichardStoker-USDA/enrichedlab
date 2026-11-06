@@ -35,6 +35,7 @@ export function blocks(events: SessionEvent[], running: { calls: { id: string; n
 		} else if (e.t === "notice") out.push({ kind: "notice", id: e.id, level: e.level, text: e.text });
 		else if (e.t === "compaction") out.push({ kind: "rule", id: e.id, text: `Earlier turns summarized to save room · ${Math.round(e.tokensBefore / 1000)}k tokens` });
 		else if (e.t === "undo") out.push({ kind: "rule", id: e.id, text: `Undone · ${e.files.join(", ")}` });
+		else if (e.t === "discovery") out.push({ kind: "rule", id: e.id, text: e.on ? "Discovery mode on · the agent works without asking at the lab" : "Discovery mode off" });
 		else if (e.t === "place" && !e.initial) out.push({ kind: "rule", id: e.id, text: e.place === "local" ? "Moved back to this computer" : `Moved to ${e.label.replace(/^the /, "").replace(/ \(.*$/, "")}` });
 	}
 	if (running) {

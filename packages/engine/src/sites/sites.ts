@@ -336,7 +336,14 @@ export class Sites {
 	}
 
 	title(name: string): string {
-		return this.configs().find((s) => s.name === name)?.title ?? name;
+		return this.configs().find((s) => s.name === name)?.title ?? this.adapters.get(name)?.descriptor?.title ?? name;
+	}
+
+	/** What a connected lab says about this person: their named grants and whose agents may use its sandboxes. */
+	lab(name: string): { title: string; capabilities: string[]; sandboxAgents?: "lab" | "any" } | undefined {
+		const adapter = this.adapters.get(name);
+		if (!adapter) return undefined;
+		return { title: this.title(name), capabilities: adapter.capabilities ?? [], sandboxAgents: adapter.sandboxAgents };
 	}
 
 	private credPath(name: string): string {

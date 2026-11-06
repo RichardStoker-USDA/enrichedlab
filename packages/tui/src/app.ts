@@ -156,6 +156,8 @@ export async function runTui(options: TuiOptions): Promise<void> {
 				return ruleView(t, `undone: ${event.files.join(", ")}`);
 			case "model":
 				return modelView(t, event.model, event.effort, origins.get(event.model));
+			case "discovery":
+				return ruleView(t, event.on ? "discovery mode on: the agent works without asking at the lab" : "discovery mode off");
 			default:
 				return undefined;
 		}
@@ -493,6 +495,12 @@ export async function runTui(options: TuiOptions): Promise<void> {
 			case "quit":
 			case "exit":
 				return quit();
+			// Not in /help or completion: a lab grants it to chosen people, who type it (docs/research.md).
+			case "discover": {
+				if (!sessionId) return;
+				const { detail } = await client.call("session.discovery", { sessionId, on: arg.toLowerCase() !== "off" });
+				return say(detail);
+			}
 			default:
 				return say(`Unknown command /${name}. /help lists them.`, "warn");
 		}

@@ -327,6 +327,28 @@ export class Engine {
 		return session.summary();
 	}
 
+	/**
+	 * Turn Discovery mode on or off for a session (docs/research.md). On only at a lab that grants this person
+	 * `discovery`; it applies while the session works there.
+	 */
+	discover(runtime: SessionRuntime, on: boolean): string {
+		const current = runtime.discovery;
+		if (!on) {
+			if (!current) return "Discovery mode is off.";
+			runtime.setDiscovery(false, current);
+			return "Discovery mode is off. Commands that change things ask you first again.";
+		}
+		const site = runtime.place;
+		if (site === "local") throw new RpcError(-32602, "Discovery mode works in a session at a lab. Move this session to the lab first.");
+		const lab = this.sites.lab(site);
+		const title = lab?.title ?? this.sites.title(site);
+		if (!lab) throw new RpcError(-32602, `${title} isn't connected. Sign in again (el login ${site}), then turn Discovery mode on.`);
+		if (!lab.capabilities.includes("discovery")) throw new RpcError(-32602, `${title} hasn't given you Discovery mode.`);
+		if (current === site) return "Discovery mode is already on.";
+		runtime.setDiscovery(true, site);
+		return `Discovery mode is on. At ${title}, the agent works without asking: its commands, file changes and ${title}'s tools. Anything on this computer still asks. Type /discover off to stop.`;
+	}
+
 	/** Move a session between this computer and a site's sandbox; a git repository comes along unless `carry` is false. */
 	async movePlace(runtime: SessionRuntime, place: string, carry = true): Promise<string> {
 		if (runtime.isRunning) throw new RpcError(-32010, "Wait for the current turn to finish, or cancel it.");
@@ -392,6 +414,7 @@ export class Engine {
 			spawn: (parent, task, options) => this.spawn(parent, task, options),
 			waitAgents: (parent, agents, timeoutMs, signal) => this.waitAgents(parent, agents, timeoutMs, signal),
 			sealed: (site) => Boolean(site && this.sites.isolated(site)),
+			lab: (site) => this.sites.lab(site),
 			apps: (sessionId) => ({ open: (path) => this.apps.openForSession(sessionId, path), publishView: (view) => this.apps.publishView(sessionId, view) }),
 			surface: (sessionId) => (this.surfaces ? { call: (capability, op, args, signal) => this.surfaces!(sessionId, capability, op, args, signal) } : undefined),
 			browser: (sessionId) => this.browserLanes(sessionId),
@@ -600,8 +623,22 @@ export class Engine {
 				}
 				case "session.close":
 					return { ok: true };
-				case "session.prompt":
-					return this.session(need("sessionId")).prompt(String(p.text ?? ""), p.images as never);
+				case "session.prompt": {
+					const runtime = this.session(need("sessionId"));
+					const text = String(p.text ?? "");
+					// Discovery mode is turned on by typing it, not from a menu.
+					const typed = /^\/discover(?:\s+(on|off))?$/i.exec(text.trim());
+					if (typed && !p.images) {
+						this.discover(runtime, typed[1]?.toLowerCase() !== "off");
+						return { queued: false };
+					}
+					return runtime.prompt(text, p.images as never);
+				}
+				case "session.discovery": {
+					const runtime = this.session(need("sessionId"));
+					const detail = this.discover(runtime, p.on === true);
+					return { summary: runtime.summary(), detail };
+				}
 				case "session.cancel": {
 					const returned = this.session(need("sessionId")).cancel();
 					return returned.length ? { ok: true, returned } : { ok: true };

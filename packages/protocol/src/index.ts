@@ -142,6 +142,11 @@ export type SessionEvent =
 			/** Where the session started (a site that keeps work in its sandbox); the system prompt already says so. */
 			initial?: boolean;
 	  })
+	/**
+	 * Discovery mode turned on or off at a lab. While on and the session works there, what acts inside that lab (its
+	 * sandbox, its tools) runs without asking, for a person the lab grants it to.
+	 */
+	| (EventBase & { t: "discovery"; on: boolean; site: string })
 	/** What an open app shows, sent by the app (MCP Apps ui/update-model-context). The model reads the latest. */
 	| (EventBase & {
 			t: "app_context";
@@ -194,6 +199,8 @@ export interface SessionSummary {
 	parent?: string;
 	/** Where its files and commands act: "local" or a site name. */
 	place?: string;
+	/** The lab where Discovery mode is on for this session. */
+	discovery?: string;
 }
 
 // ── Models and sites ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -514,6 +521,8 @@ export interface Requests {
 	"session.rename": { params: { sessionId: string; title: string }; result: { ok: true } };
 	/** Move where the session's files and commands act. A git repository comes along when `carry` is set. */
 	"session.place": { params: { sessionId: string; place: string; carry?: boolean }; result: { summary: SessionSummary; detail: string } };
+	/** Turn Discovery mode on or off; on only in a session at a lab that grants the person `discovery`. */
+	"session.discovery": { params: { sessionId: string; on: boolean }; result: { summary: SessionSummary; detail: string } };
 	"permission.answer": { params: { requestId: string; decision: PermissionDecision }; result: { ok: boolean } };
 	"model.list": { params: { refresh?: boolean }; result: { models: ModelInfo[]; default?: string } };
 	"model.default": { params: { model: string; effort?: string }; result: { ok: true } };

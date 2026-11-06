@@ -64,6 +64,8 @@ export interface Tool<A = Record<string, unknown>> {
 	unreviewed?: boolean;
 	/** Works only while the session works on this computer: not offered while it works in a lab's sandbox. */
 	localOnly?: boolean;
+	/** The lab this tool acts at (its sandbox or its MCP tools); absent for tools of this computer. */
+	site?: string;
 	/** The step line, before it runs (also what a permission question shows). */
 	view(args: A): StepView;
 	/** Extra reason to ask even when the kind would run, e.g. a path outside the project. */

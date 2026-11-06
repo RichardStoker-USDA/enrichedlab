@@ -20,6 +20,8 @@ export interface SessionMeta {
 	site?: string;
 	parent?: string;
 	place?: string;
+	/** The lab where Discovery mode is on. */
+	discovery?: string;
 }
 
 export class SessionLog {

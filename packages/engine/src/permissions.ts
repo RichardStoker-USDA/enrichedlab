@@ -103,7 +103,11 @@ export function localHost(name: string): boolean {
 /** The question a push asks; headless runs refuse it unless the person passed --push. */
 export const PUSH_REASON = "It pushes to a remote.";
 
-export function decide(tool: Tool, args: Record<string, unknown>, workspace: Workspace, config: LabConfig, allowed: Set<string>): Verdict {
+/** Built-in tools that, in a lab's sandbox, act only there: reading, file edits and commands. */
+const IN_SANDBOX = new Set(["read", "sandbox", "exec"]);
+
+/** `discovery`: the lab where Discovery mode applies to this session now (docs/research.md). */
+export function decide(tool: Tool, args: Record<string, unknown>, workspace: Workspace, config: LabConfig, allowed: Set<string>, discovery?: string): Verdict {
 	const mode = config.permissions.mode;
 	const extra = tool.ask?.(args, { workspace });
 	const key = allowKey(tool, args);
@@ -111,6 +115,9 @@ export function decide(tool: Tool, args: Record<string, unknown>, workspace: Wor
 	if (key === "shell!push") return { action: "ask", reason: PUSH_REASON, key };
 	if (tool.unreviewed) return { action: "ask", reason: "The lab hasn't reviewed this tool yet, so it asks every time.", key: `unreviewed!${tool.name}` };
 	if (mode === "full") return { action: "run" };
+	// Discovery mode: what acts inside the lab the session works at runs without asking (the lab's filters, checks and
+	// audit stay on there). Anything on this computer still asks.
+	if (discovery && (tool.site === discovery || (!tool.site && workspace.kind === "sandbox" && (IN_SANDBOX.has(tool.kind) || key === "write")))) return { action: "run" };
 	// An answer about something outside the project is remembered for that path only; "!" keys never are.
 	const outside = `${key}:outside:${String(args.path ?? args.url ?? "")}`;
 	if (!key.includes("!") && allowed.has(extra ? outside : key)) return { action: "run" };

@@ -54,6 +54,8 @@ export interface RuntimeDeps {
 	waitAgents(parent: string, agents: string[], timeoutMs: number, signal: AbortSignal): Promise<AgentResult[]>;
 	/** True for a session bound to an isolated lab. */
 	sealed?(site: string | undefined): boolean;
+	/** What a lab says about this person: its title, their named grants, and whose agents may use its sandboxes. */
+	lab?(site: string): { title: string; capabilities: string[]; sandboxAgents?: "lab" | "any" } | undefined;
 	/** Apps for a tool call in this session: opening one in the workbench, showing an MCP server's view. */
 	apps?(sessionId: string): ToolContext["apps"];
 	surface?(sessionId: string): ToolContext["surface"];
@@ -189,6 +191,24 @@ export class SessionRuntime {
 
 	get place(): string {
 		return this.placement?.place ?? "local";
+	}
+
+	/** The lab where the person turned Discovery mode on, while it's on. */
+	get discovery(): string | undefined {
+		const last = [...this.events].reverse().find((e) => e.t === "discovery") as Ev<"discovery"> | undefined;
+		return last?.on ? last.site : undefined;
+	}
+
+	/** Discovery mode applies now: it's on, the session works at that lab, and the lab still grants it. */
+	private get discovering(): string | undefined {
+		const site = this.discovery;
+		return site && site === this.place && this.deps.lab?.(site)?.capabilities.includes("discovery") ? site : undefined;
+	}
+
+	/** Turn Discovery mode on or off; the engine checks the lab's grant before turning it on. */
+	setDiscovery(on: boolean, site: string): void {
+		this.append({ t: "discovery", id: newId("e"), at: now(), on, site });
+		this.touch({ discovery: on ? site : undefined });
 	}
 
 	/** Reattach the place a reopened session last worked in (no event: it is already in the log). */
@@ -527,6 +547,12 @@ export class SessionRuntime {
 				this.notice("error", "No model is available. Start a local model server, add a provider to ~/.el/config.json, or sign in to a site with el login.");
 				return;
 			}
+			// A lab that keeps its sandboxes for its own agents: commands there come from its own models only.
+			const lab = this.place !== "local" ? this.deps.lab?.(this.place) : undefined;
+			if (lab?.sandboxAgents === "lab" && !(model.source === "site" && model.provider === this.place)) {
+				this.notice("error", `${lab.title} runs its sandboxes for its own models only. Pick one of ${lab.title}'s models to go on.`);
+				return;
+			}
 			if (model.ref !== this.modelRef) this.setModel(model.ref, undefined);
 			// Context is managed where a turn starts. Inside a tool round only the hard limit triggers a summary: an edit
 			// there throws away the round's reasoning and the prompt cache.
@@ -719,7 +745,7 @@ export class SessionRuntime {
 			return { ok: false, content: `The arguments were not valid JSON (${errorText(error)}). Send the call again with valid JSON.`, decision: "refused", tool };
 		}
 		let decision: Ev<"tool">["decision"] = "auto";
-		const verdict = decide(tool, args, this.workspace, this.deps.config(), this.allowed);
+		const verdict = decide(tool, args, this.workspace, this.deps.config(), this.allowed, this.discovering);
 		// A read-only subagent is read-only whatever the person's permission mode or sandbox would allow.
 		if (this.agentMode === "read" && !readOnlyCall(tool, args, this.workspace, this.deps.config().permissions.allowCommands)) {
 			return { ok: false, content: "Refused: this subagent works read-only. Say in your answer what should change.", decision: "refused", tool, args };

@@ -35,8 +35,8 @@ export function elisionStub(event: Ev<"tool">): string {
 	return `[Earlier output of ${event.name} elided to save context (${kb} KB). recall with handle "${event.handle}" returns it.]`;
 }
 
-function conversational(e: SessionEvent): e is Ev<"user"> | Ev<"assistant"> | Ev<"tool"> | Ev<"undo"> | Ev<"place"> | Ev<"app_context"> {
-	return e.t === "user" || e.t === "assistant" || e.t === "tool" || e.t === "undo" || e.t === "place" || e.t === "app_context";
+function conversational(e: SessionEvent): e is Ev<"user"> | Ev<"assistant"> | Ev<"tool"> | Ev<"undo"> | Ev<"place"> | Ev<"app_context"> | Ev<"discovery"> {
+	return e.t === "user" || e.t === "assistant" || e.t === "tool" || e.t === "undo" || e.t === "place" || e.t === "app_context" || e.t === "discovery";
 }
 
 export function derive(events: SessionEvent[]): Derived {
@@ -83,6 +83,8 @@ export function derive(events: SessionEvent[]): Derived {
 		open = undefined;
 	};
 
+	// Notes that wait for a tool round to finish before the model reads them.
+	const notes: { text: string; at: number }[] = [];
 	// An app's context counts only at its newest since the person's last message.
 	const staleContext = new Set<number>();
 	const seen = new Set<string>();
@@ -109,6 +111,16 @@ export function derive(events: SessionEvent[]): Derived {
 			if (staleContext.has(i)) continue;
 			closeOpen(i);
 			messages.push({ role: "user", content: [{ type: "text", text: `(The app "${e.title}" is open beside the conversation. It reports: ${e.text})` }] });
+		} else if (e.t === "discovery") {
+			const text = e.on
+				? "(The person turned on Discovery mode: work through the task on your own, step by step, until it is done. Don't stop to ask unless you are blocked or need a decision only they can make. Your commands, file changes and lab tool calls in the lab run without approval; anything on their computer still asks. Check each result before you build on it, and keep notes of what you did and why in the project.)"
+				: "(Discovery mode is off. Commands that change things ask the person first again.)";
+			// Turned on or off mid-turn: the note waits until the open calls are answered.
+			if (open?.size) {
+				notes.push({ text, at: i });
+				continue;
+			}
+			messages.push({ role: "user", content: [{ type: "text", text }] });
 		} else if (e.t === "place") {
 			if (e.initial) continue;
 			closeOpen(i);
@@ -132,6 +144,12 @@ export function derive(events: SessionEvent[]): Derived {
 			messages.push({ role: "tool", callId: e.callId, name: e.name, content, images: elided.has(e.id) ? undefined : e.images });
 		}
 		sources.push(i);
+		if (notes.length && !open?.size) {
+			for (const note of notes.splice(0)) {
+				messages.push({ role: "user", content: [{ type: "text", text: note.text }] });
+				sources.push(note.at);
+			}
+		}
 	}
 	// A call still open at the end is either running now or was cut off; only the second needs an answer, and the
 	// loop never derives context while its own calls run.

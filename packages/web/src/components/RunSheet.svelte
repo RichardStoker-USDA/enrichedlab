@@ -115,6 +115,10 @@
 			{:else}
 				<span class="place-dot" class:local={lab.place.id === "local"} style:--dot={`var(${lab.place.color})`}></span>
 				<span>{lab.place.id === "local" ? lab.place.title : lab.place.missing ? `${lab.place.title} (not one of your labs now)` : `${lab.place.title} sandbox`}</span>
+				{#if lab.summary?.discovery && lab.summary.discovery === lab.place.id}
+					<span class="sep">·</span>
+					<span class="discovery" title="Discovery mode: the agent works without asking in this lab. Type /discover off to stop.">Discovery</span>
+				{/if}
 				<span class="sep">·</span>
 				<span class="folder" title={lab.summary?.cwd}>{project}{branch ? ` · ${branch}` : ""}</span>
 			{/if}
@@ -277,6 +281,12 @@
 	}
 	.crumb .sep {
 		color: var(--text-faint);
+	}
+	/* Says the agent won't ask in this lab: plain accent text, quieter than a badge. */
+	.crumb .discovery {
+		color: var(--accent-text);
+		font-weight: 600;
+		letter-spacing: 0.01em;
 	}
 	.crumb .folder {
 		overflow: hidden;

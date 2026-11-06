@@ -173,6 +173,28 @@ describe("permissions", () => {
 		expect(decide(shell, { command: "rm -rf build" }, new LocalWorkspace(scratch("perm-plain"), "off"), config, new Set()).action).toBe("ask");
 	});
 
+	test("in Discovery mode, what acts inside the lab runs without asking; this computer, pushes and unreviewed tools still ask", () => {
+		const api = { title: "Field Lab", run: async () => ({ exitCode: 0, stdout: "", stderr: "" }) } as unknown as SandboxApi;
+		const lab = new SandboxWorkspace(api, "/sandbox/work/project-1");
+		const labTool = { name: "field_query", kind: "site-write", site: "field" } as unknown as Tool;
+		const otherLab = { name: "home_query", kind: "site-write", site: "home" } as unknown as Tool;
+		const remember = { name: "remember", kind: "write" } as unknown as Tool;
+		const unreviewed = { name: "field_new_method", kind: "site-write", site: "field", unreviewed: true } as unknown as Tool;
+		// Without it, changing lab data outside the project and a lab tool that writes both ask.
+		expect(decide(shell, { command: "rm -rf /sandbox/data/scratch" }, lab, config, new Set()).action).toBe("ask");
+		expect(decide(labTool, {}, lab, config, new Set()).action).toBe("ask");
+		expect(decide(shell, { command: "rm -rf /sandbox/data/scratch" }, lab, config, new Set(), "field").action).toBe("run");
+		expect(decide(labTool, {}, lab, config, new Set(), "field").action).toBe("run");
+		// Another lab's tool, this computer's memory, the web from this computer, a push and an unreviewed tool still ask.
+		expect(decide(otherLab, {}, lab, config, new Set(), "field").action).toBe("ask");
+		expect(decide(remember, { text: "x" }, lab, config, new Set(), "field").action).toBe("ask");
+		expect(decide(fetchT, { url: "https://example.org/" }, lab, config, new Set(), "field").action).toBe("ask");
+		expect(decide(shell, { command: "git push origin main" }, lab, config, new Set(), "field").action).toBe("ask");
+		expect(decide(unreviewed, {}, lab, config, new Set(), "field").action).toBe("ask");
+		// On this computer, Discovery mode changes nothing for the built-in tools.
+		expect(decide(shell, { command: "rm -rf build" }, new LocalWorkspace(scratch("perm-discovery"), "off"), config, new Set(), "field").action).toBe("ask");
+	});
+
 	test("opening one of the engine's own app ports doesn't ask; other local addresses do", async () => {
 		const open = { name: "browser_open", kind: "net" } as unknown as Tool;
 		const opened = openPort({ url: (p) => `http://127.0.0.1:9/${p}`, headers: async () => ({}) });
