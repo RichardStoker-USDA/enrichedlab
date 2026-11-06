@@ -2,8 +2,10 @@
 // (macOS Keychain, Windows Credential Manager, the Linux Secret Service), or to a private file under
 // ~/.el/credentials where none is available. config.json records only where the key lives.
 
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import type { ProviderPreset } from "@enrichedlab/protocol";
 import type { ProviderConfig } from "../config.ts";
 
@@ -50,12 +52,22 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
 ];
 
 const SERVICE = "EnrichedLab";
-const account = (name: string) => `provider:${name}`;
+
+/**
+ * A provider's entry in the credential store, kept apart per engine home: a second home (a test, CI, another
+ * profile through EL_HOME) never overwrites or removes the person's own key. The usual homes keep the plain name
+ * their keys were saved under.
+ */
+export function keyAccount(credentials: string, name: string): string {
+	const dir = resolve(credentials);
+	const usual = [join(homedir(), ".el", "credentials"), join(homedir(), ".enriched", "credentials")];
+	return usual.includes(dir) ? `provider:${name}` : `provider:${name}@${createHash("sha256").update(dir).digest("hex").slice(0, 12)}`;
+}
 
 /** Store a provider's key; returns where it went. */
 export async function storeKey(credentials: string, name: string, key: string): Promise<"keychain" | "file"> {
 	try {
-		await Bun.secrets.set({ service: SERVICE, name: account(name), value: key });
+		await Bun.secrets.set({ service: SERVICE, name: keyAccount(credentials, name), value: key });
 		return "keychain";
 	} catch {
 		writeFileSync(join(credentials, `provider_${name}.key`), key, { mode: 0o600 });
@@ -68,7 +80,7 @@ export async function loadKey(credentials: string, name: string): Promise<string
 	const file = join(credentials, `provider_${name}.key`);
 	if (existsSync(file)) return readFileSync(file, "utf8").trim();
 	try {
-		return (await Bun.secrets.get({ service: SERVICE, name: account(name) })) ?? undefined;
+		return (await Bun.secrets.get({ service: SERVICE, name: keyAccount(credentials, name) })) ?? undefined;
 	} catch {
 		return undefined;
 	}
@@ -76,7 +88,7 @@ export async function loadKey(credentials: string, name: string): Promise<string
 
 export async function forgetKey(credentials: string, name: string): Promise<void> {
 	rmSync(join(credentials, `provider_${name}.key`), { force: true });
-	await Bun.secrets.delete({ service: SERVICE, name: account(name) }).catch(() => false);
+	await Bun.secrets.delete({ service: SERVICE, name: keyAccount(credentials, name) }).catch(() => false);
 }
 
 /** Check a key by listing the service's models; throws with the service's answer when it's refused. */
