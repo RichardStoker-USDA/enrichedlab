@@ -5,6 +5,7 @@ import { pageMenu } from "./menu.svelte.ts";
 import type { AppSummary, BrowserFrame, BrowserInput, BrowserPageState, CanvasSummary, DeviceRequest, LabApp, ModelInfo, Part, Partial_, PermissionDecision, PermissionRequest, SessionEvent, SessionStatus, SessionSummary, SiteSummary, UiPrefs } from "@enrichedlab/protocol";
 import { close as closeTab, emptyLayout, move, place, type Node, open as openTab, resize as resizeSplit, revive, sync, type Edge, type PaneKind, type Tab, uid, activate, groups } from "./layout.ts";
 import { computerName, placeOf, places, type Place } from "./places.ts";
+import { adoptCarried } from "./carried.ts";
 import { rpc } from "./rpc.ts";
 
 const emptyPartial = (): Partial_ => ({ text: "", reasoning: "", tools: [], output: {} });
@@ -197,6 +198,8 @@ class Lab {
 	}
 
 	async init(): Promise<void> {
+		// Drafts and layouts the desktop shell carried across an engine restart, before anything reads them.
+		adoptCarried();
 		rpc.onState = (connected, reconnected) => {
 			this.connected = connected;
 			this.lost = !connected;

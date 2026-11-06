@@ -15,7 +15,24 @@
 	let place = $state(lab.newPlace ?? "local");
 	let model = $state<string | undefined>();
 	let worktree = $state(false);
-	let task = $state("");
+	// The unsent task survives a reload of the window and an engine restart (the desktop shell carries it).
+	const NEW_DRAFT = "enrichedlab.draft.new";
+	let task = $state(readDraft());
+	function readDraft(): string {
+		try {
+			return sessionStorage.getItem(NEW_DRAFT) ?? "";
+		} catch {
+			return "";
+		}
+	}
+	$effect(() => {
+		try {
+			if (task) sessionStorage.setItem(NEW_DRAFT, task);
+			else sessionStorage.removeItem(NEW_DRAFT);
+		} catch {
+			// Storage blocked: the task lives while the window is open.
+		}
+	});
 	let starting = $state(false);
 	/** The lab whose sandbox the new session is moving to, while it moves. */
 	let movingTo = $state("");
@@ -85,10 +102,13 @@
 		lab.newFolder = undefined;
 		// Without a model the task can't run yet: it waits in the new session's composer while a model is set up.
 		const text = task.trim();
+		task = "";
 		const waits = Boolean(text) && !offered.length;
 		const common = { worktree, model: chosenModel?.ref, prompt: waits ? undefined : text || undefined, progress: (to: string) => (movingTo = to) };
 		// A lab that keeps data in place binds the session to it; other labs take the session (and its repository) along.
 		const id = await lab.create(folder.trim(), isolated ? { ...common, site: place } : { ...common, place });
+		// The session didn't start: the task is still here to try again.
+		if (!id) task = text;
 		if (id && waits) {
 			lab.returned = { sessionId: id, text };
 			lab.services = true;

@@ -144,10 +144,13 @@ let carriedDrafts = {};
 async function recover() {
 	if (process.env.EL_SHOT) console.log("shot: engine lost, recovering");
 	const sessionId = /^#\/s\/(s[0-9a-z]+)/.exec(new URL(window.webContents.getURL()).hash)?.[1];
+	// Unsent drafts (each session's, and the new-session form's) and each session's workbench layout and width.
 	const drafts = await window.webContents
-		.executeJavaScript(`Object.fromEntries(Object.keys(sessionStorage).filter((k) => k.startsWith("enrichedlab.draft.")).map((k) => [k, sessionStorage.getItem(k)]))`)
+		.executeJavaScript(
+			`Object.fromEntries([...Object.keys(sessionStorage).filter((k) => k.startsWith("enrichedlab.draft.")).map((k) => [k, sessionStorage.getItem(k)]), ...Object.keys(localStorage).filter((k) => /^enrichedlab\\.(layout|bench)\\./.test(k) || k === "enrichedlab.benchWidth").map((k) => [k, localStorage.getItem(k)])])`,
+		)
 		.catch(() => ({}));
-	carriedDrafts = Object.fromEntries(Object.entries(drafts ?? {}).filter(([k, v]) => /^enrichedlab\.draft\.s[0-9a-z]+$/.test(k) && typeof v === "string" && v.length < 200_000));
+	carriedDrafts = Object.fromEntries(Object.entries(drafts ?? {}).filter(([k, v]) => /^enrichedlab\.(draft\.(s[0-9a-z]+|new)|layout\.s[0-9a-z]+|bench\.s[0-9a-z]+|benchWidth)$/.test(k) && typeof v === "string" && v.length < 200_000));
 	if (process.env.EL_SHOT) console.log(`shot: recovering ${sessionId ?? "no session"} with ${Object.keys(carriedDrafts).length} of ${Object.keys(drafts ?? {}).length} drafts`);
 	await open(sessionId ? ["--session", sessionId] : []);
 }
