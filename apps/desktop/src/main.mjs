@@ -430,11 +430,19 @@ ipcMain.handle("menu:popup", (event, entries, at) => {
 				const type = e.checked === undefined ? "normal" : e.radio ? "radio" : "checkbox";
 				return [{ ...base, type, checked: Boolean(e.checked), click: () => (chosen = String(e.id ?? "").slice(0, 64)) }];
 			});
+		const template = build(entries, 0);
+		// A screenshot run never shows a native menu: the item it names (EL_SHOT_MENU, by label) is chosen instead.
+		if (process.env.EL_SHOT && !app.isPackaged) {
+			const find = (list) => list.flatMap((t) => (t.submenu ? find(t.submenu) : [t])).find((t) => t.label === process.env.EL_SHOT_MENU && t.enabled);
+			find(template)?.click?.();
+			console.log(`shot: menu ${chosen ? `chose ${process.env.EL_SHOT_MENU}` : `had no ${process.env.EL_SHOT_MENU ?? "choice"}`}`);
+			return resolve(chosen);
+		}
 		const options = { window, callback: () => resolve(chosen) };
 		const x = Number(at?.x);
 		const y = Number(at?.y);
 		if (Number.isFinite(x) && Number.isFinite(y) && x >= 0 && y >= 0 && x < 20000 && y < 20000) Object.assign(options, { x: Math.round(x), y: Math.round(y) });
-		Menu.buildFromTemplate(build(entries, 0)).popup(options);
+		Menu.buildFromTemplate(template).popup(options);
 	});
 });
 

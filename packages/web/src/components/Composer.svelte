@@ -38,7 +38,7 @@
 <script lang="ts">
 	import type { Part } from "@enrichedlab/protocol";
 	import { lab, USAGE_URL } from "../lib/store.svelte.ts";
-	import { tick } from "svelte";
+	import { tick, untrack } from "svelte";
 	import { tokens } from "../lib/format.ts";
 	import PlaceSwitch from "./PlaceSwitch.svelte";
 	import { allowedModels } from "../lib/places.ts";
@@ -113,6 +113,13 @@
 	});
 	$effect(() => {
 		if (shownFor) saveDraft(shownFor, text, images);
+	});
+	// A task the new-session screen couldn't start comes back here, in the session it was written for.
+	$effect(() => {
+		const back = lab.returned;
+		if (!back || back.sessionId !== lab.current) return;
+		lab.returned = undefined;
+		untrack(() => (text = text.trim() ? `${back.text}\n\n${text}` : back.text));
 	});
 
 	/** Why Send is off now, if it is. */

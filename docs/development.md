@@ -68,6 +68,7 @@ A development run of the desktop app (`apps/desktop`, unpackaged) takes these fo
 | `EL_SHOT_TYPE` | Text typed as key events into what the scene focused, then Return |
 | `EL_SHOT_SIZE=1024x720` | The window's size, to check narrower layouts |
 | `EL_SHOT_ROUTE` | The page to open instead of the session |
+| `EL_SHOT_MENU` | The label of the menu item to choose when the scene opens a menu; a screenshot run shows no native menus |
 | `EL_BINARY` | The engine to start, such as a wrapper that runs `packages/cli/src/main.ts` from source |
 
 Pass `--use-mock-keychain` to Electron in these runs, so a test never asks for the login keychain.

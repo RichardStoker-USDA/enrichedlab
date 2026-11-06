@@ -1,6 +1,7 @@
 <script lang="ts">
 	// A new session, as one composer: say what to do, then where (the project folder and the place its commands run)
 	// and with which model, in one row under the text. Everything has a sensible default, so Enter starts.
+	import { untrack } from "svelte";
 	import { lab } from "../lib/store.svelte.ts";
 	import { allowedModels, mac, SANDBOX_NOTE } from "../lib/places.ts";
 	import { folderName, shortPath, tokens } from "../lib/format.ts";
@@ -16,18 +17,23 @@
 	let worktree = $state(false);
 	let task = $state("");
 	let starting = $state(false);
+	/** The lab whose sandbox the new session is moving to, while it moves. */
+	let movingTo = $state("");
 	let field: HTMLTextAreaElement | undefined = $state();
 
 	$effect(() => {
 		if (!folder && recent[0]) folder = recent[0];
 	});
-	// New Session chosen again (menu, ⌘N, the sidebar): start the form over, on the place it names.
+	// New Session chosen again (menu, ⌘N, the sidebar): start the form over, on the place it names. Only the count
+	// starts it over; starting a session clears `newPlace`, and that must not empty the task being sent.
 	$effect(() => {
 		void lab.startCount;
-		place = lab.newPlace ?? "local";
-		model = undefined;
-		task = "";
-		worktree = false;
+		untrack(() => {
+			place = lab.newPlace ?? "local";
+			model = undefined;
+			task = "";
+			worktree = false;
+		});
 	});
 	$effect(() => {
 		field?.focus({ preventScroll: true });
@@ -75,10 +81,11 @@
 		if (!folder.trim() || starting) return;
 		starting = true;
 		lab.newPlace = undefined;
+		const common = { worktree, model: chosenModel?.ref, prompt: task.trim() || undefined, progress: (to: string) => (movingTo = to) };
 		// A lab that keeps data in place binds the session to it; other labs take the session (and its repository) along.
-		const id = await lab.create(folder.trim(), isolated ? { site: place, worktree, model: chosenModel?.ref } : { place, worktree, model: chosenModel?.ref });
-		if (id && task.trim()) await lab.send(task.trim());
+		await lab.create(folder.trim(), isolated ? { ...common, site: place } : { ...common, place });
 		starting = false;
+		movingTo = "";
 	}
 
 	function keys(e: KeyboardEvent) {
@@ -109,7 +116,7 @@
 
 	<div class="card">
 		<label class="visually-hidden" for="task-field">Task</label>
-		<textarea id="task-field" bind:this={field} bind:value={task} onkeydown={keys} rows="3" placeholder="Describe a task, or leave this empty to open the session"></textarea>
+		<textarea id="task-field" bind:this={field} bind:value={task} onkeydown={keys} readonly={starting} rows="3" placeholder="Describe a task, or leave this empty to open the session"></textarea>
 		<div class="row">
 			{#if typingPath}
 				<!-- svelte-ignore a11y_autofocus -->
@@ -127,7 +134,7 @@
 				<span class="what runs" aria-hidden="true">Runs on</span>
 				<div class="segmented places" role="radiogroup" aria-label="Files and commands run on">
 					{#each lab.places as p (p.id)}
-						<button type="button" role="radio" aria-checked={place === p.id} class:on={place === p.id} disabled={!p.ready} onclick={() => (place = p.id)} title={p.ready ? "" : p.site?.signedIn ? `${p.title} has no sandbox for you yet` : `Sign in to ${p.title} first`}>
+						<button type="button" role="radio" aria-checked={place === p.id} class:on={place === p.id} disabled={!p.ready || starting} onclick={() => (place = p.id)} title={p.ready ? "" : p.site?.signedIn ? `${p.title} has no sandbox for you yet` : `Sign in to ${p.title} first`}>
 							<span class="place-dot" class:local={p.id === "local"} style:--dot={`var(${p.color})`}></span>
 							{p.title}
 						</button>
@@ -152,7 +159,7 @@
 		</div>
 	</div>
 
-	<p class="where" title={folder}>{where}</p>
+	<p class="where" title={folder} aria-live="polite">{movingTo ? `Moving ${folder ? folderName(folder) : "the project"} to the ${movingTo} sandbox…` : where}</p>
 	<label class="check"><input type="checkbox" bind:checked={worktree} /> Work on its own git branch, away from your checkout</label>
 
 	{#if !lab.models.length}

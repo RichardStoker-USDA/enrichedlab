@@ -512,22 +512,40 @@ class Lab {
 		this.say(result.detail);
 	}
 
-	/** Start a session; `site` binds it to one lab (an isolated lab also keeps its work there). */
-	async create(cwd: string, options: { site?: string; place?: string; worktree?: boolean; model?: string } = {}): Promise<string | undefined> {
+	/** Text a send couldn't deliver, for the composer of the session it was written for to show again. */
+	returned = $state<{ sessionId: string; text: string } | undefined>();
+
+	/**
+	 * Start a session; `site` binds it to one lab (an isolated lab also keeps its work there). A `prompt` runs as the
+	 * first turn once the session is in its place; if it can't start, it comes back in that session's composer.
+	 */
+	async create(cwd: string, options: { site?: string; place?: string; worktree?: boolean; model?: string; prompt?: string; progress?: (step: string) => void } = {}): Promise<string | undefined> {
+		let id: string | undefined;
 		try {
 			let summary = await rpc.call("session.create", { cwd, site: options.site, worktree: options.worktree, model: options.model });
+			id = summary.id;
 			if (options.place && options.place !== "local" && summary.place !== options.place) {
-				const moved = await rpc.call("session.place", { sessionId: summary.id, place: options.place });
-				summary = moved.summary;
+				options.progress?.(this.places.find((p) => p.id === options.place)?.title ?? options.place);
+				summary = (await rpc.call("session.place", { sessionId: summary.id, place: options.place })).summary;
 			}
 			this.upsert(summary);
-			this.go(summary.id);
-			await this.open(summary.id);
-			return summary.id;
 		} catch (error) {
+			// A session that never reached its place is removed, so the task isn't run somewhere else by mistake.
+			if (id) void rpc.call("session.delete", { sessionId: id }).catch(() => undefined);
 			this.say((error as Error).message);
 			return undefined;
 		}
+		this.go(id);
+		await this.open(id);
+		if (options.prompt) {
+			try {
+				await this.send(options.prompt, undefined, id);
+			} catch (error) {
+				this.say(`The task didn't start: ${(error as Error).message}`);
+				this.returned = { sessionId: id, text: options.prompt };
+			}
+		}
+		return id;
 	}
 
 	async send(text: string, images?: Part[], sessionId = this.current): Promise<void> {
