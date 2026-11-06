@@ -541,7 +541,7 @@ class Lab {
 		});
 		rpc.on("site.auth", (auth) => {
 			window.open(auth.url, "_blank", "noopener");
-			this.say(`Sign in to ${auth.name} in the window that opened.`);
+			this.say(`Sign in to ${auth.name} in the browser window that opened. The first time, it may ask you to set up a second step: a passkey, a security key or an authenticator app.`);
 		});
 		rpc.on("canvas.updated", (view) => {
 			if (view.sessionId !== this.current) return;

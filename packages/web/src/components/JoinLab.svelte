@@ -44,7 +44,7 @@
 		try {
 			const id = name.trim() || slug(title || host.split(".")[0] || "lab");
 			await rpc.call("site.add", { name: id, url: address.trim(), title: title.trim() || undefined, isolated: isolated || undefined });
-			message = "Opening your browser to sign in…";
+			message = "Finish signing in in your browser. The first time, the lab may ask you to set up a passkey, a security key or an authenticator app.";
 			await lab.login(id);
 			dialog?.close();
 		} catch (error) {
