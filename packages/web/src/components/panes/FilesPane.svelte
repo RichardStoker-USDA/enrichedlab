@@ -58,6 +58,32 @@
 		];
 	}
 
+	/** Arrow keys in the list: up and down move, right opens a folder or steps in, left closes it or steps out. */
+	function treeKeys(e: KeyboardEvent) {
+		const rows = [...(e.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>("button.row")];
+		const at = rows.indexOf(document.activeElement as HTMLButtonElement);
+		if (at < 0) return;
+		const row = rows[at]!;
+		const path = row.dataset.path ?? "";
+		const dir = row.dataset.dir === "1";
+		const go = (i: number) => rows[Math.max(0, Math.min(rows.length - 1, i))]?.focus();
+		if (e.key === "ArrowDown") go(at + 1);
+		else if (e.key === "ArrowUp") go(at - 1);
+		else if (e.key === "Home") go(0);
+		else if (e.key === "End") go(rows.length - 1);
+		else if (e.key === "ArrowRight" && dir) {
+			if (!openDirs[path]) void toggle(path);
+			else go(at + 1);
+		} else if (e.key === "ArrowLeft") {
+			if (dir && openDirs[path]) void toggle(path);
+			else {
+				const parent = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+				if (parent) rows.find((r) => r.dataset.path === parent)?.focus();
+			}
+		} else return;
+		e.preventDefault();
+	}
+
 	/** Read every open folder again, so expanded folders stay expanded and current. */
 	function refresh() {
 		listings = {};
@@ -110,12 +136,12 @@
 	{#each listings[dir] ?? [] as entry (entry.name)}
 		{@const path = join(dir, entry.name)}
 		{#if entry.type === "dir"}
-			<button class="row" style:padding-left={`${12 + depth * 14}px`} onclick={() => toggle(path)} aria-expanded={Boolean(openDirs[path])} use:contextMenu={() => fileActions(path, true)}>
+			<button class="row" data-path={path} data-dir="1" style:padding-left={`${12 + depth * 14}px`} onclick={() => toggle(path)} aria-expanded={Boolean(openDirs[path])} use:contextMenu={() => fileActions(path, true)}>
 				<span class="caret" class:open={openDirs[path]}></span><span class="name dir">{entry.name}</span>
 			</button>
 			{#if openDirs[path]}{@render tree(path, depth + 1)}{/if}
 		{:else}
-			<button class="row" class:viewable={VIEWABLE.test(entry.name)} class:current={preview?.path === path} style:padding-left={`${26 + depth * 14}px`} onclick={() => openFile(path)} use:contextMenu={() => fileActions(path, false)}>
+			<button class="row" data-path={path} class:viewable={VIEWABLE.test(entry.name)} class:current={preview?.path === path} style:padding-left={`${26 + depth * 14}px`} onclick={() => openFile(path)} use:contextMenu={() => fileActions(path, false)}>
 				<span class="name">{entry.name}</span><span class="size">{size(entry.size)}</span>
 			</button>
 		{/if}
@@ -132,7 +158,8 @@
 			</button>
 		</div>
 		{#if error}<p class="error">{error}</p>{/if}
-		<div class="scroll" use:contextMenu={folderActions}>{@render tree(".", 0)}</div>
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div class="scroll" use:contextMenu={folderActions} onkeydown={treeKeys} aria-label="Files: arrows move, right opens a folder, left closes it">{@render tree(".", 0)}</div>
 	</div>
 	{#if preview}
 		<div class="preview">
