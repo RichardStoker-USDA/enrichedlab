@@ -90,10 +90,5 @@
 	}
 	.steps {
 		margin-top: 2px;
-		border-left: 1px solid var(--rule-strong);
-		padding-left: 2px;
-	}
-	.live .steps {
-		border-left-color: var(--live);
 	}
 </style>

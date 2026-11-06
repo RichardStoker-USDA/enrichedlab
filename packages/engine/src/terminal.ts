@@ -70,9 +70,12 @@ export class Terminals {
 function localShell(cwd: string, cols: number, rows: number, output: (data: string) => void, exit: (code: number | null) => void): Open {
 	const decoder = new TextDecoder();
 	const shell = process.env.SHELL || "/bin/bash";
+	// The shell is this app's, not the terminal app that may have started the engine: without its markers, macOS
+	// zsh doesn't print "Restored session" or save history per window.
+	const { TERM_PROGRAM: _program, TERM_PROGRAM_VERSION: _version, TERM_SESSION_ID: _session, ...inherited } = process.env;
 	const proc = Bun.spawn([shell, "-l"], {
 		cwd,
-		env: { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor", EL_TERMINAL: "1" },
+		env: { ...inherited, TERM: "xterm-256color", COLORTERM: "truecolor", TERM_PROGRAM: "EnrichedLab", EL_TERMINAL: "1" },
 		terminal: { cols, rows, data: (_terminal, data) => output(decoder.decode(data, { stream: true })) },
 	});
 	void proc.exited.then((code) => exit(code));

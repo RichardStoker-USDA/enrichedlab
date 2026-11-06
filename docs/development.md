@@ -58,6 +58,13 @@ The desktop window has a live check of its own, run by hand or on a release tag 
 (`.github/workflows/desktop.yml`): `bun scripts/desktop_smoke.ts <folder>` starts a test engine, opens the app on a
 session, loads a page in the browser pane and saves screenshots of the window and the browser view.
 
+`bun scripts/dev_lab.ts` runs the window against a stand-in lab on this computer: a scripted model, a sandbox that
+is a temporary folder, a source engine on a throwaway home, and a git project with one session on This Mac and one
+moved to the lab. `--open` opens the app on it; `--shots <folder>` captures every scene (new session, both sessions,
+the place and model menus, the workbench, every sheet, narrow windows) in light and dark, and checks the flows that
+cross places, such as a first task typed after "New Session in <lab>" running there. Build the window first
+(`bun run build:web`). Run it before calling a change to the window done, and add a scene with each new surface.
+
 A development run of the desktop app (`apps/desktop`, unpackaged) takes these for screenshots and tests:
 
 | Variable | Does |

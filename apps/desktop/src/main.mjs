@@ -163,7 +163,7 @@ ipcMain.on("drafts:take", (event) => {
 
 async function open(argv) {
 	const sessionId = sessionArg(argv);
-	const shotRoute = process.env.EL_SHOT ? process.env.EL_SHOT_ROUTE : undefined;
+	const shotRoute = (process.env.EL_SHOT && process.env.EL_SHOT_ROUTE) || undefined;
 	const url = await pairUrl(shotRoute ?? inviteRoute(argv) ?? (sessionId ? `/#/s/${sessionId}` : "/"));
 	const origin = new URL(url).origin;
 	engineOrigin = origin;

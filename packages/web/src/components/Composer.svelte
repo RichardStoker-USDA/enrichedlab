@@ -53,6 +53,7 @@
 	/** The context gauge, once the engine has counted the session (a session with no model has no count). */
 	const gauge = $derived(typeof lab.status?.context?.used === "number" && lab.status.context.threshold ? lab.status.context : undefined);
 	const left = $derived(gauge ? Math.max(0, Math.min(1, 1 - gauge.used / gauge.threshold)) : 1);
+	// The ring fills as the context does, so a fresh session shows only its faint track.
 	const leftPct = $derived(Math.round(left * 100));
 	const CIRC = 2 * Math.PI * 9;
 	let sweeping = $state(false);
@@ -255,7 +256,7 @@
 				<button type="button" class="chip" class:missing bind:this={chip} onclick={toggleModels} aria-expanded={menuOpen} aria-haspopup="dialog" title={missing ? `${lab.status?.model} isn't offered now. Choose another model.` : gauge ? `${leftPct}% of context left before older turns are summarized (${tokens(gauge.used)} of ${tokens(gauge.threshold)})` : "Choose the model"}>
 					<svg class="ring" class:sweeping viewBox="0 0 22 22" aria-hidden="true">
 						<circle cx="11" cy="11" r="9" class="track" />
-						<circle cx="11" cy="11" r="9" class="arc" class:low={leftPct < 15} stroke-dasharray={CIRC} stroke-dashoffset={CIRC * (1 - left)} />
+						<circle cx="11" cy="11" r="9" class="arc" class:low={leftPct < 15} class:none={left > 0.99} stroke-dasharray={CIRC} stroke-dashoffset={CIRC * left} />
 					</svg>
 					<span class="model-name">{lab.model ? named(lab.model) : missing ? "Model unavailable: choose one" : "Choose a model"}</span>
 					{#if lab.model}<span class="origin">{origin(lab.model)}</span>{/if}
@@ -402,15 +403,18 @@
 	}
 	.ring circle {
 		fill: none;
-		stroke-width: 2.2;
+		stroke-width: 2;
 	}
 	.track {
 		stroke: var(--rule);
 	}
 	.arc {
-		stroke: var(--live);
+		stroke: var(--text-muted);
 		stroke-linecap: round;
 		transition: stroke-dashoffset 400ms var(--ease-out);
+	}
+	.arc.none {
+		opacity: 0;
 	}
 	.arc.low {
 		stroke: var(--bad);

@@ -246,9 +246,9 @@
 		font-size: 13px;
 		color: var(--bad);
 	}
+	/* The sheet fits the tab shown; it opens from the top, so a change of height never moves the tabs. */
 	.services {
 		--sheet-width: 560px;
-		min-height: min(640px, calc(100dvh - 48px));
 	}
 	.tabs {
 		display: grid;
