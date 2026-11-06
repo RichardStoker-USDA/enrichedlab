@@ -1,7 +1,35 @@
 <script lang="ts">
 	import { computerName } from "../lib/places.ts";
 	import { lab } from "../lib/store.svelte.ts";
+	import { groups } from "../lib/layout.ts";
 	import LayoutNode from "./workbench/LayoutNode.svelte";
+	import Pane from "./workbench/Pane.svelte";
+
+	// Every pane is mounted once, keyed by its tab, in one layer over the layout, and placed on its group's slot. A
+	// pane's life follows its tab: moving it or splitting its group keeps its terminal, app or page running.
+	let body: HTMLDivElement | undefined = $state();
+	let slots = $state<Record<string, { x: number; y: number; w: number; h: number }>>({});
+	const frames = $derived(groups(lab.layout).flatMap((g) => g.tabs.map((tab) => ({ tab, group: g.id, front: g.active === tab.id }))));
+	function measure() {
+		if (!body) return;
+		const base = body.getBoundingClientRect();
+		const next: typeof slots = {};
+		for (const el of body.querySelectorAll<HTMLElement>("[data-slot]")) {
+			const r = el.getBoundingClientRect();
+			next[el.dataset.slot!] = { x: r.left - base.left, y: r.top - base.top, w: r.width, h: r.height };
+		}
+		slots = next;
+	}
+	$effect(() => {
+		void lab.layout;
+		void lab.workbench;
+		if (!body) return;
+		const observer = new ResizeObserver(measure);
+		observer.observe(body);
+		for (const el of body.querySelectorAll("[data-slot]")) observer.observe(el);
+		measure();
+		return () => observer.disconnect();
+	});
 
 	const empty = $derived(!lab.layout || (lab.layout.type === "group" && lab.layout.tabs.length === 0));
 	let appsOpen = $state(false);
@@ -93,7 +121,7 @@
 			</button>
 		</div>
 	</div>
-	<div class="body">
+	<div class="body" bind:this={body}>
 		{#if empty}
 			<div class="empty">
 				<p class="empty-title">Nothing on the workbench yet</p>
@@ -106,6 +134,14 @@
 		{:else}
 			<LayoutNode node={lab.layout} />
 		{/if}
+		<div class="pane-layer" class:dragging={lab.draggingTab}>
+			{#each frames as { tab, group, front } (tab.id)}
+				{@const at = slots[group]}
+				<div class="frame" class:shown={front && Boolean(at)} style:left={`${at?.x ?? 0}px`} style:top={`${at?.y ?? 0}px`} style:width={`${at?.w ?? 0}px`} style:height={`${at?.h ?? 0}px`} id={`panel-${tab.id}`} role="tabpanel" aria-labelledby={`tab-${tab.id}`}>
+					<Pane {tab} active={front} />
+				</div>
+			{/each}
+		</div>
 	</div>
 </aside>
 
@@ -185,9 +221,30 @@
 		color: var(--text);
 	}
 	.body {
+		position: relative;
 		flex: 1;
 		min-height: 0;
 		display: flex;
+	}
+	/* Above the layout, below a group's drop target; a tab being dragged reaches the groups through it. */
+	.pane-layer {
+		position: absolute;
+		inset: 0;
+		z-index: 1;
+		pointer-events: none;
+	}
+	.frame {
+		position: absolute;
+		display: none;
+		min-width: 0;
+		min-height: 0;
+		pointer-events: auto;
+	}
+	.frame.shown {
+		display: flex;
+	}
+	.pane-layer.dragging .frame {
+		pointer-events: none;
 	}
 	.empty {
 		margin: auto;

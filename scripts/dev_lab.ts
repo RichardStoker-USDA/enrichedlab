@@ -244,6 +244,14 @@ const SCENES: Scene[] = [
 	{ name: "model_menu", session: "lab", js: `[...document.querySelectorAll(".model .chip")][0]?.click();` },
 	{ name: "workbench_files", session: "local", after: 2500, js: `button("Workbench")?.click(); later(700, () => button("Files")?.click()); later(1800, () => [...document.querySelectorAll(".files-pane button")].find((b) => b.textContent.includes("README"))?.click());` },
 	{ name: "workbench_terminal", session: "local", after: 2500, type: "ls", js: `button("Workbench")?.click(); later(700, () => button("Terminal")?.click()); later(2200, () => q(".xterm-helper-textarea")?.focus());` },
+	// A terminal keeps running when its tab moves into a split: the text typed before the move is still there.
+	{
+		name: "terminal_split",
+		session: "local",
+		after: 7000,
+		type: "echo still-here",
+		js: `button("Workbench")?.click(); later(700, () => button("Files")?.click()); later(1200, () => button("Terminal")?.click()); later(2200, () => q(".xterm-helper-textarea")?.focus()); later(6500, () => { const tab = [...document.querySelectorAll('[role="tab"]')].find((t) => t.textContent.includes("Terminal")); tab?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", altKey: true, shiftKey: true, bubbles: true })); });`,
+	},
 	{ name: "settings", session: "lab", js: `button("Settings")?.click();` },
 	{ name: "model_services", session: "lab", after: 2000, js: `button("Models")?.click();` },
 	{ name: "palette", session: "lab", js: `q(".search")?.click();` },

@@ -88,6 +88,8 @@ class Lab {
 	compactedAt = $state(0);
 	/** The workbench: open or not, and its panes for the current session. */
 	workbench = $state(false);
+	/** A workbench tab is being dragged: the panes let the drag through to the groups' drop targets. */
+	draggingTab = $state(false);
 	layout = $state<Node>(emptyLayout());
 	/** A move between places that is running (it can carry a repository), and the session it moves. */
 	private movingFor = $state<{ sessionId: string; place: string } | undefined>();

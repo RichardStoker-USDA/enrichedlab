@@ -2,7 +2,6 @@
 	import type { Edge, Group } from "../../lib/layout.ts";
 	import { placeOf } from "../../lib/places.ts";
 	import { lab } from "../../lib/store.svelte.ts";
-	import Pane from "./Pane.svelte";
 	import { contextMenu, separator, type MenuAction } from "../../lib/menu.svelte.ts";
 
 	let { group }: { group: Group } = $props();
@@ -128,7 +127,7 @@
 			{@const place = placeFor(tab.ref, tab.kind)}
 			{@const active = tab.id === group.active}
 			{@const kind = tab.kind === "screen" ? "browser" : tab.kind}
-			<div class="tab" class:active class:slot-before={slot === index} class:slot-after={slot === group.tabs.length && index === group.tabs.length - 1} role="presentation" draggable="true" use:contextMenu={() => tabActions(tab.id)} ondragstart={(e) => e.dataTransfer?.setData(TYPE, tab.id)} ondragend={() => ((slot = undefined), (edge = undefined))} onauxclick={(e) => e.button === 1 && lab.closePane(tab.id)}>
+			<div class="tab" class:active class:slot-before={slot === index} class:slot-after={slot === group.tabs.length && index === group.tabs.length - 1} role="presentation" draggable="true" use:contextMenu={() => tabActions(tab.id)} ondragstart={(e) => (e.dataTransfer?.setData(TYPE, tab.id), (lab.draggingTab = true))} ondragend={() => ((slot = undefined), (edge = undefined), (lab.draggingTab = false))} onauxclick={(e) => e.button === 1 && lab.closePane(tab.id)}>
 				<button id={`tab-${tab.id}`} class="label" role="tab" aria-selected={active} aria-controls={`panel-${tab.id}`} tabindex={active ? 0 : -1}
 					title={tab.title}
 					onclick={() => lab.focusPane(tab.id)} onkeydown={(e) => keys(e, index)}>
@@ -143,12 +142,9 @@
 			</div>
 		{/each}
 	</div>
-	<div class="body" bind:this={body} role="region" aria-label="Panes" ondragover={over} ondragleave={() => (edge = undefined)} ondrop={(e) => drop(e)}>
-		{#each group.tabs as tab (tab.id)}
-			<div class="pane" class:shown={tab.id === group.active} id={`panel-${tab.id}`} role="tabpanel" aria-labelledby={`tab-${tab.id}`}>
-				<Pane {tab} active={tab.id === group.active} />
-			</div>
-		{/each}
+	<!-- The panes themselves live in the workbench's pane layer, laid over this slot (Workbench.svelte): moving a tab
+	     or splitting a group moves a rectangle, never the terminal, app or browser inside it. -->
+	<div class="body" bind:this={body} data-slot={group.id} role="region" aria-label="Panes" ondragover={over} ondragleave={() => (edge = undefined)} ondrop={(e) => drop(e)}>
 		{#if edge}
 			<div class="drop {edge}" aria-hidden="true"></div>
 		{/if}
@@ -270,15 +266,6 @@
 		position: relative;
 		flex: 1;
 		min-height: 0;
-		display: flex;
-	}
-	.pane {
-		display: none;
-		flex: 1;
-		min-width: 0;
-		min-height: 0;
-	}
-	.pane.shown {
 		display: flex;
 	}
 	.drop {
