@@ -68,7 +68,8 @@ Rein (Gate's web harness) serves v1 as files rather than through its event strea
   repeated call ids unique (`<id>~2`), keeps a turn's first 64 calls and their results with a notice for the rest,
   and holds `through` steady or rising. A session longer than 20,000 records exports its newest turns, from a user
   turn, behind one leading compaction that says how much was left out (with the latest summary when there is one),
-  so every export imports.
+  so every export imports. An event's data stays within 252 KiB of JSON: a call's arguments become `{}` first,
+  then the longest strings are cut and end with "[cut to fit the shared log]".
 
 ## Status
 

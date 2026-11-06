@@ -50,6 +50,26 @@ function parts(list: unknown, attachments: Attachments): Part[] | undefined {
 /** The shared log's limits (docs/session-log.md): calls per assistant event, and records per log. */
 export const MAX_CALLS = 64;
 export const MAX_RECORDS = 20_000;
+/** An event's data, as JSON text, in bytes. */
+export const MAX_DATA = 252 * 1024;
+
+const size = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
+
+/** An event over the data limit: call arguments go to {} first, then the longest strings are cut, marked as cut. */
+function trim(e: V1Event): V1Event {
+	if (size(e.data) <= MAX_DATA) return e;
+	const data: Record<string, unknown> = { ...e.data };
+	if (Array.isArray(data.calls)) data.calls = (data.calls as Record<string, unknown>[]).map((c) => ({ ...c, arguments: {} }));
+	for (let guard = 0; size(data) > MAX_DATA && guard < 32; guard++) {
+		const key = Object.keys(data)
+			.filter((k) => typeof data[k] === "string")
+			.sort((a, b) => (data[b] as string).length - (data[a] as string).length)[0];
+		if (!key) break;
+		const text = data[key] as string;
+		data[key] = `${text.slice(0, Math.max(0, text.length - (size(data) - MAX_DATA) - 256))}\n[cut to fit the shared log]`;
+	}
+	return { ...e, data };
+}
 
 const DECISION: Record<string, { verdict: string; by: string }> = {
 	auto: { verdict: "allow", by: "rule" },
@@ -110,7 +130,7 @@ export function toV1(events: SessionEvent[]): { events: V1Event[]; attachments: 
 			push(at, `x-${t.replace(/_/g, "-")}`, rest, e.id);
 		}
 	}
-	return { events: fit(out), attachments };
+	return { events: fit(out.map(trim)), attachments };
 }
 
 /**

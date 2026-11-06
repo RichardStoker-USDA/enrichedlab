@@ -1,7 +1,7 @@
 // The shared session log v1 (docs/session-log.md): engine logs go out and come back with the same model context.
 import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "../packages/protocol/src/index.ts";
-import { MAX_CALLS, MAX_RECORDS, fromV1, toV1 } from "../packages/engine/src/session/log_v1.ts";
+import { MAX_CALLS, MAX_DATA, MAX_RECORDS, fromV1, toV1 } from "../packages/engine/src/session/log_v1.ts";
 import { derive } from "../packages/engine/src/session/context.ts";
 
 const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex").toString("base64");
@@ -112,5 +112,18 @@ describe("session log v1", () => {
 		const back = fromV1(out);
 		expect(back.events.some((e) => e.t === "compaction")).toBe(true);
 		expect(back.events.filter((e) => e.t === "user").at(-1)).toMatchObject({ text: "question 10499" });
+	});
+
+	test("no event's data is over the size limit: large arguments become {} and long text is cut", () => {
+		const big = "x".repeat(300 * 1024);
+		const out = toV1([
+			{ t: "header", v: 1, id: "h", at: at(0), cwd: "/tmp/p", created: at(0), system: "" },
+			{ t: "user", id: "u", at: at(1), text: "write it" },
+			{ t: "assistant", id: "a", at: at(2), model: "m", text: "", toolCalls: [{ id: "c", name: "write", args: JSON.stringify({ content: big }) }], stop: "tool_use" },
+			{ t: "tool", id: "r", at: at(3), callId: "c", name: "write", ok: true, content: big, decision: "auto" },
+		]).events;
+		for (const e of out) expect(Buffer.byteLength(JSON.stringify(e.data))).toBeLessThanOrEqual(MAX_DATA);
+		expect((out.find((e) => e.kind === "assistant")!.data.calls as { arguments: unknown }[])[0]!.arguments).toEqual({});
+		expect(String(out.find((e) => e.kind === "tool_result")!.data.output)).toEndWith("[cut to fit the shared log]");
 	});
 });
