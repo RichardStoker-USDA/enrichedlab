@@ -11,6 +11,7 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { deflateSync } from "node:zlib";
 import { EngineClient, findEngine } from "../packages/engine/src/index.ts";
 
 const root = join(import.meta.dir, "..");
@@ -125,6 +126,50 @@ function listFiles(): { id: string; path: string; bytes: number }[] {
 }
 
 mkdirSync(join(sandbox, "work"), { recursive: true });
+// ── A picture of the stand-in desktop: a panel, a window and a marker where the last click went ────────────────
+
+const DESK = { width: 1280, height: 800 };
+let lastClick: [number, number] | undefined;
+let typedChars = 0;
+function crc32(bytes: Uint8Array): number {
+	let c = ~0;
+	for (const b of bytes) {
+		c ^= b;
+		for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
+	}
+	return ~c >>> 0;
+}
+function desktopPng(): string {
+	const { width, height } = DESK;
+	const px = Buffer.alloc(width * height * 3);
+	const rect = (x0: number, y0: number, w: number, h: number, [r, g, b]: [number, number, number]) => {
+		for (let y = Math.max(0, y0); y < Math.min(height, y0 + h); y++) for (let x = Math.max(0, x0); x < Math.min(width, x0 + w); x++) px.set([r, g, b], (y * width + x) * 3);
+	};
+	rect(0, 0, width, height, [44, 62, 80]);
+	rect(0, 0, width, 28, [24, 28, 34]);
+	rect(160, 90, 900, 560, [246, 247, 249]);
+	rect(160, 90, 900, 34, [222, 226, 232]);
+	for (let i = 0; i < 9; i++) rect(196, 160 + i * 34, 520 + ((i * 97) % 300), 12, [205, 211, 219]);
+	rect(196, 520, 420, 36, [255, 255, 255]);
+	for (let i = 0; i < Math.min(typedChars, 40); i++) rect(204 + i * 10, 532, 7, 12, [40, 40, 40]);
+	if (lastClick) rect(lastClick[0] - 6, lastClick[1] - 6, 12, 12, [255, 191, 0]);
+	const raw = Buffer.alloc((width * 3 + 1) * height);
+	for (let y = 0; y < height; y++) px.copy(raw, y * (width * 3 + 1) + 1, y * width * 3, (y + 1) * width * 3);
+	const chunk = (type: string, data: Buffer) => {
+		const out = Buffer.alloc(12 + data.length);
+		out.writeUInt32BE(data.length, 0);
+		out.write(type, 4, "ascii");
+		data.copy(out, 8);
+		out.writeUInt32BE(crc32(out.subarray(4, 8 + data.length)), 8 + data.length);
+		return out;
+	};
+	const ihdr = Buffer.alloc(13);
+	ihdr.writeUInt32BE(width, 0);
+	ihdr.writeUInt32BE(height, 4);
+	ihdr.set([8, 2, 0, 0, 0], 8);
+	return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]).toString("base64");
+}
+
 const lab = Bun.serve({
 	port: 0,
 	hostname: "127.0.0.1",
@@ -137,11 +182,21 @@ const lab = Bun.serve({
 		}
 		if (path === "/mcp") return request.method === "POST" ? mcp((await request.json()) as { id?: number; method: string }) : new Response("", { status: 405 });
 		if (path === "/.well-known/enrichedlab-lab") {
-			return Response.json({ contract: "2026-11", name: "devlab", title: "Field Lab", endpoints: { models: true, containers: true }, sign_in: { kind: "cloudflare-access-oauth" }, policy: { keep_data_inside: false }, sandbox_networks: [{ name: "none", title: "No network" }] });
+			return Response.json({ contract: "2026-11", name: "devlab", title: "Field Lab", endpoints: { models: true, containers: true }, sign_in: { kind: "cloudflare-access-oauth" }, policy: { keep_data_inside: false }, sandbox_networks: [{ name: "none", title: "No network" }], sandbox_desktop: { image: "desktop", screen: DESK, actions: ["screenshot", "left_click", "right_click", "double_click", "left_click_drag", "type", "key", "scroll"], open: true } });
 		}
-		if (path === "/v1/me") return Response.json({ subject: "u_dev", handle: "pat", memberships: [{ lab: "devlab", research_group: null, roles: ["member"] }], policy: { keep_data_inside: false }, sandbox_networks: ["none"], sandboxes: { enabled: true } });
+		if (path === "/v1/me") return Response.json({ subject: "u_dev", handle: "pat", memberships: [{ lab: "devlab", research_group: null, roles: ["member"] }], policy: { keep_data_inside: false }, sandbox_networks: ["none"], sandboxes: { enabled: true }, capabilities: ["discovery"] });
 		if (path === "/v1/models") return Response.json({ data: [{ id: "field-coder", gate: { context: 131072, capabilities: ["reasoning", "tools"], efforts: ["low", "medium", "high"] } }] });
-		if (path === "/v1/containers") return request.method === "POST" ? Response.json({ id: "c1", status: "running" }) : Response.json({ data: [{ id: "c1", status: "running", name: "EnrichedLab" }] });
+		if (path === "/v1/containers" && request.method === "POST") {
+			const body = (await request.json()) as { image?: string };
+			return Response.json(body.image === "desktop" ? { id: "d1", status: "running", image: "desktop" } : { id: "c1", status: "running" });
+		}
+		if (path === "/v1/containers") return Response.json({ data: [{ id: "c1", status: "running", name: "EnrichedLab" }] });
+		if (path === "/v1/containers/d1/desktop" || path === "/v1/containers/d1/desktop/open") {
+			const action = (await request.json()) as { action?: string; coordinate?: [number, number]; text?: string };
+			if (action.coordinate && action.action?.includes("click")) lastClick = action.coordinate;
+			if (action.action === "type") typedChars += action.text?.length ?? 0;
+			return Response.json({ ok: true, screenshot: { png: desktopPng(), ...DESK } });
+		}
 		if (path === "/v1/containers/c1") return Response.json({ id: "c1", status: "running", image: null, network: null });
 		if (path === "/v1/containers/c1/exec") {
 			const { command, timeout_seconds } = (await request.json()) as { command: string; timeout_seconds?: number };
@@ -309,6 +364,10 @@ const SCENES: Scene[] = [
 	{ name: "narrow_900", session: "lab", size: "900x720" },
 	{ name: "narrow_760", session: "lab", size: "760x700" },
 	{ name: "compact_workbench", session: "local", size: "1100x800", after: 2000, js: `button("Workbench")?.click(); later(700, () => button("Files")?.click());` },
+	// The lab's desktop sandbox in a pane: the first picture, then a click the person makes (the marker moves there).
+	{ name: "desktop", session: "lab", after: 4500, js: `button("Workbench")?.click(); later(700, () => button("Desktop")?.click()); later(2500, () => { const c = q(".desktop-pane canvas"); if (!c) return; const r = c.getBoundingClientRect(); const at = { clientX: r.left + r.width * 0.42, clientY: r.top + r.height * 0.5, bubbles: true, button: 0 }; c.dispatchEvent(new PointerEvent("pointerdown", at)); c.dispatchEvent(new PointerEvent("pointerup", at)); c.dispatchEvent(new MouseEvent("click", { ...at, detail: 1 })); });` },
+	// Discovery mode, typed in a lab session: the title bar says so and the transcript marks where it started.
+	{ name: "discovery", session: "lab", after: 2500, type: "/discover", js: `q("textarea")?.focus();` },
 	// A long tool call streams for about 20 seconds: the page has to keep drawing frames (a window resized meanwhile
 	// shows its old frame over the window's material until the page draws again).
 	{

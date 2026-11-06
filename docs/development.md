@@ -63,7 +63,9 @@ is a temporary folder, a source engine on a throwaway home, and a git project wi
 moved to the lab. `--open` opens the app on it; `--shots <folder>` captures every scene (new session, both sessions,
 the place and model menus, the workbench, every sheet, narrow windows) in light and dark, and checks the flows that
 cross places, such as a first task typed after "New Session in <lab>" running there. Its stand-in config adds a cloud
-service beside the lab, so model menus show private and cloud models. The `streaming_write` scene streams a 30 KB tool
+service beside the lab, so model menus show private and cloud models. The stand-in lab also offers a desktop sandbox
+(a drawn desktop that marks where the last click went) and grants Discovery mode: the `desktop` scene opens the pane
+and clicks in it, and the `discovery` scene types `/discover` in the lab session. The `streaming_write` scene streams a 30 KB tool
 call at a model's pace while resizing the window, and prints frame times, long tasks, and whether the page kept the
 window's size. Build the window first
 (`bun run build:web`). Run it before calling a change to the window done, and add a scene with each new surface.
