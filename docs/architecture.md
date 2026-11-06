@@ -94,7 +94,9 @@ is replayed inside a turn. Gate reports all of this in `/v1/models`; local model
 **Models on this computer** (`models/local.ts`). The engine probes ports 11434, 1234, 8080, 8000 and 30000
 (`discovery.ports` replaces the list) and names each server by its answer, since llama.cpp and mlx_lm.server share
 8080 and vLLM and oMLX share 8000: `owned_by` (llamacpp, vllm, sglang, omlx), Ollama's `/api/version`, LM Studio's
-`/api/v1/models`, and Python's `Server` header for mlx_lm.server. Each model gets the context its server will hold,
+`/api/v1/models`, and Python's `Server` header for mlx_lm.server. Foundry Local takes a free port when its server
+starts, so the engine asks its CLI (`foundry status --output json`, else the older `foundry service status`) and
+probes that port too. Each model gets the context its server will hold,
 capped by memory (16K under 32 GB, 32K under 64 GB, 64K above). Ollama is reached through `/api/chat`, because its
 OpenAI endpoint can't set `num_ctx` and would cut prompts to its 4,096-token default; LM Studio loads a model with
 the planned `context_length` before its first request. `el local` and the window's *On this computer* list what

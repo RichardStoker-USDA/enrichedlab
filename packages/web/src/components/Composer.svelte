@@ -10,7 +10,8 @@
 	let menuOpen = $state(false);
 	let menu: HTMLDivElement | undefined = $state();
 
-	const gauge = $derived(lab.status?.context);
+	/** The context gauge, once the engine has counted the session (a session with no model has no count). */
+	const gauge = $derived(typeof lab.status?.context?.used === "number" && lab.status.context.threshold ? lab.status.context : undefined);
 	const left = $derived(gauge ? Math.max(0, Math.min(1, 1 - gauge.used / gauge.threshold)) : 1);
 	const leftPct = $derived(Math.round(left * 100));
 	const CIRC = 2 * Math.PI * 9;

@@ -1,7 +1,8 @@
 // Model servers on this computer, found by how they answer rather than by port: llama.cpp and mlx_lm.server both
-// default to 8080, and vLLM and oMLX to 8000. Each kind then adds what it knows about its models' context, so the
+// default to 8080, and vLLM and oMLX to 8000. Foundry Local picks a port when it starts; its CLI says which. Each kind then adds what it knows about its models' context, so the
 // harness never plans for more context than the server will hold.
 
+import { execFile } from "node:child_process";
 import { totalmem } from "node:os";
 import { labFetch } from "./http.ts";
 import { OLLAMA_MLX_DEFAULT, type OllamaModel, atLeast, ollamaModels, ollamaVersion } from "./ollama.ts";
@@ -11,7 +12,7 @@ import type { ModelProfile } from "./types.ts";
 /** Default ports: Ollama, LM Studio, llama.cpp or mlx_lm.server, vLLM or oMLX, SGLang. */
 export const LOCAL_PORTS = [11434, 1234, 8080, 8000, 30000];
 
-export type LocalKind = "ollama" | "lmstudio" | "llamacpp" | "vllm" | "sglang" | "omlx" | "mlx" | "openai";
+export type LocalKind = "ollama" | "lmstudio" | "llamacpp" | "vllm" | "sglang" | "omlx" | "mlx" | "foundry" | "openai";
 
 const LABELS: Record<LocalKind, string> = {
 	ollama: "Ollama",
@@ -21,6 +22,7 @@ const LABELS: Record<LocalKind, string> = {
 	sglang: "SGLang",
 	omlx: "oMLX",
 	mlx: "MLX",
+	foundry: "Foundry Local",
 	openai: "Local server",
 };
 
@@ -136,9 +138,41 @@ async function studioProfiles(name: string, label: string, baseUrl: string, cap:
 	});
 }
 
-/** Find the servers on `ports` and list their models. Probes are short and run at once; silence means none. */
-export async function discoverLocal(ports: number[] = LOCAL_PORTS, timeoutMs = 600, cap = localContextCap()): Promise<LocalServer[]> {
-	const found = (await Promise.all(ports.map(async (port) => ({ port, at: await identify(port, timeoutMs) })))).filter((f) => f.at);
+/** Run a command briefly and return what it printed; empty when it isn't installed, fails or takes too long. */
+export type Runner = (file: string, args: string[]) => Promise<string>;
+const runQuiet: Runner = (file, args) =>
+	new Promise((resolve) => {
+		execFile(file, args, { timeout: 2500, windowsHide: true, maxBuffer: 1 << 20 }, (error, stdout) => resolve(error ? "" : String(stdout)));
+	});
+
+let foundryCache: { at: number; port?: number } | undefined;
+
+/**
+ * Foundry Local's server takes a free port when it starts, so its CLI is asked where it is: `foundry status --output
+ * json` (the current CLI), then `foundry service status` (the older one). Answers are kept for 30 seconds.
+ */
+export async function foundryPort(run: Runner = runQuiet, now = Date.now()): Promise<number | undefined> {
+	if (run === runQuiet && foundryCache && now - foundryCache.at < 30_000) return foundryCache.port;
+	const local = /https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\]):(\d{2,5})/;
+	let port: number | undefined;
+	for (const args of [["status", "--output", "json"], ["service", "status"]]) {
+		const match = local.exec(await run("foundry", args));
+		if (match) {
+			port = Number(match[1]);
+			break;
+		}
+	}
+	if (run === runQuiet) foundryCache = { at: now, port };
+	return port;
+}
+
+/** Find the servers on `ports` (and Foundry Local's, wherever it is) and list their models. Probes are short and run at once; silence means none. */
+export async function discoverLocal(ports: number[] = LOCAL_PORTS, timeoutMs = 600, cap = localContextCap(), run: Runner = runQuiet): Promise<LocalServer[]> {
+	const foundry = await foundryPort(run).catch(() => undefined);
+	const all = foundry && !ports.includes(foundry) ? [...ports, foundry] : ports;
+	const found = (await Promise.all(all.map(async (port) => ({ port, at: await identify(port, timeoutMs) })))).filter((f) => f.at);
+	// Foundry Local answers like any OpenAI-compatible server; its CLI is what says which one it is.
+	for (const f of found) if (f.port === foundry && f.at!.kind === "openai") f.at!.kind = "foundry";
 	const taken = new Set<string>();
 	const servers: LocalServer[] = [];
 	for (const { port, at } of found) {

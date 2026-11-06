@@ -4,7 +4,7 @@
 
 import { afterAll, describe, expect, test } from "bun:test";
 import type { LocalPullProgress } from "../packages/protocol/src/index.ts";
-import { discoverLocal, identify, localContextCap, ollamaUsesMlx } from "../packages/engine/src/models/local.ts";
+import { discoverLocal, foundryPort, identify, localContextCap, ollamaUsesMlx } from "../packages/engine/src/models/local.ts";
 import { LocalModels } from "../packages/engine/src/models/local_service.ts";
 import { atLeast, ollamaBody, ollamaChat } from "../packages/engine/src/models/ollama.ts";
 import type { ModelRegistry } from "../packages/engine/src/models/registry.ts";
@@ -201,5 +201,26 @@ describe("downloading and loading local models", () => {
 		const { openaiChat } = await import("../packages/engine/src/models/openai_chat.ts");
 		for (let i = 0; i < 2; i++) for await (const _ of openaiChat.stream({ model: m, system: "", messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }], tools: [] }, AbortSignal.timeout(5000)));
 		expect(loads).toEqual([{ model: "openai/gpt-oss-20b", context_length: 65_536 }]);
+	});
+});
+
+describe("Foundry Local", () => {
+	test("its CLI says the port, in the current and the older output", async () => {
+		const current = async (_f: string, args: string[]) => (args[0] === "status" ? JSON.stringify({ server: { running: true, urls: ["http://127.0.0.1:51234"] } }) : "");
+		expect(await foundryPort(current)).toBe(51234);
+		const older = async (_f: string, args: string[]) => (args[0] === "service" ? "Model management service is running on http://127.0.0.1:5273/openai/status" : "");
+		expect(await foundryPort(older)).toBe(5273);
+		expect(await foundryPort(async () => "")).toBeUndefined();
+	});
+
+	test("the server its CLI names is listed as Foundry Local", async () => {
+		const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => Response.json({ object: "list", data: [{ id: "qwen3-0.6b", object: "model" }] }) });
+		try {
+			const run = async (_f: string, args: string[]) => (args[0] === "status" ? `{"url":"http://127.0.0.1:${server.port}"}` : "");
+			const found = await discoverLocal([], 600, 32_768, run);
+			expect(found.map((s) => [s.kind, s.label, s.models.map((m) => m.id)])).toEqual([["foundry", "Foundry Local", ["qwen3-0.6b"]]]);
+		} finally {
+			server.stop(true);
+		}
 	});
 });

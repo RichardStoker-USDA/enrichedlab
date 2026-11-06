@@ -35,8 +35,8 @@ Updates are signed and install themselves the same way: the app offers them, `el
   `el service add chatgpt`). Requests then use the usage included in your plan.
 - **Your own key.** Add an OpenAI, Anthropic, Google Gemini or OpenRouter key in the same place. Keys go to your
   computer's credential store.
-- **On this computer.** Models running in Ollama, LM Studio, llama.cpp, MLX, oMLX, vLLM or SGLang appear on their
-  own. With Ollama installed, `el local` suggests open models that fit your computer and `el model pull <name>`
+- **On this computer.** Models running in Ollama, LM Studio, llama.cpp, MLX, oMLX, vLLM, SGLang or Foundry Local
+  appear on their own. With Ollama installed, `el local` suggests open models that fit your computer and `el model pull <name>`
   downloads one (the window does the same under *On this computer*).
 
 ## What it does
