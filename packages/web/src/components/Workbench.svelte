@@ -208,8 +208,9 @@
 		gap: 8px;
 		margin-top: 14px;
 	}
-	@media (max-width: 1179px) {
-		.workbench {
+	/* Floating over the session only when the two don't fit side by side (the grid in App.svelte). */
+	@media (min-width: 861px) and (max-width: 983px) {
+		:global(.shell:not(.no-rail)) .workbench {
 			position: fixed;
 			z-index: 45;
 			inset: 0 0 0 auto;
@@ -217,8 +218,11 @@
 			box-shadow: var(--shadow);
 		}
 	}
-	@media (max-width: 860px) {
+	@media (max-width: 719px) {
 		.workbench {
+			position: fixed;
+			z-index: 45;
+			inset: 0;
 			width: 100vw;
 			border-left: 0;
 		}

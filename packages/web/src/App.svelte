@@ -98,6 +98,15 @@
 		window.labDesktop?.setTheme?.(lab.ui.theme);
 	});
 
+	// 861 to 983 px: the sidebar steps aside while the workbench is open (lab.sidebar).
+	$effect(() => {
+		const query = window.matchMedia("(min-width: 861px) and (max-width: 983px)");
+		const update = () => (lab.compactWindow = query.matches);
+		update();
+		query.addEventListener("change", update);
+		return () => query.removeEventListener("change", update);
+	});
+
 	$effect(() => {
 		window.labDesktop?.menuState?.({ session: Boolean(lab.current), busy: lab.busy, sidebar: lab.sidebar, workbench: lab.workbench, undoable: Boolean(lab.status?.undoable?.length) });
 	});
@@ -206,27 +215,39 @@
 			transform: translate(-50%, 6px);
 		}
 	}
-	/* Narrower: the workbench floats over the run sheet as a sheet (see Workbench.svelte). */
-	@media (max-width: 1179px) {
+	/*
+	 * The workbench stays beside the session while both fit at 360 px: from 984 px with the sidebar, from 720 px
+	 * without it (under 861 px the sidebar is a drawer). Narrower than that it floats over the session
+	 * (Workbench.svelte), so a half-screen window still shows the agent working next to its browser or terminal.
+	 */
+	@media (min-width: 861px) and (max-width: 983px) {
 		.shell.bench {
 			grid-template-columns: var(--rail-width) minmax(0, 1fr);
 		}
-		.shell.no-rail.bench {
-			grid-template-columns: minmax(0, 1fr);
-		}
-		.gutter {
+		.shell.bench:not(.no-rail) .gutter {
 			display: none;
 		}
 	}
 	@media (max-width: 860px) {
 		.shell,
-		.shell.bench,
-		.shell.no-rail,
-		.shell.no-rail.bench {
+		.shell.no-rail {
 			grid-template-columns: minmax(0, 1fr);
+		}
+		.shell.bench,
+		.shell.no-rail.bench {
+			grid-template-columns: minmax(360px, 1fr) 0 minmax(360px, var(--bench));
 		}
 		.main {
 			border-left: 0;
+		}
+	}
+	@media (max-width: 719px) {
+		.shell.bench,
+		.shell.no-rail.bench {
+			grid-template-columns: minmax(0, 1fr);
+		}
+		.shell.bench .gutter {
+			display: none;
 		}
 	}
 </style>

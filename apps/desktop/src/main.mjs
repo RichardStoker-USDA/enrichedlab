@@ -147,8 +147,9 @@ async function open(argv) {
 	const mac = process.platform === "darwin";
 	const win11 = process.platform === "win32";
 	window = new BrowserWindow({
-		width: 1360,
-		height: 880,
+		// A screenshot run can ask for a window size (EL_SHOT_SIZE=1024x720) to check narrower layouts.
+		width: Number(/^(\d+)x\d+$/.exec(process.env.EL_SHOT ? (process.env.EL_SHOT_SIZE ?? "") : "")?.[1]) || 1360,
+		height: Number(/^\d+x(\d+)$/.exec(process.env.EL_SHOT ? (process.env.EL_SHOT_SIZE ?? "") : "")?.[1]) || 880,
 		minWidth: 720,
 		minHeight: 520,
 		show: false,

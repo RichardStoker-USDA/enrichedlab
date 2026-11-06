@@ -72,8 +72,31 @@ class Lab {
 	join = $state<{ url?: string; name?: string; title?: string; isolated?: boolean } | undefined>();
 	/** The settings sheet: appearance, labs, models. */
 	settings = $state(false);
-	/** The sidebar, hidden with View > Toggle Sidebar on a wide window. */
-	sidebar = $state(true);
+	/** The person's choice: View > Toggle Sidebar. */
+	private sidebarChoice = $state(true);
+	/** The window is 861 to 983 px wide: room for the session and the workbench, not for the sidebar as well. */
+	private compactWidth = $state(false);
+	/** The sidebar was asked for while the workbench was open in a compact window: it stays, the workbench floats. */
+	private sidebarOverBench = $state(false);
+
+	/**
+	 * Whether the sidebar shows. In a compact window it steps aside while the workbench is open, as a Mac app's
+	 * sidebar does for an inspector, and comes back when the workbench closes.
+	 */
+	get sidebar(): boolean {
+		return this.sidebarChoice && (!(this.compactWidth && this.workbench) || this.sidebarOverBench);
+	}
+	set sidebar(on: boolean) {
+		this.sidebarChoice = on;
+		this.sidebarOverBench = on && this.compactWidth && this.workbench;
+	}
+	get compactWindow(): boolean {
+		return this.compactWidth;
+	}
+	set compactWindow(on: boolean) {
+		this.compactWidth = on;
+		this.sidebarOverBench = false;
+	}
 	/** A question that needs a yes before something that can't be undone. */
 	confirming = $state<{ title: string; detail: string; action: string; tone?: "danger" | "plain"; run: () => unknown } | undefined>();
 	/** The place the new-session screen starts on (the rail's "New session in <place>"). */
@@ -255,7 +278,9 @@ class Lab {
 		// A session with views and no saved layout opens all of them, newest in front.
 		if (!saved) for (const view of [...this.canvases].reverse().slice(-8)) layout = openTab(layout, this.tabFor(view));
 		this.layout = layout;
-		const wide = window.matchMedia("(min-width: 1180px)").matches;
+		// Opened again on its own wherever it can sit beside the session (see App.svelte), never over it.
+		const wide = window.matchMedia("(min-width: 720px)").matches;
+		this.sidebarOverBench = false;
 		this.workbench = wide && (store.get(`enrichedlab.bench.${id}`) ?? (groups(layout).some((g) => g.tabs.length) ? "1" : "0")) === "1";
 	}
 
@@ -272,6 +297,7 @@ class Lab {
 
 	toggleWorkbench(open = !this.workbench): void {
 		this.workbench = open;
+		if (!open) this.sidebarOverBench = false;
 		this.saveLayout();
 	}
 
