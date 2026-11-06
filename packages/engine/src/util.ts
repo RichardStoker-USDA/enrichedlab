@@ -5,6 +5,12 @@ import { dirname, join } from "node:path";
 
 export const VERSION = "0.2.12";
 
+/**
+ * How the harness names itself to a lab. Gate files every request under the User-Agent's first word, so the lab's
+ * console can show which harness versions and systems each person uses without a separate report.
+ */
+export const CLIENT_AGENT = `EnrichedLab/${VERSION} (${process.platform}; ${process.arch})`;
+
 /** What changed in this version, one line each, newest first. Surfaces show the first lines when a session opens. */
 export const NEWS = [
 	"0.2.12: the window rebuilt to feel like a Mac app: a native menu bar and right-click menus everywhere, title bars you can drag, AA contrast in light and dark, and where a session runs chosen beside its model, with a review before a move; Remove Lab, Jump to Latest and per-session drafts; hiding the workbench no longer stops its terminals; Foundry Local is found on its own; sessions export and import in the log format Gate also reads (el session export); Windows signing is ready for an Azure Artifact Signing account.",

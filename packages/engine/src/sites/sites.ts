@@ -8,7 +8,7 @@ import type { DeviceRequest, LabApp, LabNotice, SiteSummary } from "@enrichedlab
 import type { ModelProfile } from "../models/types.ts";
 import type { Paths } from "../paths.ts";
 import type { Tool } from "../tools/types.ts";
-import { errorText, expandHome, readJson, readSecret, redact, writeJson } from "../util.ts";
+import { CLIENT_AGENT, errorText, expandHome, readJson, readSecret, redact, writeJson } from "../util.ts";
 import { syncSiteBundles } from "../bundles.ts";
 import type { ModelSource } from "../models/registry.ts";
 import { SITE_KINDS, type SiteAdapter } from "./adapter.ts";
@@ -340,7 +340,7 @@ export class Sites {
 		const useLan = lan && (forceLan || config.preferLan || !creds.oauth);
 		if (useLan && lan) {
 			const ca = lan.caFile ? readFileSync(expandHome(lan.caFile), "utf8") : undefined;
-			return { base: lan.url.replace(/\/+$/, ""), via: "key", ca, headers: async () => ({ authorization: `Bearer ${readSecret({ keyFile: lan.keyFile })}` }) };
+			return { base: lan.url.replace(/\/+$/, ""), via: "key", ca, headers: async () => ({ authorization: `Bearer ${readSecret({ keyFile: lan.keyFile })}`, "user-agent": CLIENT_AGENT }) };
 		}
 		if (creds.oauth) {
 			let current = creds.oauth;
@@ -363,7 +363,7 @@ export class Sites {
 							});
 						await refreshing;
 					}
-					return { authorization: `Bearer ${current.access}` };
+					return { authorization: `Bearer ${current.access}`, "user-agent": CLIENT_AGENT };
 				},
 			};
 		}

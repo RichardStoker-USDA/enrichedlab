@@ -1,5 +1,6 @@
 // fetch, show, recall and plan: the web, the canvas, stored outputs and the visible plan.
 
+import { VERSION } from "../util.ts";
 import type { CanvasSummary } from "@enrichedlab/protocol";
 import { num, str, type Tool, ToolError } from "./types.ts";
 
@@ -49,7 +50,7 @@ export const fetchTool: Tool = {
 		const url = new URL(str(args, "url"));
 		if (url.protocol !== "https:" && url.protocol !== "http:") throw new ToolError("Only http and https addresses can be fetched.");
 		const response = await fetch(url, {
-			headers: { "user-agent": "EnrichedLab/0.1 (+agent harness)", accept: "text/html,application/json,text/plain,*/*;q=0.5" },
+			headers: { "user-agent": `EnrichedLab/${VERSION} (+agent harness)`, accept: "text/html,application/json,text/plain,*/*;q=0.5" },
 			signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(30_000)]),
 			redirect: "manual",
 		});
