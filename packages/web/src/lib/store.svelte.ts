@@ -294,7 +294,9 @@ class Lab {
 		const tab: Tab = view ? this.tabFor(view) : { id: uid("t"), kind, title: title ?? TITLES[kind], ref };
 		// Terminals and browsers are new each time; views and files come forward if open.
 		const fresh = (kind === "terminal" || kind === "browser") && !ref ? { ...tab, id: uid("t") } : tab;
-		this.layout = kind === "terminal" ? openTab(this.layout, { ...fresh, ref: fresh.id }) : openTab(this.layout, fresh);
+		// New panes join the group last used, when it's still there.
+		const target = groups(this.layout).some((g) => g.id === this.lastGroup) ? this.lastGroup : undefined;
+		this.layout = kind === "terminal" ? openTab(this.layout, { ...fresh, ref: fresh.id }, target) : openTab(this.layout, fresh, target);
 		this.workbench = true;
 		this.saveLayout();
 		return fresh.id;

@@ -240,7 +240,7 @@
 								ondblclick={() => startRename(s)}
 								use:contextMenu={() => sessionActions(s)}
 							>
-								<span class="title">{s.title}</span>
+								<span class="title" title={s.title}>{s.title}</span>
 								{#if s.running}
 									<span class="live" aria-label="running"></span>
 								{:else if place}
@@ -253,6 +253,8 @@
 					{/each}
 					{#if !showAll && project.sessions.length > shown.length}
 						<button class="more" onclick={() => (expanded[project.path] = true)}>Show {project.sessions.length - shown.length} more</button>
+					{:else if expanded[project.path] && !filter && project.sessions.length > (project.path === currentProject ? 8 : 4)}
+						<button class="more" onclick={() => (expanded[project.path] = false)}>Show less</button>
 					{/if}
 				</div>
 			{:else}

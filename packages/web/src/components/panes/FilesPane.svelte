@@ -81,6 +81,12 @@
 </script>
 
 {#snippet tree(dir: string, depth: number)}
+	<!-- A folder still being read, and an empty one, each say so instead of showing nothing. -->
+	{#if !listings[dir]}
+		<p class="state" style:padding-left={`${26 + depth * 14}px`}>{error && dir === "." ? "" : "Reading…"}</p>
+	{:else if !listings[dir].length}
+		<p class="state" style:padding-left={`${26 + depth * 14}px`}>{dir === "." ? "This folder is empty." : "Empty"}</p>
+	{/if}
 	{#each listings[dir] ?? [] as entry (entry.name)}
 		{@const path = join(dir, entry.name)}
 		{#if entry.type === "dir"}
@@ -123,6 +129,14 @@
 </div>
 
 <style>
+	.state {
+		margin: 0;
+		height: 26px;
+		display: flex;
+		align-items: center;
+		font-size: 12px;
+		color: var(--text-muted);
+	}
 	.files-pane {
 		flex: 1;
 		display: grid;
