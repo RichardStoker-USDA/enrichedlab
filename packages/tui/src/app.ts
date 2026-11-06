@@ -436,7 +436,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
 			}
 			case "sites": {
 				sites = await client.call("site.refresh", {});
-				if (!sites.length) return say("No sites. Add one: el site add <name> <https://address>");
+				if (!sites.length) return say("No labs yet. Add one with its invite link, or: el site add <name> <https://address>");
 				for (const s of sites) say(`${s.name}: ${s.signedIn ? `signed in as ${s.who} (${s.via}); ${s.models} models, ${s.tools} tools${s.sandbox ? ", sandbox" : ""}${s.warning ? `. ${s.warning}` : ""}` : s.error ?? "not signed in"}`);
 				return;
 			}
