@@ -2,7 +2,7 @@
 // stream back into StreamEvents. Nothing above this file knows a provider's field names.
 
 import type { ApiKind } from "../config.ts";
-import type { Part, ToolCall, Usage } from "@enrichedlab/protocol";
+import type { ModelWhere, Part, ToolCall, Usage } from "@enrichedlab/protocol";
 
 export type Msg =
 	| { role: "user"; content: Part[] }
@@ -22,6 +22,8 @@ export interface ModelProfile {
 	id: string;
 	label: string;
 	source: "local" | "config" | "site";
+	/** Where it runs, when its source knows better than its address (a lab names where its models run). */
+	where?: ModelWhere;
 	api: ApiKind;
 	baseUrl: string;
 	context: number;

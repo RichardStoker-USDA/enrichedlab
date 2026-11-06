@@ -2,6 +2,7 @@
 // request's shape. No provider is called.
 
 import { afterAll, describe, expect, test } from "bun:test";
+import { whereOf } from "../packages/engine/src/models/registry.ts";
 import type { ModelProfile, Msg } from "../packages/engine/src/models/types.ts";
 import { anthropic } from "../packages/engine/src/models/anthropic.ts";
 import { prepareForSummary, summarize } from "../packages/engine/src/session/compaction.ts";
@@ -79,5 +80,20 @@ describe("summary preparation", () => {
 		const { messages, dropped } = prepareForSummary(long, 10_000);
 		expect(dropped).toBeGreaterThan(0);
 		expect(messages.length + dropped).toBe(long.length);
+	});
+});
+
+describe("where a model runs", () => {
+	const at = (baseUrl: string, label = "gpt-x · OpenAI") => whereOf({ baseUrl, label, provider: "openai" });
+	test("this computer, a private address on the network, or a cloud service named as the provider is", () => {
+		expect(at("http://127.0.0.1:11434/v1")).toEqual({ kind: "device", name: "this computer" });
+		expect(at("http://localhost:1234/v1")).toEqual({ kind: "device", name: "this computer" });
+		expect(at("http://192.168.1.40:8000/v1")).toEqual({ kind: "network", name: "192.168.1.40" });
+		expect(at("https://gpu-box.lan/v1")).toEqual({ kind: "network", name: "gpu-box.lan" });
+		expect(at("https://api.openai.com/v1")).toEqual({ kind: "cloud", name: "OpenAI" });
+		expect(at("not an address")).toEqual({ kind: "cloud", name: "OpenAI" });
+	});
+	test("a lab says where its models run, even when it's reached on the LAN", () => {
+		expect(whereOf({ baseUrl: "http://10.0.0.5/v1", label: "qwen · lab", provider: "lab", where: { kind: "lab", name: "EnrichedLab" } })).toEqual({ kind: "lab", name: "EnrichedLab" });
 	});
 });

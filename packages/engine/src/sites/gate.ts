@@ -42,6 +42,8 @@ interface GateModel {
 		efforts?: string[];
 		endpoints?: string[];
 		max_output?: number;
+		/** The outside service a lab sends this model's requests to, when it doesn't run the model itself. */
+		relayed_to?: string;
 	};
 }
 
@@ -679,6 +681,8 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			id: m.id,
 			label: `${m.id} · ${name}`,
 			source: "site",
+			// A lab runs its models on its own servers, unless it says it relays one to an outside service.
+			where: g.relayed_to ? { kind: "cloud", name: g.relayed_to } : { kind: "lab", name: this.title },
 			api: "openai-chat",
 			baseUrl: `${this.route.base}/v1`,
 			context: g.context ?? m.max_model_len ?? 131_072,

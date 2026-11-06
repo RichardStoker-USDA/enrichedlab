@@ -2,7 +2,8 @@
 // providers in config.json, and signed-in sites. A model reference is `<provider>/<model id>`.
 
 import { readFileSync } from "node:fs";
-import type { ModelInfo } from "@enrichedlab/protocol";
+import type { ModelInfo, ModelWhere } from "@enrichedlab/protocol";
+import { localHost, loopbackHost } from "../permissions.ts";
 import type { LabConfig, ModelOverride, ProviderConfig } from "../config.ts";
 import { errorText, expandHome, readSecret } from "../util.ts";
 import { openaiChat } from "./openai_chat.ts";
@@ -45,6 +46,23 @@ export function applyOverride(model: ModelProfile, overrides: Record<string, Mod
 	};
 }
 
+/**
+ * Where a model runs: what its source says (a lab), or else its address: this computer, a private address on the
+ * person's network, or a cloud service named as its provider is.
+ */
+export function whereOf(m: Pick<ModelProfile, "where" | "baseUrl" | "label" | "provider">): ModelWhere {
+	if (m.where) return m.where;
+	let host = "";
+	try {
+		host = new URL(m.baseUrl).host;
+	} catch {
+		// No address to go by: say cloud, the cautious answer.
+	}
+	if (host && loopbackHost(host)) return { kind: "device", name: "this computer" };
+	if (host && localHost(host)) return { kind: "network", name: new URL(m.baseUrl).hostname };
+	return { kind: "cloud", name: m.label.split(" · ").at(-1) || m.provider };
+}
+
 export function toInfo(m: ModelProfile): ModelInfo {
 	return {
 		ref: m.ref,
@@ -52,6 +70,7 @@ export function toInfo(m: ModelProfile): ModelInfo {
 		id: m.id,
 		label: m.label,
 		source: m.source,
+		where: whereOf(m),
 		context: m.context,
 		maxOutput: m.maxOutput,
 		vision: m.vision,

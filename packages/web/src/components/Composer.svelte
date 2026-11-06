@@ -26,6 +26,8 @@
 </script>
 
 <script lang="ts">
+	import Where from "./Where.svelte";
+	import { byWhere, whereNote } from "../lib/where.ts";
 	import type { Part } from "@enrichedlab/protocol";
 	import { lab, USAGE_URL } from "../lib/store.svelte.ts";
 	import { tick, untrack } from "svelte";
@@ -54,29 +56,13 @@
 		return () => clearTimeout(timer);
 	});
 
-	const groups = $derived.by(() => {
-		const plan = (m: { provider: string }) => m.provider === "chatgpt";
-		// Only the models this session may use: a lab that keeps its data inside lends its models to its own sessions.
-		const offered = allowedModels(lab.models, lab.sites, lab.summary?.site);
-		const labTitle = (provider: string) => lab.sites.find((s) => s.name === provider)?.title ?? provider;
-		const labs = [...new Set(offered.filter((m) => m.source === "site").map((m) => m.provider))];
-		return [
-			...labs.map((provider) => ({ label: `From ${labTitle(provider)}`, models: offered.filter((m) => m.source === "site" && m.provider === provider) })),
-			{ label: "Your ChatGPT plan", models: offered.filter((m) => m.source === "config" && plan(m)) },
-			{ label: "Your keys", models: offered.filter((m) => m.source === "config" && !plan(m)) },
-			{ label: "On this computer", models: offered.filter((m) => m.source === "local") },
-		].filter((g) => g.models.length);
-	});
+	// Only the models this session may use (a lab that keeps its data inside lends its models to its own sessions),
+	// grouped by where they run: private places first, then cloud services.
+	const groups = $derived(byWhere(allowedModels(lab.models, lab.sites, lab.summary?.site)));
 	/** OpenAI asks apps to say when requests use the person's ChatGPT plan, with a way to manage it. */
 	const onPlan = $derived(lab.model?.provider === "chatgpt");
 	/** A model's name as its service gives it ("GPT-6.1 Sol · ChatGPT" shows as "GPT-6.1 Sol"). */
 	const named = (m: { id: string; label: string }) => m.label.split(" · ")[0] || m.id;
-	/** Where a model comes from, in a word: the lab's name, "ChatGPT", the key's service, or "this computer". */
-	function origin(m: { provider: string; source: string; label: string }): string {
-		if (m.source === "site") return lab.sites.find((s) => s.name === m.provider)?.title ?? m.provider;
-		if (m.source === "local") return "this computer";
-		return m.label.split(" · ")[1] ?? m.provider;
-	}
 	/** The session names a model that isn't offered now (its server stopped, or access changed). */
 	const missing = $derived(!lab.model && Boolean(lab.status?.model));
 
@@ -278,7 +264,7 @@
 						</svg>
 					{/if}
 					<span class="model-name">{lab.model ? named(lab.model) : missing ? "Model unavailable: choose one" : "Choose a model"}</span>
-					{#if lab.model}<span class="origin">{origin(lab.model)}</span>{/if}
+					{#if lab.model}<span class="origin"><Where where={lab.model.where} /></span>{/if}
 					{#if lab.status?.effort && lab.model}<span class="effort">{lab.status.effort}</span>{/if}
 					<svg class="caret" viewBox="0 0 12 12" aria-hidden="true"><path d="m3 7.5 3-3 3 3" /></svg>
 				</button>
@@ -288,7 +274,8 @@
 							<p class="menu-missing">{lab.status?.model} isn't offered now: its server may have stopped, or your access changed.</p>
 						{/if}
 						{#each groups as group (group.label)}
-							<p class="menu-label">{group.label}</p>
+							<p class="menu-label where-label"><Where where={group.where} named={false} />{group.label}</p>
+							<p class="menu-note">{whereNote(group.where, false)}</p>
 							{#each group.models as m (m.ref)}
 								<button
 									type="button"
@@ -452,11 +439,22 @@
 	}
 	.effort,
 	.origin {
-		color: var(--text-faint);
-		white-space: nowrap;
+		display: inline-flex;
+		min-width: 0;
+		margin-left: 2px;
 	}
-	.origin::before {
-		content: "· ";
+	.where-label {
+		display: flex;
+		align-items: center;
+		gap: 5px;
+	}
+	.menu-note {
+		margin: -2px 0 4px;
+		padding: 0 10px 0 27px;
+		font-size: 11.5px;
+		line-height: 1.4;
+		color: var(--text-muted);
+		max-width: 340px;
 	}
 	.chip.missing {
 		color: var(--bad);
@@ -680,7 +678,8 @@
 		.chip {
 			max-width: 200px;
 		}
-		.origin {
+		/* Narrow: the glyph alone still says private or cloud; its title has the sentence. */
+		.origin :global(.where > span) {
 			display: none;
 		}
 	}

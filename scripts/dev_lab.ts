@@ -168,7 +168,11 @@ const lab = Bun.serve({
 mkdirSync(home, { recursive: true, mode: 0o700 });
 writeFileSync(join(work, "lab.key"), KEY, { mode: 0o600 });
 writeFileSync(join(home, "sites.json"), JSON.stringify({ sites: [{ name: "devlab", title: "Field Lab", url: "https://devlab.invalid", kind: "gate", lan: { url: `http://127.0.0.1:${lab.port}`, keyFile: join(work, "lab.key") }, preferLan: true }] }));
-writeFileSync(join(home, "config.json"), JSON.stringify({ model: "devlab/field-coder", discovery: { local: false } }));
+// A cloud service beside the lab (never called: its models are listed from config), so menus show both kinds.
+writeFileSync(
+	join(home, "config.json"),
+	JSON.stringify({ model: "devlab/field-coder", discovery: { local: false }, providers: { cloudco: { api: "openai-chat", baseUrl: "https://api.cloudco.invalid/v1", keyEnv: "CLOUDCO_KEY", label: "CloudCo", models: ["cloud-large"] } } }),
+);
 mkdirSync(join(project, "src"), { recursive: true });
 writeFileSync(join(project, "README.md"), "# Soil moisture analysis\n\nScripts for the 2026 field season.\n");
 writeFileSync(join(project, "src", "analysis.py"), "import pandas as pd\n\n\ndef load(path):\n    return pd.read_csv(path)\n");

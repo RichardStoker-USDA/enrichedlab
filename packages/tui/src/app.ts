@@ -340,10 +340,13 @@ export async function runTui(options: TuiOptions): Promise<void> {
 
 	// ── Commands ───────────────────────────────────────────────────────────────────────────────────────────────────
 
-	/** Where each model comes from, in the words the window uses (a lab's title, "this computer", a key's name). */
+	/**
+	 * Where each model runs, as the window says it: private (a lab's own servers, this computer, the person's network)
+	 * or cloud (a service, where what's sent may be kept by its terms).
+	 */
 	const origins = new Map<string, string>();
-	function learnOrigins(models: ModelInfo[], sites: { name: string; title: string }[]): void {
-		for (const m of models) origins.set(m.ref, m.source === "site" ? (sites.find((x) => x.name === m.provider)?.title ?? m.provider) : m.source === "local" ? "this computer" : (m.label.split(" · ")[1] ?? m.provider));
+	function learnOrigins(models: ModelInfo[], _sites: { name: string; title: string }[]): void {
+		for (const m of models) origins.set(m.ref, `${m.where.kind === "cloud" ? "cloud" : "private"} · ${m.where.kind === "device" ? "this computer" : m.where.name}`);
 	}
 
 	/** A line under the prompt while a command looks something up; the returned function clears it. */

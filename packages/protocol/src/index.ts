@@ -198,6 +198,15 @@ export interface SessionSummary {
 
 // ── Models and sites ─────────────────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Where a model runs, so people know where what they send goes: on this computer, on a machine on their network, at a
+ * lab (its own servers), or at a cloud service. `name` is the computer, host, lab or service.
+ */
+export interface ModelWhere {
+	kind: "device" | "network" | "lab" | "cloud";
+	name: string;
+}
+
 export interface ModelInfo {
 	/** `<provider>/<model>` */
 	ref: string;
@@ -205,6 +214,7 @@ export interface ModelInfo {
 	id: string;
 	label: string;
 	source: "local" | "config" | "site";
+	where: ModelWhere;
 	context: number;
 	maxOutput: number;
 	vision: boolean;

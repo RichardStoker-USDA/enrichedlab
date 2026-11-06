@@ -1,4 +1,6 @@
 <script lang="ts">
+	import Where from "./Where.svelte";
+	import { byWhere, whereNote } from "../lib/where.ts";
 	// A new session, as one composer: say what to do, then where (the project folder and the place its commands run)
 	// and with which model, in one row under the text. Everything has a sensible default, so Enter starts.
 	import { untrack } from "svelte";
@@ -63,6 +65,8 @@
 	const offered = $derived(allowedModels(lab.models, lab.sites, isolated ? place : undefined));
 	const chosenModel = $derived(offered.find((m) => m.ref === model));
 	const fallback = $derived(offered.find((m) => m.ref === lab.defaultModel) ?? offered.find((m) => m.source === "site") ?? offered[0]);
+	/** The model the session starts with: the chosen one, or the default. */
+	const startModel = $derived(chosenModel ?? fallback);
 	const named = (m: { id: string; label: string }) => m.label.split(" · ")[0] || m.id;
 
 	async function pickFolder() {
@@ -80,13 +84,9 @@
 	}
 
 	function modelMenu(): MenuAction[] {
-		const labTitle = (provider: string) => lab.sites.find((s) => s.name === provider)?.title ?? provider;
-		const sections: [string, typeof lab.models][] = [];
-		for (const provider of new Set(offered.filter((m) => m.source === "site").map((m) => m.provider))) sections.push([`From ${labTitle(provider)}`, offered.filter((m) => m.source === "site" && m.provider === provider)]);
-		sections.push(["Your plans and keys", offered.filter((m) => m.source === "config")], ["On this computer", offered.filter((m) => m.source === "local")]);
+		// Grouped by where each model runs: private places first, then cloud services.
 		const entries: MenuAction[] = [{ label: fallback ? `Default (${named(fallback)})` : "Default model", checked: !model, radio: true as const, run: () => (model = undefined) }];
-		for (const [label, models] of sections) {
-			if (!models.length) continue;
+		for (const { label, models } of byWhere(offered)) {
 			entries.push(separator, { label, disabled: true });
 			for (const m of models) entries.push({ label: `${named(m)}  ·  ${tokens(m.context)}`, checked: model === m.ref, radio: true as const, run: () => (model = m.ref) });
 		}
@@ -174,6 +174,7 @@
 			<button type="button" class="chip" onclick={(e) => showMenu(modelMenu(), e.currentTarget as HTMLElement)} title="Choose the model">
 				<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="2.5" /><path d="M6 6.5h4M6 9.5h2.5" /></svg>
 				<span class="label"><span class="what">Model</span> {chosenModel ? named(chosenModel) : fallback ? named(fallback) : "None yet"}</span>
+				{#if startModel}<Where where={startModel.where} named={false} />{/if}
 				<svg class="caret" viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4.5 3 3 3-3" /></svg>
 			</button>
 
@@ -185,6 +186,10 @@
 	</div>
 
 	<p class="where" title={folder} aria-live="polite">{movingTo ? `Moving ${folder ? folderName(folder) : "the project"} to the ${movingTo} sandbox…` : starting ? "Starting the session…" : where}</p>
+	<!-- Where what's typed goes, before it's sent: private (a lab, this computer, the network) or a cloud service. -->
+	{#if startModel && !starting}
+		<p class="where model-where"><Where where={startModel.where} named={false} /> {named(startModel)}: {whereNote(startModel.where, false).replace(/^./, (c) => c.toLowerCase())}</p>
+	{/if}
 	<label class="check"><input type="checkbox" bind:checked={worktree} /> Work on its own git branch, away from your checkout</label>
 
 	{#if !offered.length}
@@ -337,6 +342,8 @@
 		cursor: default;
 	}
 	.go {
+		/* Right-aligned, also when the row wraps and it starts a line of its own. */
+		margin-left: auto;
 		width: 34px;
 		height: 34px;
 		border-radius: 50%;
@@ -366,6 +373,13 @@
 		font-size: 12.5px;
 		color: var(--text-muted);
 		text-align: center;
+	}
+	.model-where {
+		display: flex;
+		justify-content: center;
+		align-items: baseline;
+		gap: 5px;
+		margin-top: 0;
 	}
 	.check {
 		display: flex;

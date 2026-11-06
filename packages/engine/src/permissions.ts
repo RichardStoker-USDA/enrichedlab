@@ -79,7 +79,13 @@ function v6Groups(text: string): number[] | undefined {
  * Loopback, private, carrier NAT, link-local and cloud metadata addresses get a sharper question, in IPv6 too: ULA,
  * link-local, and the mapped, NAT64 and 6to4 forms that carry an IPv4 address.
  */
-function localHost(name: string): boolean {
+/** This computer: localhost, 127/8, ::1. */
+export function loopbackHost(name: string): boolean {
+	const h = (name.startsWith("[") ? name.slice(1, name.indexOf("]")) : name.replace(/:\d+$/, "")).toLowerCase().replace(/\.$/, "");
+	return h === "localhost" || h.endsWith(".localhost") || /^127\.\d+\.\d+\.\d+$/.test(h) || h === "::1";
+}
+
+export function localHost(name: string): boolean {
 	const h = (name.startsWith("[") ? name.slice(1, name.indexOf("]")) : name.replace(/:\d+$/, "")).toLowerCase().replace(/\.$/, "");
 	if (/^(localhost|.+\.(localhost|local|internal|lan|home\.arpa))$/.test(h)) return true;
 	const v4 = /^(\d+)\.(\d+)\.\d+\.\d+$/.exec(h);
