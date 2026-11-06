@@ -1,10 +1,11 @@
 // The seam every kind of site plugs into. A site signs a person in somewhere (Cloudflare Access, a LAN key) and
-// grants them models, tools and a sandbox; an adapter turns one site's API into those. Gate is the first kind; the
-// a research broker is the next kind. Add a kind by writing an adapter and registering it in SITE_KINDS.
+// grants them models, tools and a sandbox; an adapter turns one site's API into those. Gate is the first kind; a
+// research broker is the next. Add a kind by writing an adapter and registering it in SITE_KINDS.
 
-import type { LabSandbox } from "@enrichedlab/protocol";
+import type { DesktopFrame, LabSandbox } from "@enrichedlab/protocol";
 import type { BundleGrant } from "../bundles.ts";
-import type { CheckRow, LabAppEntry, LabDescriptor, LabEvent, LabSigner } from "./contract.ts";
+import type { CheckRow, DesktopInfo, LabAppEntry, LabDescriptor, LabEvent, LabSigner } from "./contract.ts";
+import type { DesktopApi } from "./desktop.ts";
 import type { ModelProfile } from "../models/types.ts";
 import type { Tool } from "../tools/types.ts";
 import { GateSite } from "./gate.ts";
@@ -33,6 +34,12 @@ export interface SiteAdapter {
 	appPackage?(entry: LabAppEntry, signal?: AbortSignal): Promise<Uint8Array>;
 	/** Set by Sites: notices the adapter has for the person (a sandbox restored from its archive, or replaced). */
 	onNotice?: (text: string) => void;
+	/** Set by Sites: a picture of the lab's desktop sandbox after an action. */
+	onDesktopFrame?: (frame: DesktopFrame) => void;
+	/** The lab's desktop sandbox, where it offers one (sites/desktop.ts). */
+	desktop?(): DesktopInfo | undefined;
+	desktopAct?: DesktopApi["desktopAct"];
+	desktopOpen?: DesktopApi["desktopOpen"];
 	/** On sign-out: revoke this computer's device key at the lab (best effort) and delete it here. */
 	forget?(): Promise<void>;
 	/** Who the site says the person is. */

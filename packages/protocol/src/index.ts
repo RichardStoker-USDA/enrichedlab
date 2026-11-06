@@ -269,6 +269,19 @@ export interface SiteSummary {
 	keepsDataInside?: boolean;
 	/** Sandbox sizes the lab offers. */
 	profiles?: { name: string; cpu: number; memory: string; gpu?: string }[];
+	/** A desktop sandbox the person and the agent work in, through the lab's checked actions. */
+	desktop?: { width?: number; height?: number; actions: string[]; open: boolean };
+}
+
+/** A picture of a lab's desktop sandbox after an action (PNG), for the windows that show it. */
+export interface DesktopFrame {
+	site: string;
+	png: string;
+	width: number;
+	height: number;
+	/** Who the client said asked for the action: the agent, or the person in the pane. */
+	by: "agent" | "person";
+	at: string;
 }
 
 /** Something a lab told this person: a job finished, a sandbox is about to stop, a quota is near. */
@@ -526,6 +539,10 @@ export interface Requests {
 	"session.rename": { params: { sessionId: string; title: string }; result: { ok: true } };
 	/** Move where the session's files and commands act. A git repository comes along when `carry` is set. */
 	"session.place": { params: { sessionId: string; place: string; carry?: boolean }; result: { summary: SessionSummary; detail: string } };
+	/** One action in a lab's desktop sandbox from the person in the pane (contract/desktop.schema.json). */
+	"desktop.act": { params: { site: string; action: Record<string, unknown> }; result: { frame?: DesktopFrame; cursor?: [number, number] } };
+	/** Open an https address or a /sandbox file on a lab's desktop. */
+	"desktop.open": { params: { site: string; target: string }; result: { frame?: DesktopFrame } };
 	/** Turn Discovery mode on or off; on only in a session at a lab that grants the person `discovery`. */
 	"session.discovery": { params: { sessionId: string; on: boolean }; result: { summary: SessionSummary; detail: string } };
 	"permission.answer": { params: { requestId: string; decision: PermissionDecision }; result: { ok: boolean } };
@@ -750,6 +767,8 @@ export interface Notifications {
 	"browser.page": BrowserPageState;
 	/** A picture of that page (JPEG), while a window watches it. */
 	"browser.frame": BrowserFrame;
+	/** A picture of a lab's desktop after an action, the agent's or the person's. */
+	"desktop.frame": DesktopFrame;
 }
 
 export type Notification = keyof Notifications;

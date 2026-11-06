@@ -28,7 +28,8 @@ import type { SiteAdapter } from "./adapter.ts";
 import { fetchRepo, sendRepo } from "./repo_handoff.ts";
 import type { SandboxApi } from "./sandbox_workspace.ts";
 import type { SiteConfig, SiteRoute } from "./sites.ts";
-import { type CheckRow, CONTRACT, contractProblem, DESCRIPTOR_PATH, type Endpoint, type LabAppEntry, type LabDescriptor, type LabEvent, type LabSigner, type SandboxAgents, SCHEMAS, validate } from "./contract.ts";
+import { type DesktopAction, type DesktopApi, type DesktopFrame, type DesktopResult, desktopTools, frameIn } from "./desktop.ts";
+import { type CheckRow, CONTRACT, contractProblem, DESCRIPTOR_PATH, type DesktopInfo, type Endpoint, type LabAppEntry, type LabDescriptor, type LabEvent, type LabSigner, type SandboxAgents, SCHEMAS, validate } from "./contract.ts";
 
 interface GateModel {
 	id: string;
@@ -166,7 +167,7 @@ export function reprSha256(response: Response): string | undefined {
 	return match ? Buffer.from(match[1]!, "base64").toString("hex") : undefined;
 }
 
-export class GateSite implements SiteAdapter, SandboxApi {
+export class GateSite implements SiteAdapter, SandboxApi, DesktopApi {
 	who?: string;
 	/** Named grants this person holds at the lab (GET /v1/me capabilities), such as "discovery". */
 	capabilities: string[] = [];
@@ -209,6 +210,11 @@ export class GateSite implements SiteAdapter, SandboxApi {
 	onNotice?: (text: string) => void;
 	/** Sandbox ports opened on this computer, by container and port. */
 	private ports = new Map<string, OpenPort>();
+	/** The desktop sandbox (descriptor sandbox_desktop), a sandbox of its own beside the one the person works in. */
+	private desktopBox?: string;
+	private desktopStarting?: Promise<string>;
+	/** Set by Sites: a picture of the desktop after an action, for the windows that show it. */
+	onDesktopFrame?: (frame: DesktopFrame) => void;
 
 	constructor(
 		readonly config: SiteConfig,
@@ -638,6 +644,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 			this.warning = `Tools unavailable: ${redact(errorText(error))}`;
 		}
 		if (this.sandboxOn) tools.push(...this.sandboxTools());
+		tools.push(...desktopTools(this.config.name, this.title, this));
 		// Each tool knows its lab, so a session's Discovery mode applies to this lab's tools only.
 		this.tools = tools.map((tool) => ({ ...tool, site: this.config.name }));
 		// Waiting for approval is what the person has to act on: it leads whatever else went wrong.
@@ -1768,6 +1775,62 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		const url = `${this.route.base}${path}${new URL(found.webSocketDebuggerUrl).pathname}`;
 		await this.freshNonce();
 		return Cdp.open(url.replace(/^http/, "ws"), await this.authHeaders("GET", url), this.route.ca);
+	}
+
+	/** The lab's desktop sandbox, when it offers one and this person has sandboxes. */
+	desktop(): DesktopInfo | undefined {
+		return this.sandboxOn && this.offers("containers") ? this.descriptor?.sandbox_desktop : undefined;
+	}
+
+	/** The person's desktop sandbox: one they already have from the desktop image, or a new one. */
+	private async desktopSandbox(signal?: AbortSignal): Promise<string> {
+		if (this.desktopBox) return this.desktopBox;
+		const image = this.desktop()?.image;
+		if (!image) throw new ToolError(`${this.title} has no desktop sandbox for you.`);
+		this.desktopStarting ??= (async () => {
+			const listed = await this.json<{ data?: { id: string; image?: string | null; status?: string }[] }>("GET", "/v1/containers?limit=100", { signal: AbortSignal.timeout(15_000) });
+			const found = (listed.data ?? []).find((c) => c.image === image && c.status !== "deleted" && c.status !== "deleting");
+			const id = found?.id ?? (await this.create(signal, { name: "EnrichedLab desktop", image })).id;
+			this.desktopBox = id;
+			this.made.set(id, { image });
+			return id;
+		})().finally(() => {
+			this.desktopStarting = undefined;
+		});
+		return this.desktopStarting;
+	}
+
+	/** One request to the desktop; a desktop sandbox the lab removed is made again, once. */
+	private async desktopCall(path: "desktop" | "desktop/open", body: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+		for (let attempt = 0; ; attempt++) {
+			const id = await this.desktopSandbox(signal);
+			try {
+				return await this.json<unknown>("POST", `/v1/containers/${encodeURIComponent(id)}/${path}`, { json: body, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000) });
+			} catch (error) {
+				const status = (error as { status?: number }).status;
+				if (attempt === 0 && (status === 404 || status === 410)) {
+					this.desktopBox = undefined;
+					continue;
+				}
+				throw error;
+			}
+		}
+	}
+
+	async desktopAct(action: DesktopAction, by: "agent" | "person", signal?: AbortSignal): Promise<DesktopResult> {
+		const answer = await this.desktopCall("desktop", { ...action, by }, signal);
+		const frame = frameIn(answer, this.config.name, by, this.desktop());
+		if (frame) this.onDesktopFrame?.(frame);
+		const cursor = (answer as { cursor?: unknown } | undefined)?.cursor;
+		return { frame, cursor: Array.isArray(cursor) && cursor.length === 2 ? (cursor as [number, number]) : undefined };
+	}
+
+	async desktopOpen(target: string, by: "agent" | "person", signal?: AbortSignal): Promise<DesktopResult> {
+		if (!this.desktop()?.open) throw new ToolError(`${this.title}'s desktop doesn't open addresses or files for you.`);
+		const answer = await this.desktopCall("desktop/open", { target, by }, signal);
+		const frame = frameIn(answer, this.config.name, by, this.desktop());
+		if (frame) this.onDesktopFrame?.(frame);
+		return { frame };
 	}
 
 	/** Background jobs, unless the lab's descriptor says it doesn't run them (sandbox_jobs: false). */

@@ -115,7 +115,7 @@
 
 	/** The place a tab's work came from, for tabs of data that live in a lab and a lab's sandbox browser. */
 	function placeFor(ref?: string, kind?: string) {
-		if (kind === "screen" && ref) return placeOf(lab.places, ref);
+		if ((kind === "screen" || kind === "desktop") && ref) return placeOf(lab.places, ref);
 		const view = ref ? lab.canvases.find((c) => c.id === ref) : undefined;
 		return view?.source && view.source.place !== "local" ? placeOf(lab.places, view.source.place) : undefined;
 	}
@@ -131,7 +131,7 @@
 				<button id={`tab-${tab.id}`} class="label" role="tab" aria-selected={active} aria-controls={`panel-${tab.id}`} tabindex={active ? 0 : -1}
 					title={tab.title}
 					onclick={() => lab.focusPane(tab.id)} onkeydown={(e) => keys(e, index)}>
-					{#if place}<span class="place-dot" style:--dot={`var(${place.color})`} title={tab.kind === "screen" ? `Runs in the ${place.title} sandbox` : `From the ${place.title} sandbox`}></span>{/if}
+					{#if place}<span class="place-dot" style:--dot={`var(${place.color})`} title={tab.kind === "screen" || tab.kind === "desktop" ? `Runs in the ${place.title} sandbox` : `From the ${place.title} sandbox`}></span>{/if}
 					<!-- The kind says what a pane is when its title doesn't (a table named "Field plots"); never twice. -->
 					{#if kind !== "view" && !tab.title.toLowerCase().split(/\s+/).includes(kind)}<span class="kind">{kind}</span>{/if}
 					<span class="name">{tab.title}</span>

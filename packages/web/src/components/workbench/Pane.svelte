@@ -2,6 +2,7 @@
 	import type { Tab } from "../../lib/layout.ts";
 	import BrowserPane from "../panes/BrowserPane.svelte";
 	import ScreenPane from "../panes/ScreenPane.svelte";
+	import DesktopPane from "../panes/DesktopPane.svelte";
 	import FilesPane from "../panes/FilesPane.svelte";
 	import PlotPane from "../panes/PlotPane.svelte";
 	import TablePane from "../panes/TablePane.svelte";
@@ -29,6 +30,8 @@
 	<BrowserPane id={tab.id} url={tab.ref} {active} />
 {:else if tab.kind === "screen"}
 	<ScreenPane site={tab.ref ?? ""} {active} />
+{:else if tab.kind === "desktop"}
+	<DesktopPane site={tab.ref ?? ""} {active} />
 {:else if tab.kind === "files"}
 	<FilesPane />
 {:else if tab.kind === "app"}

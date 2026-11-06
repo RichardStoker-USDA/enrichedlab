@@ -2,7 +2,7 @@
 // layout is the one piece kept here: it belongs to this person's screen, per session, in local storage.
 
 import { pageMenu } from "./menu.svelte.ts";
-import type { AppSummary, BrowserFrame, BrowserInput, BrowserPageState, CanvasSummary, DeviceRequest, LabApp, ModelInfo, Part, Partial_, PermissionDecision, PermissionRequest, SessionEvent, SessionStatus, SessionSummary, SiteSummary, UiPrefs } from "@enrichedlab/protocol";
+import type { AppSummary, BrowserFrame, BrowserInput, BrowserPageState, CanvasSummary, DesktopFrame, DeviceRequest, LabApp, ModelInfo, Part, Partial_, PermissionDecision, PermissionRequest, SessionEvent, SessionStatus, SessionSummary, SiteSummary, UiPrefs } from "@enrichedlab/protocol";
 import { close as closeTab, emptyLayout, move, place, type Node, open as openTab, resize as resizeSplit, revive, sync, type Edge, type PaneKind, type Tab, uid, activate, groups } from "./layout.ts";
 import { computerName, placeOf, places, type Place } from "./places.ts";
 import { adoptCarried } from "./carried.ts";
@@ -27,7 +27,7 @@ const store = {
 	},
 };
 
-const TITLES: Record<PaneKind, string> = { view: "View", table: "Table", plot: "Plot", browser: "Browser", screen: "Sandbox browser", terminal: "Terminal", files: "Files", app: "App" };
+const TITLES: Record<PaneKind, string> = { view: "View", table: "Table", plot: "Plot", browser: "Browser", screen: "Sandbox browser", desktop: "Desktop", terminal: "Terminal", files: "Files", app: "App" };
 
 class Lab {
 	connected = $state(false);
@@ -41,6 +41,9 @@ class Lab {
 	/** The open session's page in a lab's sandbox browser, as the engine last described it. */
 	screen = $state<BrowserPageState | undefined>();
 	private frames = new Set<(frame: BrowserFrame) => void>();
+	/** The newest picture of each lab's desktop sandbox, and whether an action on it is on its way. */
+	desktops = $state<Record<string, DesktopFrame>>({});
+	desktopBusy = $state<Record<string, boolean>>({});
 	/** Other devices asking to use the person's sign-in at a lab, oldest first; the window asks about each. */
 	deviceRequests = $state<DeviceRequest[]>([]);
 	/** How much history the sidebar holds; Show Older Sessions raises it. */
@@ -391,7 +394,7 @@ class Lab {
 			if (other) this.setLayout(closeTab(this.layout, other.id));
 		}
 		// Files, and each lab's sandbox browser, are one pane each: opening again brings it forward.
-		const openFiles = (kind === "files" && !ref) || kind === "screen" ? groups(this.layout).flatMap((g) => g.tabs).find((t) => t.kind === kind && (kind === "files" || t.ref === ref)) : undefined;
+		const openFiles = (kind === "files" && !ref) || kind === "screen" || kind === "desktop" ? groups(this.layout).flatMap((g) => g.tabs).find((t) => t.kind === kind && (kind === "files" || t.ref === ref)) : undefined;
 		if (openFiles) {
 			this.focusPane(openFiles.id);
 			this.workbench = true;
@@ -447,6 +450,34 @@ class Lab {
 
 	screenInput(event: BrowserInput): void {
 		if (this.current) void rpc.call("browser.input", { sessionId: this.current, event }).catch(() => undefined);
+	}
+
+	/**
+	 * One action on a lab's desktop from the pane, as the person's. The answer's picture arrives as desktop.frame too;
+	 * a refusal is said once, not per click.
+	 */
+	async desktopAct(site: string, action: Record<string, unknown>): Promise<void> {
+		this.desktopBusy = { ...this.desktopBusy, [site]: true };
+		try {
+			const { frame } = await rpc.call("desktop.act", { site, action });
+			if (frame) this.desktops = { ...this.desktops, [site]: frame };
+		} catch (error) {
+			this.say((error as Error).message);
+		} finally {
+			this.desktopBusy = { ...this.desktopBusy, [site]: false };
+		}
+	}
+
+	async desktopOpen(site: string, target: string): Promise<void> {
+		this.desktopBusy = { ...this.desktopBusy, [site]: true };
+		try {
+			const { frame } = await rpc.call("desktop.open", { site, target });
+			if (frame) this.desktops = { ...this.desktops, [site]: frame };
+		} catch (error) {
+			this.say((error as Error).message);
+		} finally {
+			this.desktopBusy = { ...this.desktopBusy, [site]: false };
+		}
 	}
 
 	async screenNavigate(site: string, to: { url?: string; step?: "back" | "forward" | "reload" }): Promise<void> {
@@ -901,6 +932,12 @@ class Lab {
 			this.screen = page;
 			// The first sign of the agent browsing there brings the pane forward, opening the workbench if needed.
 			if (fresh) this.openPane("screen", page.site, `${page.lab} browser`);
+		});
+		// A lab's desktop after an action. The agent's first one in the open session's lab brings the pane forward.
+		rpc.on("desktop.frame", (frame) => {
+			this.desktops = { ...this.desktops, [frame.site]: frame };
+			const shown = groups(this.layout).flatMap((g) => g.tabs).some((t) => t.kind === "desktop" && t.ref === frame.site);
+			if (frame.by === "agent" && !shown && this.summary?.place === frame.site) this.openPane("desktop", frame.site, `${this.place.title} desktop`);
 		});
 		rpc.on("browser.frame", (frame) => {
 			if (frame.sessionId === this.current) for (const listener of this.frames) listener(frame);

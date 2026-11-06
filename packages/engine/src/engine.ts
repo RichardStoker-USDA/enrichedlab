@@ -32,6 +32,7 @@ import { projectRoot, systemPrompt } from "./prompt.ts";
 import { listSessions, SessionLog, toSummary } from "./session/log.ts";
 import { type RuntimeDeps, SessionRuntime } from "./session/runtime.ts";
 import { Sites } from "./sites/sites.ts";
+import { checkAction } from "./sites/desktop.ts";
 import { createWorktree, repoRoot } from "./git.ts";
 import { fetchRepo, sendRepo } from "./sites/repo_handoff.ts";
 import { type SandboxApi, SandboxWorkspace, shq } from "./sites/sandbox_workspace.ts";
@@ -132,6 +133,7 @@ export class Engine {
 			this.emit("site.updated", summary);
 		}, (notice) => this.emit("lab.notice", notice));
 		this.sites.onAppsChanged = (site) => this.emit("lab.apps.changed", { site });
+		this.sites.onDesktopFrame = (frame) => this.emit("desktop.frame", frame);
 		this.sites.onDeviceRequest = (request) => this.emit("lab.device.pending", request);
 		this.terminals = new Terminals((name, params) => this.emit(name, params as never));
 		this.canvas = new CanvasStore(this.paths.canvases, () => this.origin(), (summary) => {
@@ -633,6 +635,20 @@ export class Engine {
 						return { queued: false };
 					}
 					return runtime.prompt(text, p.images as never);
+				}
+				case "desktop.act":
+				case "desktop.open": {
+					const site = need("site");
+					const api = this.sites.desktop(site);
+					const info = api?.desktop();
+					if (!api || !info) throw new RpcError(-32602, `${this.sites.title(site)} has no desktop for you.`);
+					if (method === "desktop.open") {
+						const target = need("target").trim();
+						if (!/^https:\/\//.test(target) && !target.startsWith("/sandbox/")) throw new RpcError(-32602, "Open an https address or a file under /sandbox.");
+						return api.desktopOpen(target, "person");
+					}
+					// The person's input goes through the same checks as the agent's, marked as the person's.
+					return api.desktopAct(checkAction((p.action ?? {}) as Record<string, unknown>, info), "person");
 				}
 				case "session.discovery": {
 					const runtime = this.session(need("sessionId"));

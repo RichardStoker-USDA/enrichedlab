@@ -4,7 +4,7 @@
 
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { DeviceRequest, LabApp, LabNotice, SiteSummary } from "@enrichedlab/protocol";
+import type { DesktopFrame, DeviceRequest, LabApp, LabNotice, SiteSummary } from "@enrichedlab/protocol";
 import type { ModelProfile } from "../models/types.ts";
 import type { Paths } from "../paths.ts";
 import type { Tool } from "../tools/types.ts";
@@ -15,6 +15,7 @@ import { SITE_KINDS, type SiteAdapter } from "./adapter.ts";
 import type { CheckRow, LabAppEntry, LabEvent, LabSigner } from "./contract.ts";
 import { type AppOrigin, installApp } from "../apps/package.ts";
 import type { SandboxApi } from "./sandbox_workspace.ts";
+import type { DesktopApi } from "./desktop.ts";
 import { login, refresh, type SavedClient, type SiteCredentials } from "./oauth.ts";
 
 export interface SiteConfig {
@@ -339,6 +340,15 @@ export class Sites {
 		return this.configs().find((s) => s.name === name)?.title ?? this.adapters.get(name)?.descriptor?.title ?? name;
 	}
 
+	/** Set by the engine: a picture of a lab's desktop sandbox after an action, for the windows. */
+	onDesktopFrame?: (frame: DesktopFrame) => void;
+
+	/** A connected lab's desktop sandbox, where it offers one. */
+	desktop(name: string): DesktopApi | undefined {
+		const adapter = this.adapters.get(name);
+		return adapter?.desktop?.() && adapter.desktopAct && adapter.desktopOpen ? (adapter as unknown as DesktopApi) : undefined;
+	}
+
 	/** What a connected lab says about this person: their named grants and whose agents may use its sandboxes. */
 	lab(name: string): { title: string; capabilities: string[]; sandboxAgents?: "lab" | "any" } | undefined {
 		const adapter = this.adapters.get(name);
@@ -469,6 +479,7 @@ export class Sites {
 			if (!factory) break;
 			const adapter = factory(config, route, container, this.deviceFile(name));
 			adapter.onNotice = (text) => this.onNotice({ site: name, type: "site.notice", at: new Date().toISOString(), text });
+			adapter.onDesktopFrame = (frame) => this.onDesktopFrame?.(frame);
 			adapter.onApproved = () => void this.connect(name).catch(() => undefined);
 			try {
 				await adapter.connect();
@@ -537,7 +548,13 @@ export class Sites {
 			keepsDataInside: d.policy?.keep_data_inside,
 			profiles: d.sandbox_profiles?.map(({ name: profile, cpu, memory, gpu }) => ({ name: profile, cpu, memory, ...(gpu ? { gpu } : {}) })),
 			browser: Boolean(this.adapters.get(name)?.sandboxApi?.()?.browser?.()),
+			desktop: this.desktopSummary(name),
 		};
+	}
+
+	private desktopSummary(name: string): SiteSummary["desktop"] {
+		const info = this.desktop(name)?.desktop();
+		return info ? { width: info.screen?.width, height: info.screen?.height, actions: info.actions, open: info.open === true } : undefined;
 	}
 
 	list(): SiteSummary[] {

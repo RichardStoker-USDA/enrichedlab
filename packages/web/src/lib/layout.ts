@@ -1,13 +1,13 @@
 // The workbench layout: a tree of splits whose leaves are tab groups. Pure functions over plain data, so the layout
 // can be stored per session and every change is easy to reason about and test.
 
-export type PaneKind = "view" | "table" | "plot" | "browser" | "screen" | "terminal" | "files" | "app";
+export type PaneKind = "view" | "table" | "plot" | "browser" | "screen" | "desktop" | "terminal" | "files" | "app";
 
 export interface Tab {
 	id: string;
 	kind: PaneKind;
 	title: string;
-	/** What the pane shows: a view id for view, table and plot; an address for browser; a lab for screen (its sandbox browser). */
+	/** What the pane shows: a view id for view, table and plot; an address for browser; a lab for screen (its sandbox browser) and desktop. */
 	ref?: string;
 }
 

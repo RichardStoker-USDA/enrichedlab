@@ -34,14 +34,18 @@
 	const empty = $derived(!lab.layout || (lab.layout.type === "group" && lab.layout.tabs.length === 0));
 	let appsOpen = $state(false);
 	let browserOpen = $state(false);
+	let desktopOpen = $state(false);
 	// While either menu is open, a browser pane under it steps aside (lab.covered).
 	$effect(() => {
-		if (!appsOpen && !browserOpen) return;
+		if (!appsOpen && !browserOpen && !desktopOpen) return;
 		lab.overlays++;
 		return () => lab.overlays--;
 	});
 	// Labs that run a browser in the person's sandbox: the Browser button then asks which browser.
 	const browserLabs = $derived(lab.places.filter((p) => p.site?.signedIn && p.site.browser));
+	/** Labs with a desktop sandbox: the one the session works at first. */
+	const desktopLabs = $derived(lab.places.filter((p) => p.site?.signedIn && p.site.desktop).sort((a, b) => Number(b.id === lab.place.id) - Number(a.id === lab.place.id)));
+	const openDesktop = (place: (typeof desktopLabs)[number]) => ((desktopOpen = false), lab.openPane("desktop", place.id, `${place.title} desktop`));
 	function toggleApps() {
 		appsOpen = !appsOpen;
 		if (appsOpen) void lab.refreshApps();
@@ -69,9 +73,9 @@
 <!-- Escape closes the Browser and Apps menus, as it does every other menu. -->
 <svelte:window
 	onkeydown={(e) => {
-		if (e.key !== "Escape" || (!appsOpen && !browserOpen)) return;
+		if (e.key !== "Escape" || (!appsOpen && !browserOpen && !desktopOpen)) return;
 		e.preventDefault();
-		appsOpen = browserOpen = false;
+		appsOpen = browserOpen = desktopOpen = false;
 	}}
 />
 
@@ -102,6 +106,24 @@
 				</div>
 			{:else}
 				<button class="btn quiet" onclick={() => lab.openPane("browser")} title="A browser the agent's apps open in">Browser</button>
+			{/if}
+			{#if desktopLabs.length === 1}
+				<button class="btn quiet" onclick={() => openDesktop(desktopLabs[0]!)} title={`A desktop in your ${desktopLabs[0]!.title} sandbox, for you and the agent`}>Desktop</button>
+			{:else if desktopLabs.length > 1}
+				<div class="apps">
+					<button class="btn quiet" onclick={() => (desktopOpen = !desktopOpen)} aria-expanded={desktopOpen} aria-haspopup="menu">Desktop</button>
+					{#if desktopOpen}
+						<button class="scrim" aria-label="Close" onclick={() => (desktopOpen = false)}></button>
+						<div class="menu apps-menu" role="menu">
+							{#each desktopLabs as place (place.id)}
+								<button class="menu-item" role="menuitem" onclick={() => openDesktop(place)}>
+									<span class="app-title"><span class="place-dot" style:--dot={`var(${place.color})`}></span>{place.title} desktop</span>
+									<span class="app-meta">{place.site?.desktop?.width ? `${place.site.desktop.width} × ${place.site.desktop.height}` : "in its sandbox"}</span>
+								</button>
+							{/each}
+						</div>
+					{/if}
+				</div>
 			{/if}
 			<div class="apps">
 				<button class="btn quiet" onclick={toggleApps} aria-expanded={appsOpen} aria-haspopup="menu">Apps</button>
