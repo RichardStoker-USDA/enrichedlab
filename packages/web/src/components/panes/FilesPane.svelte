@@ -31,6 +31,7 @@
 		listings = {};
 		openDirs = { ".": true };
 		preview = undefined;
+		asked++;
 		void load(".");
 	});
 
@@ -63,17 +64,25 @@
 
 	const VIEWABLE = /\.(csv|tsv|tab|json|jsonl|ndjson|parquet|png|jpe?g|gif|webp|svg|html?)$/i;
 
+	// Only the file asked for last may fill the preview, however the reads finish.
+	let asked = 0;
 	async function openFile(path: string) {
 		if (VIEWABLE.test(path)) return void lab.openFile(path);
 		if (!lab.current) return;
+		const ask = ++asked;
+		const sessionId = lab.current;
+		preview = { path, note: `Reading ${path}…` };
 		try {
-			const file = await rpc.call("fs.read", { sessionId: lab.current, path });
+			const file = await rpc.call("fs.read", { sessionId, path });
+			if (ask !== asked || sessionId !== lab.current) return;
 			if (file.binary || file.text === undefined) return void (preview = { path, note: `${path} is binary or over 2 MB.` });
 			const lang = languageOf(path);
 			preview = { path, text: file.text };
-			if (lang) preview = { path, html: await highlight(file.text, lang) };
+			if (!lang) return;
+			const html = await highlight(file.text, lang);
+			if (ask === asked && sessionId === lab.current) preview = { path, html };
 		} catch (e) {
-			lab.say((e as Error).message);
+			if (ask === asked) preview = { path, note: `Couldn't read ${path}: ${(e as Error).message}` };
 		}
 	}
 
@@ -116,7 +125,7 @@
 	</div>
 	{#if preview}
 		<div class="preview">
-			<div class="preview-head"><span>{preview.path}</span><button class="icon-btn" onclick={() => (preview = undefined)} aria-label="Close preview"><svg viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8" /></svg></button></div>
+			<div class="preview-head"><span>{preview.path}</span><button class="icon-btn" onclick={() => ((preview = undefined), asked++)} aria-label="Close preview"><svg viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8" /></svg></button></div>
 			{#if preview.html}
 				<div class="code-view">{@html preview.html}</div>
 			{:else if preview.text !== undefined}

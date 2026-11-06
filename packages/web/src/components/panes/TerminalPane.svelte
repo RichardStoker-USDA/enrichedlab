@@ -11,6 +11,7 @@
 	let ended = $state(false);
 	let error = $state("");
 	let cleanup: (() => void) | undefined;
+	let restart: (() => Promise<void>) | undefined = $state();
 	// Closed while still starting: whatever opened afterwards is closed at once.
 	let gone = false;
 
@@ -38,24 +39,41 @@
 			if (termId === undefined) early.push(m);
 			else if (m.termId === termId) term.write(m.data);
 		});
-		try {
-			const opened = await rpc.call("term.open", { sessionId: lab.current, cols: term.cols, rows: term.rows });
-			termId = opened.termId;
-			label = opened.label;
-			if (gone) {
-				offOut();
-				void rpc.call("term.close", { termId }).catch(() => undefined);
-				term.dispose();
-				return;
+		/** Open a shell for this pane; again after one ends, in the same pane. */
+		async function start(): Promise<boolean> {
+			termId = undefined;
+			try {
+				const opened = await rpc.call("term.open", { sessionId: lab.current, cols: term.cols, rows: term.rows });
+				termId = opened.termId;
+				label = opened.label;
+				if (gone) {
+					offOut();
+					void rpc.call("term.close", { termId }).catch(() => undefined);
+					term.dispose();
+					return false;
+				}
+				for (const m of early) if (m.termId === termId) term.write(m.data);
+				early.length = 0;
+				error = "";
+				return true;
+			} catch (e) {
+				error = (e as Error).message;
+				return false;
 			}
-			for (const m of early) if (m.termId === termId) term.write(m.data);
-			early.length = 0;
-		} catch (e) {
-			offOut();
-			error = (e as Error).message;
-			term.dispose();
+		}
+		if (!(await start())) {
+			if (!gone) {
+				offOut();
+				term.dispose();
+			}
 			return;
 		}
+		restart = async () => {
+			ended = false;
+			term.reset();
+			if (await start()) term.focus();
+			else ended = true;
+		};
 		const offExit = rpc.on("term.exit", (m) => {
 			if (m.termId !== termId) return;
 			ended = true;
@@ -86,7 +104,10 @@
 </script>
 
 <div class="terminal-pane" class:active>
-	<div class="where">{label}{ended ? " · ended" : ""}</div>
+	<div class="where">
+		<span>{label}{ended ? " · ended" : ""}</span>
+		{#if ended && restart}<button class="btn" onclick={() => restart?.()}>Start Again</button>{/if}
+	</div>
 	{#if error}
 		<p class="error">{error}</p>
 	{/if}
@@ -103,13 +124,20 @@
 		background: var(--canvas);
 	}
 	.where {
-		padding: 6px 12px;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+		min-height: 29px;
+		padding: 2px 6px 2px 12px;
 		font-size: 11.5px;
-		color: var(--text-faint);
+		color: var(--text-muted);
 		border-bottom: 1px solid var(--rule);
 	}
-	.where:empty {
-		display: none;
+	.where .btn {
+		height: 24px;
+		padding: 0 10px;
+		font-size: 12px;
 	}
 	.host {
 		flex: 1;
