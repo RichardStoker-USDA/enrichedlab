@@ -157,11 +157,12 @@
 					<label>Horizontal <select class="field" bind:value={plotX}>{#each table.columns as c, i}<option value={i}>{c.name}</option>{/each}</select></label>
 					<label>Vertical <select class="field" bind:value={plotY}>{#each table.columns as c, i}<option value={i}>{c.name}</option>{/each}</select></label>
 					<label>Color by <select class="field" bind:value={plotColor}><option value={-1}>Nothing</option>{#each table.columns as c, i}<option value={i}>{c.name}</option>{/each}</select></label>
+					<p class="scope">Plots every row of the table{order.length < (table?.rows ?? order.length) ? ", not only the filtered ones" : ""}.</p>
 					<button class="btn primary" onclick={makePlot}>Draw</button>
 				</div>
 			{/if}
 		</div>
-		<button class="btn" onclick={exportCsv} disabled={!table}>Export CSV</button>
+		<button class="btn" onclick={exportCsv} disabled={!table} title="Exports the rows shown, in their current order and filters">Export CSV</button>
 	</div>
 
 	{#if loading && !table}
@@ -204,6 +205,7 @@
 		<div class="foot">
 			{#if focusStats}
 				<strong>{focusStats.col.name}</strong>
+				<span class="scope-note">all rows</span>
 				<span>{focusStats.col.type}</span>
 				<span>{focusStats.s.present.toLocaleString()} present</span>
 				{#if focusStats.s.missing}<span>{focusStats.s.missing.toLocaleString()} missing</span>{/if}
@@ -221,6 +223,14 @@
 </div>
 
 <style>
+	.scope {
+		margin: 0;
+		font-size: 11.5px;
+		color: var(--text-muted);
+	}
+	.scope-note {
+		color: var(--text-muted);
+	}
 	.table-pane {
 		flex: 1;
 		display: flex;
