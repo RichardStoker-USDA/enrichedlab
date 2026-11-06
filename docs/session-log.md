@@ -62,6 +62,11 @@ Rein (Gate's web harness) serves v1 as files rather than through its event strea
   20,000 events) and answers `{session, events, skipped}`. It renumbers from 1 and remaps `compaction.through`,
   skips `x-*` and unknown kinds, drops hold ids and keeps images by reference. Imported decisions allow nothing.
 - Rein rebuilds the context with the engine's summary prefix as the first user turn.
+- Import limits, which every writer keeps to: a compaction's `through` names an earlier event (`0 <= through < seq`)
+  and never decreases; call ids are unique within one assistant event; at most 64 calls per assistant event;
+  arguments over 96 KiB are kept as `{}`; at most 20,000 records, blank lines aside. The engine's export makes
+  repeated call ids unique (`<id>~2`), keeps a turn's first 64 calls and their results with a notice for the rest,
+  and holds `through` steady or rising.
 
 ## Status
 

@@ -1,7 +1,7 @@
 // The shared session log v1 (docs/session-log.md): engine logs go out and come back with the same model context.
 import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "../packages/protocol/src/index.ts";
-import { fromV1, toV1 } from "../packages/engine/src/session/log_v1.ts";
+import { MAX_CALLS, fromV1, toV1 } from "../packages/engine/src/session/log_v1.ts";
 import { derive } from "../packages/engine/src/session/context.ts";
 
 const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex").toString("base64");
@@ -65,5 +65,31 @@ describe("session log v1", () => {
 		expect(tools[0]).toMatchObject({ callId: "k1", ok: false, content: "The read call never finished (the run was stopped)." });
 		expect(JSON.stringify(events)).not.toContain("stray");
 		expect(events.find((e) => e.t === "assistant")).toMatchObject({ toolCalls: [{ id: "k1", args: '{"path":"x"}' }] });
+	});
+
+	test("export meets the import limits: unique call ids per turn, at most 64 calls, compaction through never goes back", () => {
+		const calls = Array.from({ length: MAX_CALLS + 3 }, (_, n) => ({ id: n < 2 ? "dup" : `c${n}`, name: "read", args: "{}" }));
+		const events: SessionEvent[] = [
+			{ t: "header", v: 1, id: "h", at: at(0), cwd: "/tmp/p", created: at(0), system: "" },
+			{ t: "user", id: "u1", at: at(1), text: "read them all" },
+			{ t: "assistant", id: "a1", at: at(2), model: "m", text: "", toolCalls: calls, stop: "tool_use" },
+			...calls.map((c, n) => ({ t: "tool" as const, id: `r${n}`, at: at(3), callId: c.id, name: "read", ok: true, content: `out ${n}`, decision: "auto" as const })),
+			{ t: "assistant", id: "a2", at: at(4), model: "m", text: "done", stop: "end" as const },
+			{ t: "compaction", id: "k1", at: at(5), summary: "later", firstKeptId: "a2", tokensBefore: 1, model: "m" },
+			{ t: "compaction", id: "k2", at: at(6), summary: "earlier point", firstKeptId: "u1", tokensBefore: 1, model: "m" },
+		];
+		const out = toV1(events).events;
+		const turn = out.find((e) => e.kind === "assistant" && (e.data.calls as unknown[]).length)!;
+		const ids = (turn.data.calls as { id: string }[]).map((c) => c.id);
+		expect(ids).toHaveLength(MAX_CALLS);
+		expect(new Set(ids).size).toBe(ids.length);
+		// Each result keeps its own call, in order, and results for calls left out go too.
+		const results = out.filter((e) => e.kind === "tool_result");
+		expect(results.map((r) => r.data.callId)).toEqual(ids);
+		expect(results[1]!.data.output).toBe("out 1");
+		expect(out.some((e) => e.kind === "notice" && String(e.data.text).includes("3 more tool calls"))).toBe(true);
+		const compactions = out.filter((e) => e.kind === "compaction");
+		for (const c of compactions) expect(Number(c.data.through)).toBeLessThan(c.seq);
+		expect(Number(compactions[1]!.data.through)).toBeGreaterThanOrEqual(Number(compactions[0]!.data.through));
 	});
 });

@@ -47,6 +47,10 @@ function parts(list: unknown, attachments: Attachments): Part[] | undefined {
 	return out.length ? out : undefined;
 }
 
+/** The shared log's limits (docs/session-log.md): calls per assistant event, and records per log. */
+export const MAX_CALLS = 64;
+export const MAX_RECORDS = 20_000;
+
 const DECISION: Record<string, { verdict: string; by: string }> = {
 	auto: { verdict: "allow", by: "rule" },
 	allowed: { verdict: "allow", by: "person" },
@@ -65,24 +69,41 @@ export function toV1(events: SessionEvent[]): { events: V1Event[]; attachments: 
 		out.push({ v: 1, seq, time, kind, data });
 		if (id) seqOf.set(id, seq);
 	};
-	const names = new Map<string, string>();
+	// Each call's v1 id, in the order its results come: ids are made unique within a turn, and a turn's calls past
+	// the format's 64 have no id here, so their results are left out with the calls.
+	const callIds = new Map<string, string[]>();
+	let lastThrough = 0;
 	for (const e of events) {
 		if (e.t === "user") push(e.at, "user", { text: e.text, ...(refs(e.images, attachments) ? { images: refs(e.images, attachments) } : {}) }, e.id);
 		else if (e.t === "assistant") {
-			for (const call of e.toolCalls ?? []) names.set(call.id, call.name);
-			push(e.at, "assistant", { text: e.text, ...(e.reasoning ? { reasoning: e.reasoning } : {}), calls: (e.toolCalls ?? []).map((c) => ({ id: c.id, name: c.name, arguments: c.args })), stop: e.stop, model: e.model }, e.id);
+			const all = e.toolCalls ?? [];
+			const seen = new Set<string>();
+			const calls = all.slice(0, MAX_CALLS).map((c) => {
+				let id = c.id;
+				for (let n = 2; seen.has(id); n++) id = `${c.id}~${n}`;
+				seen.add(id);
+				callIds.set(c.id, [...(callIds.get(c.id) ?? []), id]);
+				return { id, name: c.name, arguments: c.args };
+			});
+			push(e.at, "assistant", { text: e.text, ...(e.reasoning ? { reasoning: e.reasoning } : {}), calls, stop: e.stop, model: e.model }, e.id);
+			if (all.length > calls.length) push(e.at, "notice", { level: "warn", text: `${all.length - calls.length} more tool calls in this turn were left out: the shared log takes ${MAX_CALLS} per turn.` });
 			if (e.stop === "error" && e.error) push(e.at, "error", { text: e.error });
 		} else if (e.t === "tool") {
+			const callId = callIds.get(e.callId)?.shift();
+			if (!callId) continue;
 			const decided = DECISION[e.decision ?? "auto"] ?? DECISION.auto!;
-			push(e.at, "decision", { callId: e.callId, tool: e.name, ...decided });
+			push(e.at, "decision", { callId, tool: e.name, ...decided });
 			const images = refs(e.images, attachments);
-			push(e.at, "tool_result", { callId: e.callId, tool: e.name, output: e.content, ...(e.decision === "denied" || e.decision === "refused" ? { refused: true } : {}), ...(!e.ok ? { error: true } : {}), ...(images ? { images } : {}) }, e.id);
+			push(e.at, "tool_result", { callId, tool: e.name, output: e.content, ...(e.decision === "denied" || e.decision === "refused" ? { refused: true } : {}), ...(!e.ok ? { error: true } : {}), ...(images ? { images } : {}) }, e.id);
 		} else if (e.t === "notice") push(e.at, "notice", { level: e.level === "info" ? "info" : "warn", text: e.text }, e.id);
 		else if (e.t === "compaction") {
-			// v1 names the last event the summary covers; the engine names the first one it keeps.
+			// v1 names the last event the summary covers; the engine names the first one it keeps. `through` always
+			// names an earlier event and never goes back.
 			const kept = events.findIndex((x) => x.id === e.firstKeptId);
 			const before = kept > 0 ? events.slice(0, kept).reverse().find((x) => seqOf.has(x.id)) : undefined;
-			push(e.at, "compaction", { summary: e.summary, through: before ? seqOf.get(before.id)! : 0, model: e.model }, e.id);
+			const through = Math.min(Math.max(before ? seqOf.get(before.id)! : 0, lastThrough), out.length);
+			lastThrough = through;
+			push(e.at, "compaction", { summary: e.summary, through, model: e.model }, e.id);
 		} else {
 			// Everything else is the engine's own: kept for a faithful re-import, skipped by other readers.
 			const { t, id: _id, at, ...rest } = e as SessionEvent & Record<string, unknown>;
