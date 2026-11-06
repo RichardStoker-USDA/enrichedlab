@@ -49,9 +49,46 @@ function stream(chunks: unknown[]): Response {
 const delta = (d: Record<string, unknown>, finish: string | null = null) => ({ choices: [{ index: 0, delta: d, finish_reason: finish }] });
 const usage = (input: number, output: number) => ({ choices: [], usage: { prompt_tokens: input, completion_tokens: output } });
 
+/** Chunks sent at a model's pace (about `perSecond`), as a real model streams a long tool call. */
+function paced(chunks: unknown[], perSecond: number): Response {
+	const encoder = new TextEncoder();
+	let i = 0;
+	const body = new ReadableStream({
+		async pull(controller) {
+			if (i >= chunks.length) {
+				controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+				return controller.close();
+			}
+			controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunks[i++])}\n\n`));
+			await Bun.sleep(1000 / perSecond);
+		},
+	});
+	return new Response(body, { headers: { "content-type": "text/event-stream" } });
+}
+
+/** A long page written as one tool call: about 30 KB of arguments, a few characters per chunk. */
+function bigWrite(): Response {
+	const page = `<!doctype html>\n<title>Dashboard</title>\n${Array.from({ length: 600 }, (_, i) => `<div class="row" data-i="${i}">row ${i}</div>`).join("\n")}\n`;
+	const args = JSON.stringify({ path: "dashboard.html", content: page });
+	const id = `call_${Date.now()}`;
+	const pieces = args.match(/[\s\S]{1,12}/g)!;
+	return paced(
+		[
+			delta({ content: "Writing the page now." }),
+			delta({ tool_calls: [{ index: 0, id, type: "function", function: { name: "write", arguments: "" } }] }),
+			...pieces.map((part) => delta({ tool_calls: [{ index: 0, function: { arguments: part } }] })),
+			delta({}, "tool_calls"),
+			usage(2000, pieces.length),
+		],
+		150,
+	);
+}
+
 /** A request for commands runs one; the command's result gets the answer; a request without tools is the naming one. */
 function reply(body: ChatBody): Response {
 	if (!body.tools?.length) return stream([delta({ content: "Project check" }), delta({}, "stop"), usage(40, 3)]);
+	const last = body.messages.at(-1) as { role: string; content?: unknown };
+	if (last?.role === "user" && JSON.stringify(last.content ?? "").includes("big page")) return bigWrite();
 	if (body.messages.at(-1)?.role === "user") {
 		const call = { index: 0, id: `call_${Date.now()}`, type: "function", function: { name: "shell", arguments: JSON.stringify({ command: "uname -s; git log --oneline -1; ls" }) } };
 		return stream([delta({ reasoning_content: "The person wants commands run in the project; the shell tool does that." }), delta({ content: "I'll run that in the project." }), delta({ tool_calls: [call] }), delta({}, "tool_calls"), usage(1200, 40)]);
@@ -198,6 +235,7 @@ async function main(): Promise<void> {
 					...(scene.js ? { EL_SHOT_JS: `(() => { ${HELPERS} ${scene.js} })()` } : {}),
 					...(scene.type ? { EL_SHOT_TYPE: scene.type } : {}),
 					...(scene.menu ? { EL_SHOT_MENU: scene.menu } : {}),
+					...(scene.resize ? { EL_SHOT_RESIZE: scene.resize } : {}),
 				},
 				sessionId ? ["--session", sessionId] : [],
 			);
@@ -213,7 +251,12 @@ async function main(): Promise<void> {
 
 function electron(extra: Record<string, string>, argv: string[]): ReturnType<typeof Bun.spawn> {
 	const bin = join(root, "apps/desktop/node_modules/.bin", process.platform === "win32" ? "electron.cmd" : "electron");
-	return Bun.spawn([bin, ".", `--user-data-dir=${join(work, "electron")}`, "--use-mock-keychain", ...argv], { cwd: join(root, "apps/desktop"), env: { ...env, ...extra }, stdout: "ignore", stderr: "ignore" });
+	const proc = Bun.spawn([bin, ".", `--user-data-dir=${join(work, "electron")}`, "--use-mock-keychain", ...argv], { cwd: join(root, "apps/desktop"), env: { ...env, ...extra }, stdout: "pipe", stderr: "ignore" });
+	// What a scene measured (shot: perf ...) goes to this script's output.
+	void (async () => {
+		for await (const line of proc.stdout.pipeThrough(new TextDecoderStream())) for (const l of line.split("\n")) if (l.startsWith("shot: perf")) console.log(`  ${l.slice(6)}`);
+	})().catch(() => undefined);
+	return proc;
 }
 
 // ── Scenes ───────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -231,6 +274,8 @@ interface Scene {
 	type?: string;
 	menu?: string;
 	size?: string;
+	/** WxH: the window is resized back and forth to this size during the scene, then compared with the page. */
+	resize?: string;
 	after?: number;
 	/** A problem with what the scene did, if any. `before` holds the sessions that existed before it. */
 	check?: (client: EngineClient, before: Set<string>) => Promise<string | undefined>;
@@ -260,6 +305,21 @@ const SCENES: Scene[] = [
 	{ name: "narrow_900", session: "lab", size: "900x720" },
 	{ name: "narrow_760", session: "lab", size: "760x700" },
 	{ name: "compact_workbench", session: "local", size: "1100x800", after: 2000, js: `button("Workbench")?.click(); later(700, () => button("Files")?.click());` },
+	// A long tool call streams for about 20 seconds: the page has to keep drawing frames (a window resized meanwhile
+	// shows its old frame over the window's material until the page draws again).
+	{
+		name: "streaming_write",
+		session: "local",
+		after: 26_000,
+		resize: "1000x640",
+		type: "Write a big page",
+		js: `const gaps = []; let last = performance.now(); let long = 0, longest = 0;
+new PerformanceObserver((l) => l.getEntries().forEach((e) => { long += e.duration; longest = Math.max(longest, e.duration); })).observe({ type: "longtask", buffered: false });
+const frame = (t) => { gaps.push(t - last); last = t; if (gaps.length < 100000) requestAnimationFrame(frame); }; requestAnimationFrame(frame);
+q("textarea")?.focus();
+later(24_000, () => { const sorted = [...gaps].sort((a, b) => a - b); const p = (x) => sorted[Math.floor(sorted.length * x)]?.toFixed(1);
+console.log("shot: perf frames " + gaps.length + " p50 " + p(0.5) + " ms p95 " + p(0.95) + " ms max " + sorted.at(-1)?.toFixed(0) + " ms; long tasks " + long.toFixed(0) + " ms, longest " + longest.toFixed(0) + " ms"); });`,
+	},
 	// A task typed after choosing "New Session in <lab>" from the lab's menu runs there as the first turn.
 	{
 		name: "new_in_lab",

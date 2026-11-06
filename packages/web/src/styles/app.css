@@ -28,7 +28,7 @@
 	--surface: light-dark(#f5f7fa, var(--black-90));
 	--surface-2: light-dark(#edf1f5, var(--black-80));
 	--raised: light-dark(#ffffff, var(--black-90));
-	--rail: light-dark(rgb(247 249 252 / 0.96), rgb(25 25 25 / 0.96));
+	--rail: light-dark(#f7f9fc, #191919);
 	/* Hairlines between regions, and the stronger edge that marks a control (3:1 against the canvas). */
 	--rule: light-dark(#dfe4eb, var(--black-80));
 	--rule-strong: light-dark(var(--aggie-blue-10), var(--black-70));
@@ -570,11 +570,6 @@ input::placeholder {
 	}
 }
 
-/* Inside the desktop shell on macOS and Windows 11 the window material shows through the rail. */
-html.material,
-html.material body {
-	background: transparent;
-}
 
 /* ── Sheets: modal dialogs (settings, model services, add a lab, confirmations) ─────────────────────────────────── */
 

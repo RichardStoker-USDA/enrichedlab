@@ -307,7 +307,6 @@
 		min-height: 0;
 		min-width: 0;
 		background: var(--rail);
-		backdrop-filter: blur(24px) saturate(1.3);
 		font-size: 13px;
 		user-select: none;
 	}

@@ -25,7 +25,6 @@
 		} catch {
 			// Storage blocked: the default width.
 		}
-		if (desktop && window.labDesktop?.platform !== "linux") document.documentElement.classList.add("material");
 		void lab.init();
 		const offFull = window.labDesktop?.onFullscreen?.((on) => document.documentElement.classList.toggle("fullscreen", on));
 		const offCommand = window.labDesktop?.onCommand?.(command);
@@ -179,9 +178,6 @@
 	}
 	.shell.no-rail .main {
 		border-left: 0;
-	}
-	:global(html.material) .shell {
-		background: transparent;
 	}
 	.main {
 		min-width: 0;

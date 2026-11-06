@@ -1,6 +1,6 @@
 // The EnrichedLab desktop window: a thin shell around the web surface the person's engine serves. It finds or starts
-// the engine, trades the engine token for a one-time browser link, and opens it in a window with the platform's
-// material behind the sidebar. Everything else lives in the engine and the web surface.
+// the engine, trades the engine token for a one-time browser link, and opens it in a window. Everything else lives in
+// the engine and the web surface.
 
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -190,10 +190,9 @@ async function open(argv) {
 		titleBarOverlay: win11 ? { color: "#00000000", symbolColor: nativeTheme.shouldUseDarkColors ? "#f2f2f2" : "#022851", height: 52 } : undefined,
 		// Centered in the 52 px toolbar the sidebar draws under them.
 		trafficLightPosition: mac ? { x: 20, y: 19 } : undefined,
-		vibrancy: mac ? "sidebar" : undefined,
-		visualEffectState: mac ? "followWindow" : undefined,
-		backgroundMaterial: win11 ? "mica" : undefined,
-		backgroundColor: mac || win11 ? "#00000000" : nativeTheme.shouldUseDarkColors ? "#000000" : "#ffffff",
+		// An opaque window in the page's own color. A see-through one (the system material behind the sidebar) showed that
+		// gray material wherever the page lagged a resize, and could keep the page smaller than the window.
+		backgroundColor: canvasColor(),
 		webPreferences: {
 			preload: join(import.meta.dirname, "preload.cjs"),
 			contextIsolation: true,
@@ -229,6 +228,8 @@ async function open(argv) {
 	// reach it, pair afresh instead of leaving the window on "Reconnecting".
 	window.webContents.on("console-message", (details) => {
 		if (String(details.message ?? "").includes("lab:engine-lost")) void recover().catch(() => undefined);
+		// A screenshot run's scene reports what it measured.
+		if (process.env.EL_SHOT && String(details.message ?? "").startsWith("shot: ")) console.log(details.message);
 	});
 	await window.loadURL(url);
 	if (process.env.EL_SHOT) {
@@ -245,7 +246,24 @@ async function open(argv) {
 				window.webContents.sendInputEvent({ type: "char", keyCode: "\r" });
 				window.webContents.sendInputEvent({ type: "keyUp", keyCode: "Return" });
 			}
+			// EL_SHOT_RESIZE=WxH: the window changes size back and forth meanwhile, as a person resizing it does; then
+			// the page's size is compared with the window's.
+			const resize = /^(\d+)x(\d+)$/.exec(process.env.EL_SHOT_RESIZE ?? "");
+			if (resize) {
+				const [w0, h0] = window.getSize();
+				const sizes = [[Number(resize[1]), Number(resize[2])], [w0, h0]];
+				for (let i = 0; i < 24; i++) {
+					window.setSize(...sizes[i % 2]);
+					await new Promise((r) => setTimeout(r, 120 + (i % 5) * 40));
+				}
+				window.setSize(Number(resize[1]), Number(resize[2]));
+			}
 			await new Promise((r) => setTimeout(r, Number(process.env.EL_SHOT_AFTER) || 900));
+			if (resize) {
+				const [w, h] = window.getContentSize();
+				const page = await window.webContents.executeJavaScript("[innerWidth, innerHeight]").catch(() => [0, 0]);
+				console.log(`shot: perf window ${w}x${h}, page ${page[0]}x${page[1]}${page[0] === w && page[1] === h ? " (matches)" : " (DIFFERS)"}`);
+			}
 			console.log("shot: scene done");
 		}
 		const image = await window.webContents.capturePage();
@@ -386,13 +404,20 @@ ipcMain.on("menu:state", (event, state) => {
 });
 
 let currentTheme = "auto";
-// The page's appearance choice drives the window material too, so a light page never sits on dark glass.
+/** The page's canvas color (--canvas in app.css) for the current appearance, so a resize never shows another color. */
+function canvasColor() {
+	return nativeTheme.shouldUseDarkColors ? "#000000" : "#ffffff";
+}
+// The page's appearance choice drives the window's own color and controls too, so a light page never sits in a dark
+// window.
 ipcMain.on("theme", (event, theme) => {
 	if (event.sender !== window?.webContents || !["auto", "light", "dark"].includes(theme)) return;
 	currentTheme = theme;
 	nativeTheme.themeSource = theme === "auto" ? "system" : theme;
+	window.setBackgroundColor(canvasColor());
 	appMenu();
 });
+nativeTheme.on("updated", () => window?.setBackgroundColor(canvasColor()));
 
 /** Right-click on text, a text field, a link or an image: the system's own items. The page handles its other areas. */
 function textMenu(params) {
