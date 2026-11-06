@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("labDesktop", {
 	setTheme: (theme) => ipcRenderer.send("theme", theme),
 	closeWindow: () => ipcRenderer.send("window:close"),
 	menuState: (state) => ipcRenderer.send("menu:state", state),
+	takeDrafts: () => ipcRenderer.sendSync("drafts:take"),
 	onFullscreen: (listener) => {
 		const handler = (_event, on) => listener(Boolean(on));
 		ipcRenderer.on("fullscreen", handler);

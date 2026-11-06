@@ -22,6 +22,8 @@ interface Window {
 		reveal?(path: string): Promise<boolean>;
 		/** The appearance choice, so the window material matches the page. */
 		setTheme?(theme: "auto" | "light" | "dark"): void;
+		/** Drafts carried across an engine restart, once. */
+		takeDrafts?(): Record<string, string>;
 		/** What applies now, so the menu bar's items read and enable to match. */
 		menuState?(state: { session: boolean; busy: boolean; sidebar: boolean; workbench: boolean; undoable: boolean }): void;
 		/** Close the window (⌘W with no pane open). */

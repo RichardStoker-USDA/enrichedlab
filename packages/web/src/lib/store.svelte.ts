@@ -167,23 +167,21 @@ class Lab {
 	}
 
 	private async reload(): Promise<void> {
-		const [sessions, sites, ui, models, apps] = await Promise.all([
-			rpc.call("session.list", { limit: 200 }),
-			rpc.call("site.list", {}),
-			rpc.call("ui.get", {}),
-			rpc.call("model.list", {}),
-			rpc.call("app.list", {}).catch(() => []),
+		// Each part shows as it arrives: the theme and the history never wait on model discovery, and one failure
+		// doesn't hold back the rest.
+		const parts = await Promise.allSettled([
+			rpc.call("ui.get", {}).then((ui) => (this.ui = ui)),
+			rpc.call("session.list", { limit: 200 }).then((sessions) => (this.sessions = sessions)),
+			rpc.call("site.list", {}).then((sites) => (this.sites = sites)),
+			rpc.call("model.list", {}).then((models) => ((this.models = models.models), (this.defaultModel = models.default))),
+			rpc.call("app.list", {}).then((apps) => (this.apps = apps)),
 		]);
 		void rpc
 			.call("lab.apps", {})
 			.then((offered) => (this.labApps = offered))
 			.catch(() => undefined);
-		this.sessions = sessions;
-		this.sites = sites;
-		this.apps = apps;
-		this.ui = ui;
-		this.models = models.models;
-		this.defaultModel = models.default;
+		const failed = parts.find((p): p is PromiseRejectedResult => p.status === "rejected");
+		if (failed) this.say(`Part of the app didn't load: ${(failed.reason as Error)?.message ?? failed.reason}. It tries again when the engine reconnects.`);
 		if (this.current) await this.open(this.current);
 	}
 

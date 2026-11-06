@@ -11,7 +11,19 @@
 			// Storage blocked: the draft lives while the window is open.
 		}
 	}
+	let adopted = false;
+	/** Drafts the desktop shell carried across an engine restart (the old page's storage had another address). */
+	function adoptCarried() {
+		if (adopted) return;
+		adopted = true;
+		try {
+			for (const [key, text] of Object.entries(window.labDesktop?.takeDrafts?.() ?? {})) if (!sessionStorage.getItem(key)) sessionStorage.setItem(key, text);
+		} catch {
+			// Nothing carried, or storage blocked.
+		}
+	}
 	function loadDraft(id: string): { text: string; images: DraftImage[] } | undefined {
+		adoptCarried();
 		const kept = drafts.get(id);
 		if (kept) return kept;
 		try {

@@ -21,6 +21,8 @@ const binary = process.platform === "win32" ? "el.exe" : "el";
 
 /** The el binary: bundled with the app, else the one the installer put on PATH. */
 function labBinary() {
+	// Development only: run the engine from a source checkout (a wrapper script) instead of an installed el.
+	if (!app.isPackaged && process.env.EL_BINARY) return process.env.EL_BINARY;
 	const bundled = join(process.resourcesPath ?? "", "bin", binary);
 	if (existsSync(bundled)) return bundled;
 	const candidates = [
@@ -132,6 +134,33 @@ function inviteRoute(argv) {
 	}
 }
 
+/** Unsent drafts carried across a recovery, handed to the new page once (drafts:take). */
+let carriedDrafts = {};
+
+/**
+ * The engine came back on a new port and key: pair again on the same session, and carry unsent drafts across, since
+ * the page's storage belongs to the old address.
+ */
+async function recover() {
+	if (process.env.EL_SHOT) console.log("shot: engine lost, recovering");
+	const sessionId = /^#\/s\/(s[0-9a-z]+)/.exec(new URL(window.webContents.getURL()).hash)?.[1];
+	const drafts = await window.webContents
+		.executeJavaScript(`Object.fromEntries(Object.keys(sessionStorage).filter((k) => k.startsWith("enrichedlab.draft.")).map((k) => [k, sessionStorage.getItem(k)]))`)
+		.catch(() => ({}));
+	carriedDrafts = Object.fromEntries(Object.entries(drafts ?? {}).filter(([k, v]) => /^enrichedlab\.draft\.s[0-9a-z]+$/.test(k) && typeof v === "string" && v.length < 200_000));
+	if (process.env.EL_SHOT) console.log(`shot: recovering ${sessionId ?? "no session"} with ${Object.keys(carriedDrafts).length} of ${Object.keys(drafts ?? {}).length} drafts`);
+	await open(sessionId ? ["--session", sessionId] : []);
+}
+
+// A synchronous call from the page: it must always get an answer, or the page stops.
+ipcMain.on("drafts:take", (event) => {
+	const ours = event.sender === window?.webContents;
+	const drafts = ours ? carriedDrafts : {};
+	if (ours) carriedDrafts = {};
+	event.returnValue = drafts;
+	if (process.env.EL_SHOT && Object.keys(drafts).length) console.log(`shot: page took ${Object.keys(drafts).length} drafts`);
+});
+
 async function open(argv) {
 	const sessionId = sessionArg(argv);
 	const shotRoute = process.env.EL_SHOT ? process.env.EL_SHOT_ROUTE : undefined;
@@ -196,7 +225,7 @@ async function open(argv) {
 	// The engine stops after 30 idle minutes and gets a new port and key when it starts again: when the page can't
 	// reach it, pair afresh instead of leaving the window on "Reconnecting".
 	window.webContents.on("console-message", (details) => {
-		if (String(details.message ?? "").includes("lab:engine-lost")) void open([]).catch(() => undefined);
+		if (String(details.message ?? "").includes("lab:engine-lost")) void recover().catch(() => undefined);
 	});
 	await window.loadURL(url);
 	if (process.env.EL_SHOT) {
@@ -214,10 +243,12 @@ async function open(argv) {
 				window.webContents.sendInputEvent({ type: "keyUp", keyCode: "Return" });
 			}
 			await new Promise((r) => setTimeout(r, Number(process.env.EL_SHOT_AFTER) || 900));
+			console.log("shot: scene done");
 		}
 		const image = await window.webContents.capturePage();
 		const { writeFileSync } = await import("node:fs");
 		writeFileSync(process.env.EL_SHOT, image.toPNG());
+		console.log(`shot: at ${new URL(window.webContents.getURL()).port}${new URL(window.webContents.getURL()).hash}`);
 		console.log(`shot: window captured, ${views.size} browser ${views.size === 1 ? "view" : "views"}`);
 		// Browser panes are native views over the page: each is captured on its own, with what it shows.
 		let n = 0;
