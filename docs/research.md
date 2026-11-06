@@ -8,7 +8,7 @@ is the plan and its state; the wire shapes are in [labs.md](labs.md) and [contra
 
 | Lab | Role | Serves the contract through | State (November 6, 2026) |
 |---|---|---|---|
-| Home Lab | the development lab: every addition is built and broken here first | Gate | the contract through `2026-11`, 36 of 38 `el lab check` rows pass (2 skipped by design); desktop sandboxes in build |
+| Home Lab | the development lab: every addition is built and broken here first | Gate | the contract through `2026-11`, 36 of 38 `el lab check` rows pass (2 skipped by design); desktop sandboxes live since publication 67 |
 | WHNRC EnrichedLab | the production lab: scientists, research data, reviewed tools | the WHNRC research broker, as a versioned adapter | not started: the broker has its own API at research.whnrc.com; the adapter waits for Rich's go-ahead and an owner |
 
 Each lab names itself in its descriptor (`title`). Nothing in EnrichedLab names a lab: a person sees a lab only after
@@ -162,10 +162,10 @@ lane and decided with Rich; EnrichedLab's side is ready for each piece as the co
 | 2 | Contract rows for runs, desktops, capabilities and sandbox agents | EnrichedLab, with Home Lab | in [labs.md](labs.md) (`ac42ee2`); runs proposed, shape sent to Home Lab |
 | 3 | Discovery mode client | EnrichedLab | done (`d4a39dc`) |
 | 4 | Reasoning summaries | EnrichedLab | done (`398e4d6`) |
-| 5 | Desktop pane and agent tools | EnrichedLab | done against Home Lab's action shape (`4824b45`); live check when Gate offers it |
+| 5 | Desktop pane and agent tools | EnrichedLab | done (`4824b45`, `d44bd9d`); checked live against Home Lab, November 6 |
 | 6 | Runs at the lab, client | EnrichedLab | after the shape is agreed with Home Lab |
 | 7 | Run package | EnrichedLab | done (`700eb59`) |
-| 8 | Desktop sandboxes, `Home Lab` title | Home Lab | in build |
+| 8 | Desktop sandboxes, `Home Lab` title | Home Lab | live (publication 67) |
 | 9 | Runs on Rein and scheduled tasks | Home Lab | next |
 | 10 | Discovery grant and approval holds | Home Lab | after Rich confirms to its owner |
 | 11 | Broker adapter, hostname, Access OAuth, srv4 sandbox profiles | WHNRC broker lane | waits for Rich |
