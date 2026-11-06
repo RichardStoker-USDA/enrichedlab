@@ -28,11 +28,17 @@
 	let failed = $state(false);
 	const chosen = $derived(presets.find((p) => p.id === choice));
 
+	let loadError = $state("");
 	async function load() {
-		const list = await rpc.call("provider.list", {});
-		presets = list.presets;
-		added = list.added;
-		accounts = list.accounts;
+		try {
+			const list = await rpc.call("provider.list", {});
+			presets = list.presets;
+			added = list.added;
+			accounts = list.accounts;
+			loadError = "";
+		} catch (error) {
+			loadError = `Couldn't read your model services: ${(error as Error).message}`;
+		}
 	}
 
 	/** ChatGPT's page opens in the browser; the engine waits for it to come back. `account` signs in again. */
@@ -57,17 +63,29 @@
 	}
 
 	async function signOut(account: ServiceAccount) {
-		const { revoked } = await rpc.call("provider.signout", { service: "chatgpt", account: account.id });
-		planFailed = !revoked;
-		planMessage = revoked ? `Signed out of ${account.label}.` : `Signed out here. ChatGPT didn't confirm the session ended; you can disconnect EnrichedLab in ChatGPT settings.`;
-		await lab.refreshModels();
-		await load();
+		try {
+			const { revoked } = await rpc.call("provider.signout", { service: "chatgpt", account: account.id });
+			planFailed = !revoked;
+			planMessage = revoked ? `Signed out of ${account.label}.` : `Signed out here. ChatGPT didn't confirm the session ended; you can disconnect EnrichedLab in ChatGPT settings.`;
+			await lab.refreshModels();
+			await load();
+		} catch (error) {
+			planFailed = true;
+			planMessage = `Couldn't sign out of ${account.label}: ${(error as Error).message}`;
+		}
 	}
 
 	async function use(account: ServiceAccount) {
-		await rpc.call("provider.use", { service: "chatgpt", account: account.id });
-		await lab.refreshModels();
-		await load();
+		try {
+			await rpc.call("provider.use", { service: "chatgpt", account: account.id });
+			planFailed = false;
+			planMessage = `Using ${account.label}.`;
+			await lab.refreshModels();
+			await load();
+		} catch (error) {
+			planFailed = true;
+			planMessage = `Couldn't switch to ${account.label}: ${(error as Error).message}`;
+		}
 	}
 
 	$effect(() => {
@@ -100,9 +118,16 @@
 	}
 
 	async function remove(name: string) {
-		await rpc.call("provider.remove", { name });
-		await lab.refreshModels();
-		await load();
+		try {
+			await rpc.call("provider.remove", { name });
+			failed = false;
+			message = `Removed ${added.find((a) => a.name === name)?.label ?? name}.`;
+			await lab.refreshModels();
+			await load();
+		} catch (error) {
+			failed = true;
+			message = `Couldn't remove it: ${(error as Error).message}`;
+		}
 	}
 </script>
 
@@ -114,6 +139,9 @@
 		</button>
 	</form>
 	<p class="lead">Models come from three places besides your labs, which add theirs when you sign in.</p>
+	{#if loadError}
+		<p class="load-error" role="alert">{loadError} <button type="button" class="link" onclick={load}>Try again</button></p>
+	{/if}
 	<div class="segmented tabs" role="tablist" aria-label="Where models come from">
 		{#each [["plan", "ChatGPT Plan"], ["local", "This Computer"], ["keys", "Your Keys"]] as const as [id, label] (id)}
 			<button role="tab" id={`svc-${id}`} aria-selected={tab === id} aria-controls={`svc-panel-${id}`} class:on={tab === id} onclick={() => (tab = id)}>{label}</button>
@@ -213,6 +241,11 @@
 </dialog>
 
 <style>
+	.load-error {
+		margin: 0 0 12px;
+		font-size: 13px;
+		color: var(--bad);
+	}
 	.services {
 		--sheet-width: 560px;
 		min-height: min(640px, calc(100dvh - 48px));
