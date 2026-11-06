@@ -39,11 +39,11 @@
 	}
 </script>
 
-<dialog bind:this={dialog} onclose={() => lab.deviceRequests.length && (lab.deviceRequests = lab.deviceRequests.slice(1))} aria-labelledby="device-title">
+<dialog class="sheet" style:--sheet-width="440px" bind:this={dialog} onclose={() => lab.deviceRequests.length && (lab.deviceRequests = lab.deviceRequests.slice(1))} aria-labelledby="device-title">
 	{#if request}
-		<form method="dialog" class="head">
+		<form method="dialog" class="sheet-head">
 			<h2 id="device-title">A new device wants your {request.lab} sign-in</h2>
-			<button class="close" aria-label="Decide later">×</button>
+			<button class="icon-btn" aria-label="Decide later"><svg viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8" /></svg></button>
 		</form>
 		<p class="lead">
 			<strong>{request.name}</strong> signed in at {when}. Approve it only if you just signed in there. If you didn't, revoke it: someone else may
@@ -58,41 +58,6 @@
 </dialog>
 
 <style>
-	dialog {
-		width: min(460px, calc(100vw - 32px));
-		padding: 0 22px 20px;
-		border: 1px solid var(--rule-strong);
-		border-radius: 14px;
-		background: var(--raised);
-		color: var(--text);
-		box-shadow: 0 24px 60px rgb(0 0 0 / 0.22);
-	}
-	dialog::backdrop {
-		background: rgb(0 0 0 / 0.32);
-	}
-	.head {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 12px;
-		padding: 16px 0 4px;
-	}
-	h2 {
-		margin: 0;
-		font-size: 16px;
-		font-weight: 600;
-	}
-	.close {
-		flex: none;
-		width: 32px;
-		height: 32px;
-		font-size: 20px;
-		color: var(--text-muted);
-		border-radius: 8px;
-	}
-	.close:hover {
-		background: var(--hover);
-	}
 	.lead {
 		margin: 6px 0 12px;
 		font-size: 13px;

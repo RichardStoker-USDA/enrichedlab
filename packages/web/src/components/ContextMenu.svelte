@@ -46,6 +46,9 @@
 		} else if (e.key === "Home" || e.key === "End") {
 			e.preventDefault();
 			(e.key === "Home" ? items[0] : items.at(-1))?.focus();
+		} else if (e.key === "Enter" || e.key === " ") {
+			e.preventDefault();
+			(document.activeElement as HTMLButtonElement | null)?.click();
 		} else if (e.key === "Tab") {
 			e.preventDefault();
 		}

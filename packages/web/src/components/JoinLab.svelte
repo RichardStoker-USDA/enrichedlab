@@ -56,10 +56,10 @@
 	}
 </script>
 
-<dialog bind:this={dialog} onclose={() => (lab.join = undefined)} aria-labelledby="join-title">
-	<form method="dialog" class="head">
+<dialog class="sheet" style:--sheet-width="460px" bind:this={dialog} onclose={() => (lab.join = undefined)} aria-labelledby="join-title">
+	<form method="dialog" class="sheet-head">
 		<h2 id="join-title">{title ? `Join ${title}` : "Add a lab"}</h2>
-		<button class="close" aria-label="Close">×</button>
+		<button class="icon-btn" aria-label="Close"><svg viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8" /></svg></button>
 	</form>
 	<p class="lead">
 		A lab gives you its models, tools and a sandbox for your work, after you sign in with the account it invited. You can remove it any time.
@@ -76,53 +76,6 @@
 </dialog>
 
 <style>
-	dialog {
-		width: min(460px, calc(100vw - 32px));
-		padding: 0 22px 20px;
-		border: 1px solid var(--rule-strong);
-		border-radius: 14px;
-		background: var(--raised);
-		color: var(--text);
-		box-shadow: 0 24px 60px rgb(0 0 0 / 0.22);
-	}
-	dialog::backdrop {
-		background: rgb(0 0 0 / 0.32);
-	}
-	dialog[open] {
-		animation: rise 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
-	}
-	@keyframes rise {
-		from {
-			opacity: 0;
-			transform: translateY(6px);
-		}
-	}
-	@media (prefers-reduced-motion: reduce) {
-		dialog[open] {
-			animation: none;
-		}
-	}
-	.head {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: 16px 0 4px;
-	}
-	h2 {
-		margin: 0;
-		font-size: 16px;
-		font-weight: 600;
-	}
-	.close {
-		width: 32px;
-		height: 32px;
-		font-size: 20px;
-		color: var(--text-muted);
-		border-radius: 8px;
-	}
-	.close:hover {
-		background: var(--hover);
-	}
 	.lead,
 	.host {
 		margin: 6px 0 12px;
