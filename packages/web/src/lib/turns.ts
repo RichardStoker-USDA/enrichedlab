@@ -10,7 +10,7 @@ export type StepItem = { kind: "done"; id: string; event: Ev<"tool"> } | { kind:
 
 export type Block =
 	| { kind: "prompt"; id: string; text: string; images: number }
-	| { kind: "thinking"; id: string; text: string }
+	| { kind: "thinking"; id: string; text: string; summary?: string }
 	| { kind: "activity"; id: string; steps: StepItem[] }
 	| { kind: "answer"; id: string; text: string; error?: string; stop: string }
 	| { kind: "notice"; id: string; level: string; text: string }
@@ -25,10 +25,13 @@ export function blocks(events: SessionEvent[], running: { calls: { id: string; n
 		out.push(made);
 		return made;
 	};
+	// A step's reading summary arrives after the step; it labels the step's reasoning.
+	const summaries = new Map<string, string>();
+	for (const e of events) if (e.t === "reasoning_summary") summaries.set(e.of, e.text);
 	for (const e of events) {
 		if (e.t === "user") out.push({ kind: "prompt", id: e.id, text: e.text, images: e.images?.length ?? 0 });
 		else if (e.t === "assistant") {
-			if (e.reasoning?.trim()) out.push({ kind: "thinking", id: `${e.id}-r`, text: e.reasoning });
+			if (e.reasoning?.trim()) out.push({ kind: "thinking", id: `${e.id}-r`, text: e.reasoning, summary: summaries.get(e.id) });
 			if (e.text || e.stop === "error" || e.stop === "cancelled") out.push({ kind: "answer", id: e.id, text: e.text, error: e.error, stop: e.stop });
 		} else if (e.t === "tool") {
 			activity().steps.push({ kind: "done", id: e.id, event: e });

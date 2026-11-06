@@ -24,7 +24,10 @@ each maps its log to v1 on export and from v1 on import.
 against `sha256` (and `Repr-Digest`, where the server sends one). Image bytes never go inline.
 
 Kinds starting with `x-` belong to one side and readers skip them. The engine's: `x-header` (the folder it worked in,
-its system prompt), `x-model`, `x-place`, `x-title`, `x-checkpoint`, `x-undo`, `x-app-context`, `x-elide`.
+its system prompt), `x-model`, `x-place`, `x-title`, `x-checkpoint`, `x-undo`, `x-app-context`, `x-elide`,
+`x-discovery` (`{on, site}`: Discovery mode turned on or off at a lab; the engine tells its model) and
+`x-reasoning-summary` (`{of, text, model}`: a reading summary of one assistant step's reasoning, made by a model in
+the same place as the session's; the full reasoning stays on the step, and no model reads the summary).
 
 ## Rebuilding the context
 

@@ -147,6 +147,11 @@ export type SessionEvent =
 	 * sandbox, its tools) runs without asking, for a person the lab grants it to.
 	 */
 	| (EventBase & { t: "discovery"; on: boolean; site: string })
+	/**
+	 * A short summary of one assistant step's reasoning, for the person reading the session. The full reasoning stays on
+	 * the step (`of`); the model never sees this. Made by a model in the same place as the session's model.
+	 */
+	| (EventBase & { t: "reasoning_summary"; of: string; text: string; model: string })
 	/** What an open app shows, sent by the app (MCP Apps ui/update-model-context). The model reads the latest. */
 	| (EventBase & {
 			t: "app_context";

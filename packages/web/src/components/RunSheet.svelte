@@ -146,7 +146,7 @@
 			{:else if item.kind === "thinking"}
 				<div class="thought">
 					<button class="thought-line" onclick={() => (thinkingOpen[item.id] = !thinkingOpen[item.id])} aria-expanded={Boolean(thinkingOpen[item.id])}>
-						<span class="caret" class:open={thinkingOpen[item.id]}></span>Thought
+						<span class="caret" class:open={thinkingOpen[item.id]}></span>{#if item.summary}<span class="thought-summary">{item.summary}</span>{:else}Thought{/if}
 					</button>
 					{#if thinkingOpen[item.id]}<p class="thought-text">{item.text.trim()}</p>{/if}
 				</div>
@@ -394,10 +394,21 @@
 	}
 	.thought-line {
 		display: inline-flex;
-		align-items: center;
+		align-items: flex-start;
 		gap: 6px;
 		font-size: 12.5px;
+		line-height: 1.45;
+		text-align: left;
 		color: var(--text-faint);
+	}
+	.thought-line .caret {
+		flex: none;
+		margin-top: 0.42em;
+	}
+	/* A step's reasoning in a sentence; the full text opens below it. */
+	.thought-summary {
+		max-width: var(--measure);
+		color: var(--text-muted);
 	}
 	.thought-line:hover {
 		color: var(--text-muted);

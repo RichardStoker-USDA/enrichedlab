@@ -156,6 +156,8 @@ export async function runTui(options: TuiOptions): Promise<void> {
 				return ruleView(t, `undone: ${event.files.join(", ")}`);
 			case "model":
 				return modelView(t, event.model, event.effort, origins.get(event.model));
+			case "reasoning_summary":
+				return ruleView(t, `thought: ${event.text}`);
 			case "discovery":
 				return ruleView(t, event.on ? "discovery mode on: the agent works without asking at the lab" : "discovery mode off");
 			default:

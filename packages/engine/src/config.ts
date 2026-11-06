@@ -58,8 +58,13 @@ export type PermissionMode = "ask" | "edits" | "full";
 export interface LabConfig {
 	model?: string;
 	effort?: string;
-	/** A model for compaction summaries; the session's own model when unset. */
+	/**
+	 * A smaller model for compaction and reasoning summaries. Used only where it runs in the same place as the session's
+	 * model (the same lab, service or computer); otherwise the session's own model makes them.
+	 */
 	summaryModel?: string;
+	/** Summarize each step's reasoning for reading (the full text stays in the log); on unless false. */
+	reasoningSummaries?: boolean;
 	/** Compact no later than this: a token count, or a fraction of the window (0 to 1). */
 	compactAt?: number;
 	providers: Record<string, ProviderConfig>;

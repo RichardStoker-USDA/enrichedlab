@@ -18,7 +18,7 @@ import type {
 	Usage,
 } from "@enrichedlab/protocol";
 import type { LabConfig } from "../config.ts";
-import { adapterFor, type ModelRegistry } from "../models/registry.ts";
+import { adapterFor, type ModelRegistry, whereOf } from "../models/registry.ts";
 import { ModelHttpError, type ModelProfile, type ToolSchema } from "../models/types.ts";
 import { Checkpoints } from "./checkpoint.ts";
 import { changedSince, repoRoot, restoreSnapshot, snapshot } from "../git.ts";
@@ -38,6 +38,10 @@ import { budget, cutPoint, derive, ELIDE_MIN_CHARS, elisionCandidates, gauge, IN
 import { type SessionLog, type SessionMeta, toSummary } from "./log.ts";
 
 const MAX_STEPS = 400;
+/** Reasoning shorter than this reads well as it is. */
+const SUMMARY_MIN_CHARS = 600;
+const REASONING_SUMMARY_SYSTEM =
+	"You summarize an AI agent's private reasoning for the scientist reviewing its work. Write one or two plain sentences, under 45 words, saying what the agent was working out and what it decided to do next. Name the files, tools, methods and numbers it relied on. No preamble, quotes or markdown.";
 const MAX_ATTEMPTS = 5;
 const DELTA_FLUSH_MS = 24;
 const PARALLEL_KINDS = new Set(["read", "net", "site-read"]);
@@ -85,6 +89,9 @@ export class SessionRuntime {
 	readonly pending = new Map<string, PermissionRequest>();
 
 	private checkpoints: Checkpoints;
+	/** Steps whose reasoning waits for a summary, and the one being summarized now. */
+	private toSummarize: Ev<"assistant">[] = [];
+	private summarizing = false;
 
 	private current: Workspace;
 	/** Set while the session moves between places; prompts wait for the move to finish. */
@@ -336,6 +343,8 @@ export class SessionRuntime {
 		this.running = this.drain().finally(() => {
 			this.running = undefined;
 			this.setActivity("idle");
+			// Summaries that waited for the turn (a model on this computer) go now.
+			void this.pumpSummaries();
 		});
 	}
 
@@ -374,6 +383,68 @@ export class SessionRuntime {
 	/** What an open app reports (MCP Apps ui/update-model-context); the model reads the newest on its next request. */
 	appContext(app: string, title: string, text: string): void {
 		this.append({ t: "app_context", id: newId("e"), at: now(), app, title, text });
+	}
+
+	/**
+	 * The configured summary model when it runs in the same place as `model` and this session may use it; otherwise
+	 * `model` itself. Summaries carry the conversation, so they never go anywhere the session's model doesn't.
+	 */
+	private helperModel(model: ModelProfile): ModelProfile {
+		const helper = this.deps.registry.resolve(this.deps.config().summaryModel);
+		if (!helper || helper.ref === model.ref || !this.deps.allows(helper, this.site)) return model;
+		const a = whereOf(helper);
+		const b = whereOf(model);
+		const same = a.kind === b.kind && a.name === b.name && (b.kind === "device" || b.kind === "network" || helper.provider === model.provider);
+		return same ? helper : model;
+	}
+
+	/** Queue a step's reasoning for a reading summary (docs/research.md); the full text stays on the step. */
+	private queueSummary(step: Ev<"assistant">): void {
+		if (this.deps.config().reasoningSummaries === false || (step.reasoning?.trim().length ?? 0) < SUMMARY_MIN_CHARS) return;
+		this.toSummarize.push(step);
+		void this.pumpSummaries();
+	}
+
+	/**
+	 * Summarize queued steps one at a time. A model on this computer usually serves one request at a time, so there
+	 * the summaries wait until the turn ends instead of slowing it.
+	 */
+	private async pumpSummaries(): Promise<void> {
+		if (this.summarizing || !this.toSummarize.length) return;
+		const model = this.model();
+		if (!model) return;
+		const helper = this.helperModel(model);
+		if (this.running && whereOf(helper).kind === "device") return;
+		this.summarizing = true;
+		try {
+			while (this.toSummarize.length) {
+				const step = this.toSummarize.shift()!;
+				const text = await this.summarizeReasoning(helper, step.reasoning ?? "").catch(() => "");
+				if (text) this.append({ t: "reasoning_summary", id: newId("e"), at: now(), of: step.id, text, model: helper.ref });
+			}
+		} finally {
+			this.summarizing = false;
+		}
+	}
+
+	private async summarizeReasoning(model: ModelProfile, reasoning: string): Promise<string> {
+		const body = reasoning.length > 16_000 ? `${reasoning.slice(0, 8_000)}\n[…]\n${reasoning.slice(-8_000)}` : reasoning;
+		const quick = ["off", "none", "minimal", "low"].find((e) => model.efforts.includes(e)) ?? model.efforts[0];
+		const request = {
+			model,
+			system: REASONING_SUMMARY_SYSTEM,
+			messages: [{ role: "user" as const, content: [{ type: "text" as const, text: body }] }],
+			tools: [],
+			toolChoice: "none" as const,
+			effort: quick,
+			maxTokens: Math.min(1_024, model.maxOutput),
+		};
+		let text = "";
+		for await (const event of adapterFor(model).stream(request, AbortSignal.timeout(90_000))) {
+			if (event.type === "text") text += event.delta;
+			if (event.type === "done" && event.stop === "error") return "";
+		}
+		return clip(text.trim().replace(/^["'“”*\s]+|["'“”*\s]+$/g, "").replace(/\s+/g, " "), 400);
 	}
 
 	/** One answer from the session's model, outside the conversation: an app's lab.ask(). */
@@ -559,6 +630,7 @@ export class SessionRuntime {
 			await this.manageContext(model, signal, step === 0);
 			const assistant = await this.request(model, signal);
 			this.append(assistant);
+			this.queueSummary(assistant);
 			if (assistant.stop === "cancelled" || assistant.stop === "error") return;
 			if (assistant.stop === "length" && !assistant.toolCalls?.length) {
 				this.notice("warn", "The answer reached the output limit and stopped.");
@@ -885,7 +957,7 @@ export class SessionRuntime {
 		const firstKept = this.events[derived.sources[cut]];
 		if (!firstKept) return false;
 		this.setActivity("compacting", `summarizing ${derived.messages.slice(0, cut).length} messages`);
-		const summaryModel = this.deps.registry.resolve(this.deps.config().summaryModel) ?? model;
+		const summaryModel = this.helperModel(model);
 		try {
 			const summary = await summarize(summaryModel, derived.messages.slice(0, cut), signal, this.toolSchemas());
 			this.append({ t: "compaction", id: newId("e"), at: now(), summary, firstKeptId: firstKept.id, tokensBefore: before, model: summaryModel.ref });
