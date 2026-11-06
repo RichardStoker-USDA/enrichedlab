@@ -42,6 +42,23 @@ class Lab {
 	private frames = new Set<(frame: BrowserFrame) => void>();
 	/** Other devices asking to use the person's sign-in at a lab, oldest first; the window asks about each. */
 	deviceRequests = $state<DeviceRequest[]>([]);
+	/** How much history the sidebar holds; Show Older Sessions raises it. */
+	sessionLimit = $state(200);
+	get moreSessions(): boolean {
+		return this.sessions.length >= this.sessionLimit;
+	}
+	async loadOlderSessions(): Promise<void> {
+		this.sessionLimit += 200;
+		try {
+			this.sessions = await rpc.call("session.list", { limit: this.sessionLimit });
+		} catch (error) {
+			this.say((error as Error).message);
+		}
+	}
+	/** Search all history, past what the sidebar holds. */
+	async searchSessions(query: string): Promise<SessionSummary[]> {
+		return rpc.call("session.list", { query, limit: 40 }).catch(() => []);
+	}
 	/** Requests the person chose to decide later: kept, counted on the lab's row, and opened again from there. */
 	deferredDevices = $state<DeviceRequest[]>([]);
 
@@ -180,7 +197,7 @@ class Lab {
 		// doesn't hold back the rest.
 		const parts = await Promise.allSettled([
 			rpc.call("ui.get", {}).then((ui) => (this.ui = ui)),
-			rpc.call("session.list", { limit: 200 }).then((sessions) => (this.sessions = sessions)),
+			rpc.call("session.list", { limit: this.sessionLimit }).then((sessions) => (this.sessions = sessions)),
 			rpc.call("site.list", {}).then((sites) => (this.sites = sites)),
 			rpc.call("model.list", {}).then((models) => ((this.models = models.models), (this.defaultModel = models.default))),
 			rpc.call("app.list", {}).then((apps) => (this.apps = apps)),

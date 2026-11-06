@@ -508,10 +508,12 @@ export class Engine {
 		return session;
 	}
 
-	listSessions(cwd?: string, limit = 50): SessionSummary[] {
+	listSessions(cwd?: string, limit = 50, query?: string): SessionSummary[] {
+		const words = (query ?? "").toLowerCase().split(/\s+/).filter(Boolean);
 		// Subagent sessions open from the step that started them, not from the session list.
 		return listSessions(this.paths.sessions)
 			.filter((m) => !m.parent && (!cwd || resolve(m.cwd) === resolve(cwd)))
+			.filter((m) => !words.length || words.every((w) => `${m.title ?? ""} ${m.cwd}`.toLowerCase().includes(w)))
 			.slice(0, limit)
 			.map((m) => toSummary(m, this.sessions.get(m.id)?.isRunning ?? false));
 	}
@@ -557,7 +559,7 @@ export class Engine {
 				case "hello":
 					return { engine: VERSION, protocol: PROTOCOL_VERSION, home: this.paths.home, pid: process.pid };
 				case "session.list":
-					return this.listSessions(p.cwd as string | undefined, (p.limit as number | undefined) ?? 50);
+					return this.listSessions(p.cwd as string | undefined, (p.limit as number | undefined) ?? 50, typeof p.query === "string" ? p.query : undefined);
 				case "session.create": {
 					// A model the person asked for by name is used or refused, never quietly swapped for another.
 					const model = typeof p.model === "string" && p.model ? p.model : undefined;

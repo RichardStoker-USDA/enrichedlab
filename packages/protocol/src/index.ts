@@ -487,7 +487,8 @@ export interface UpdateStatus {
 
 export interface Requests {
 	hello: { params: { client: string; version: string; capabilities?: string[] }; result: { engine: string; protocol: number; home: string; pid: number } };
-	"session.list": { params: { cwd?: string; limit?: number }; result: SessionSummary[] };
+	/** Newest first. `query` matches words in the title or folder, across all history. */
+	"session.list": { params: { cwd?: string; limit?: number; query?: string }; result: SessionSummary[] };
 	"session.create": { params: { cwd: string; model?: string; site?: string; worktree?: boolean }; result: SessionSummary };
 	"session.open": {
 		params: { sessionId: string };

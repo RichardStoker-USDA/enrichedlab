@@ -270,6 +270,9 @@
 			{:else}
 				<p class="empty">{filter ? "No sessions match." : "Sessions you start appear here, by project."}</p>
 			{/each}
+					{#if lab.moreSessions && !filter}
+				<button class="more older" onclick={() => lab.loadOlderSessions()}>Show Older Sessions</button>
+			{/if}
 		</section>
 	</div>
 

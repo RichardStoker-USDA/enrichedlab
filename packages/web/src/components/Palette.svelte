@@ -15,6 +15,15 @@
 	}
 
 	let query = $state("");
+	let older = $state<{ id: string; title: string; cwd: string }[]>([]);
+	// With more history than the sidebar holds, typed words also search the rest.
+	$effect(() => {
+		const q = query.trim();
+		if (!q || !lab.moreSessions) return void (older = []);
+		let current = true;
+		const timer = setTimeout(() => void lab.searchSessions(q).then((found) => current && (older = found)), 160);
+		return () => ((current = false), clearTimeout(timer));
+	});
 	let index = $state(0);
 	let input: HTMLInputElement | undefined = $state();
 
@@ -49,6 +58,8 @@
 			list.push({ id: `lab-app-${offer.site}-${offer.name}`, label: `${offer.installed ? "Update" : "Install"} ${offer.title}`, hint: `from ${offer.lab}`, group: "Apps", run: () => void lab.installLabApp(offer) });
 		}
 		for (const s of lab.sessions) list.push({ id: s.id, label: s.title, hint: folderName(s.cwd), group: "Sessions", run: () => lab.go(s.id) });
+		// Older sessions the sidebar doesn't hold, from a search of all history.
+		for (const s of older) if (!lab.sessions.some((x) => x.id === s.id)) list.push({ id: s.id, label: s.title, hint: folderName(s.cwd), group: "Sessions", run: () => lab.go(s.id) });
 		const q = query.trim().toLowerCase();
 		if (!q) return list.filter((i) => i.group !== "Sessions" && i.group !== "Apps").concat(list.filter((i) => i.group === "Apps").slice(0, 6), list.filter((i) => i.group === "Sessions").slice(0, 8));
 		const words = q.split(/\s+/);
