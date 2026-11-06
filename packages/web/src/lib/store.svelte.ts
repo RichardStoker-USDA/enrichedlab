@@ -3,7 +3,7 @@
 
 import { pageMenu } from "./menu.svelte.ts";
 import type { AppSummary, BrowserFrame, BrowserInput, BrowserPageState, CanvasSummary, DeviceRequest, LabApp, ModelInfo, Part, Partial_, PermissionDecision, PermissionRequest, SessionEvent, SessionStatus, SessionSummary, SiteSummary, UiPrefs } from "@enrichedlab/protocol";
-import { close as closeTab, emptyLayout, move, type Node, open as openTab, resize as resizeSplit, revive, sync, type Edge, type PaneKind, type Tab, uid, activate, groups } from "./layout.ts";
+import { close as closeTab, emptyLayout, move, place, type Node, open as openTab, resize as resizeSplit, revive, sync, type Edge, type PaneKind, type Tab, uid, activate, groups } from "./layout.ts";
 import { placeOf, places, type Place } from "./places.ts";
 import { rpc } from "./rpc.ts";
 
@@ -386,6 +386,11 @@ class Lab {
 	focusPane(tabId: string): void {
 		this.lastGroup = groups(this.layout).find((g) => g.tabs.some((t) => t.id === tabId))?.id;
 		this.setLayout(activate(this.layout, tabId));
+	}
+
+	/** Put a pane at a position in a group's tab strip. */
+	placePane(tabId: string, groupId: string, index: number): void {
+		this.setLayout(place(this.layout, tabId, groupId, index));
 	}
 
 	movePane(tabId: string, groupId: string, edge: Edge): void {

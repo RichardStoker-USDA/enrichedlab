@@ -50,7 +50,31 @@
 	function drop(e: DragEvent, at?: Edge) {
 		const id = e.dataTransfer?.getData(TYPE);
 		edge = undefined;
+		slot = undefined;
 		if (id) lab.movePane(id, group.id, at ?? edgeAt(e));
+	}
+
+	/** Where a tab dropped on the strip lands: before the tab under the pointer, or after it past its middle. */
+	let slot = $state<number | undefined>();
+	function slotAt(e: DragEvent): number {
+		const tabs = [...(strip?.querySelectorAll<HTMLElement>(".tab") ?? [])];
+		const i = tabs.findIndex((t) => e.clientX < t.getBoundingClientRect().left + t.getBoundingClientRect().width / 2);
+		return i < 0 ? tabs.length : i;
+	}
+	function overStrip(e: DragEvent) {
+		if (!e.dataTransfer?.types.includes(TYPE)) return;
+		e.preventDefault();
+		slot = slotAt(e);
+	}
+	function dropOnStrip(e: DragEvent) {
+		const id = e.dataTransfer?.getData(TYPE);
+		const at = slotAt(e);
+		slot = undefined;
+		edge = undefined;
+		if (id) {
+			e.preventDefault();
+			lab.placePane(id, group.id, at);
+		}
 	}
 
 	const ARROWS: Record<string, Edge> = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "top", ArrowDown: "bottom" };
@@ -62,6 +86,14 @@
 		if (e.altKey && e.shiftKey && ARROWS[e.key]) {
 			e.preventDefault();
 			lab.movePane(tab.id, group.id, ARROWS[e.key]!);
+			return;
+		}
+		// Alt+Left or Right moves the tab along the strip.
+		if (e.altKey && !e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+			e.preventDefault();
+			const to = e.key === "ArrowLeft" ? Math.max(0, index - 1) : Math.min(tabs.length, index + 2);
+			lab.placePane(tab.id, group.id, to);
+			requestAnimationFrame(() => document.getElementById(`tab-${tab.id}`)?.focus());
 			return;
 		}
 		let next: number | undefined;
@@ -91,14 +123,14 @@
 </script>
 
 <section class="group" onpointerdowncapture={() => (lab.lastGroup = group.id)} onfocusin={() => (lab.lastGroup = group.id)}>
-	<div class="tabs" bind:this={strip} role="tablist" aria-label="Open panes" tabindex="-1" ondragover={(e) => e.dataTransfer?.types.includes(TYPE) && e.preventDefault()} ondrop={(e) => drop(e, "center")}>
+	<div class="tabs" bind:this={strip} role="tablist" aria-label="Open panes: arrows switch, Alt with an arrow reorders, Delete closes" tabindex="-1" ondragover={overStrip} ondragleave={(e) => !strip?.contains(e.relatedTarget as Node) && (slot = undefined)} ondrop={dropOnStrip}>
 		{#each group.tabs as tab, index (tab.id)}
 			{@const place = placeFor(tab.ref, tab.kind)}
 			{@const active = tab.id === group.active}
 			{@const kind = tab.kind === "screen" ? "browser" : tab.kind}
-			<div class="tab" class:active role="presentation" draggable="true" use:contextMenu={() => tabActions(tab.id)} ondragstart={(e) => e.dataTransfer?.setData(TYPE, tab.id)} onauxclick={(e) => e.button === 1 && lab.closePane(tab.id)}>
+			<div class="tab" class:active class:slot-before={slot === index} class:slot-after={slot === group.tabs.length && index === group.tabs.length - 1} role="presentation" draggable="true" use:contextMenu={() => tabActions(tab.id)} ondragstart={(e) => e.dataTransfer?.setData(TYPE, tab.id)} ondragend={() => ((slot = undefined), (edge = undefined))} onauxclick={(e) => e.button === 1 && lab.closePane(tab.id)}>
 				<button id={`tab-${tab.id}`} class="label" role="tab" aria-selected={active} aria-controls={`panel-${tab.id}`} tabindex={active ? 0 : -1}
-					title="Arrows switch, Delete closes, Alt+Shift+arrow moves the pane"
+					title={tab.title}
 					onclick={() => lab.focusPane(tab.id)} onkeydown={(e) => keys(e, index)}>
 					{#if place}<span class="place-dot" style:--dot={`var(${place.color})`} title={tab.kind === "screen" ? `Runs in the ${place.title} sandbox` : `From the ${place.title} sandbox`}></span>{/if}
 					<!-- The kind says what a pane is when its title doesn't (a table named "Field plots"); never twice. -->
@@ -124,6 +156,24 @@
 </section>
 
 <style>
+	/* Where a dragged tab will land in the strip. */
+	.tab.slot-before::before,
+	.tab.slot-after::after {
+		content: "";
+		position: absolute;
+		top: 6px;
+		bottom: 6px;
+		width: 2px;
+		border-radius: 1px;
+		background: var(--accent);
+		z-index: 2;
+	}
+	.tab.slot-before::before {
+		left: -1px;
+	}
+	.tab.slot-after::after {
+		right: -1px;
+	}
 	.group {
 		flex: 1;
 		display: flex;
@@ -144,6 +194,7 @@
 		border-bottom: 1px solid var(--rule);
 	}
 	.tab {
+		position: relative;
 		display: flex;
 		align-items: center;
 		gap: 6px;

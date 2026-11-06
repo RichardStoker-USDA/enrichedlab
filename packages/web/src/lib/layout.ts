@@ -102,6 +102,27 @@ export function close(root: Node, tabId: string): Node {
 }
 
 /** Move a tab next to (or into) a group. An edge splits the target group on that side. */
+/** Put a tab at a position in a group's strip: reorders it within its group, or brings it in from another. */
+export function place(root: Node, tabId: string, targetGroupId: string, index: number): Node {
+	const found = findTab(root, (t) => t.id === tabId);
+	if (!found || !groups(root).some((g) => g.id === targetGroupId)) return root;
+	const { tab, group: source } = found;
+	const same = source.id === targetGroupId;
+	// Within one strip the index counts the tab itself, so moving right lands one place earlier once it's lifted.
+	const from = source.tabs.findIndex((t) => t.id === tabId);
+	const at = same && from < index ? index - 1 : index;
+	const without = map(root, (n) =>
+		n.type === "group" && n.id === source.id ? { ...n, tabs: n.tabs.filter((t) => t.id !== tabId), active: !same && n.active === tabId ? (n.tabs.find((t) => t.id !== tabId)?.id ?? "") : n.active } : n,
+	);
+	const placed = map(without, (n) => {
+		if (n.type !== "group" || n.id !== targetGroupId) return n;
+		const tabs = [...n.tabs];
+		tabs.splice(Math.max(0, Math.min(at, tabs.length)), 0, tab);
+		return { ...n, tabs, active: tab.id };
+	});
+	return normalize(placed);
+}
+
 export function move(root: Node, tabId: string, targetGroupId: string, edge: Edge): Node {
 	const found = findTab(root, (t) => t.id === tabId);
 	if (!found) return root;

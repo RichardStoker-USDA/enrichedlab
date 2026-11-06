@@ -3,10 +3,26 @@
 import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "../packages/protocol/src/index.ts";
 import { parseDelimited, readTable, matcher, stats } from "../packages/web/src/lib/data.ts";
-import { allTabs, close, emptyLayout, groups, move, open, revive } from "../packages/web/src/lib/layout.ts";
+import { allTabs, close, emptyLayout, groups, move, open, place, revive } from "../packages/web/src/lib/layout.ts";
 import { blocks, summarize } from "../packages/web/src/lib/turns.ts";
 
 describe("workbench layout", () => {
+	test("a tab moves to a position in its own strip and into another group's", () => {
+		const tab = (id: string) => ({ id, kind: "files" as const, title: id });
+		let root = open(open(open(emptyLayout(), tab("a")), tab("b")), tab("c"));
+		const first = groups(root)[0]!.id;
+		root = place(root, "a", first, 3);
+		expect(groups(root)[0]!.tabs.map((t) => t.id)).toEqual(["b", "c", "a"]);
+		root = place(root, "a", first, 0);
+		expect(groups(root)[0]!.tabs.map((t) => t.id)).toEqual(["a", "b", "c"]);
+		root = move(root, "c", first, "right");
+		const second = groups(root)[1]!.id;
+		root = place(root, "a", second, 0);
+		expect(groups(root).map((g) => g.tabs.map((t) => t.id))).toEqual([["b"], ["a", "c"]]);
+		expect(groups(root)[1]!.active).toBe("a");
+		expect(groups(root)[0]!.active).toBe("b");
+	});
+
 	test("tabs open once, split to an edge, and empty groups fold away when closed", () => {
 		let root = open(emptyLayout(), { id: "t1", kind: "table", title: "a.csv", ref: "c1" });
 		root = open(root, { id: "t2", kind: "table", title: "a.csv", ref: "c1" });
