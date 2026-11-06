@@ -142,7 +142,7 @@ export function decide(tool: Tool, args: Record<string, unknown>, workspace: Wor
 			// Contained by the OS: writes stay in the project and temp folders, no network. Runs without asking unless it
 			// names a path outside the project or expands variables (the sandbox can still read most of the disk).
 			// Contained commands that stay inside the project run; Windows contains writes only, so it still asks.
-			if (workspace.sandboxed && FULL_CONTAINMENT.has(workspace.sandboxed) && args.unsandboxed !== true && pathsInside(command, (path) => workspace.inside(path))) return { action: "run" };
+			if (workspace.sandboxed && FULL_CONTAINMENT.has(workspace.sandboxed) && args.unsandboxed !== true && pathsInside(command, (path) => workspace.inside(path), workspace.kind === "sandbox" || process.platform !== "win32")) return { action: "run" };
 			if (isReadOnlyCommand(command, config.permissions.allowCommands, (path) => workspace.inside(path))) return { action: "run" };
 			const reads = isReadOnlyCommand(command, config.permissions.allowCommands, () => true);
 			return { action: "ask", reason: reads ? "It reads outside the project folder." : "It runs a command that can change things.", key };

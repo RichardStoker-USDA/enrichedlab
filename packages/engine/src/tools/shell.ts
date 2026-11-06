@@ -181,8 +181,9 @@ export function isReadOnlyCommand(command: string, extra: string[] = [], inside?
 }
 
 /** True when the command can be parsed and every word shaped like a path is inside the project. */
-export function pathsInside(command: string, inside: (path: string) => boolean): boolean {
-	if (process.platform === "win32") return false;
+export function pathsInside(command: string, inside: (path: string) => boolean, posix = process.platform !== "win32"): boolean {
+	// Only POSIX shell words are read; a Windows shell's command asks.
+	if (!posix) return false;
 	const tokens = tokenize(command.trim());
 	if (!tokens) return false;
 	return tokens.every((t) => {
