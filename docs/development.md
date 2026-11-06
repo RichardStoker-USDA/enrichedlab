@@ -76,6 +76,26 @@ GitHub release that `el update` and `install.sh` read. `--security` marks a rele
 version is `VERSION` in `packages/engine/src/util.ts` and the `version` in each `package.json`; the release notes are
 `NEWS` beside it.
 
+### Signing for Windows
+
+Windows signing uses Azure Artifact Signing through jsign, so it runs from the same Mac (`scripts/windows_signing.cjs`).
+It signs the app, the installer, the uninstaller and every `el.exe`, each with an RFC 3161 timestamp. Until it is set
+up, the Windows files ship unsigned and SmartScreen warns on first run. One-time setup:
+
+1. In the Azure portal, create an Artifact Signing account, finish its identity validation, and create a public-trust
+   certificate profile.
+2. Give the Azure identity that releases the Certificate Profile Signer role on that account.
+3. On the release Mac: `brew install jsign azure-cli`, then `az login` as that identity.
+
+Then release with the account's endpoint, name and profile set:
+
+```sh
+EL_WINDOWS_SIGNING_ENDPOINT=<region>.codesigning.azure.net EL_WINDOWS_SIGNING_ACCOUNT=<account> \
+EL_WINDOWS_SIGNING_PROFILE=<profile> NOTARY_PROFILE=<notarytool profile> bun scripts/release.ts --publish
+```
+
+The access token comes from `az` at the moment of signing and reaches jsign through its environment only.
+
 ## Upgrading dependencies
 
 Versions are pinned exactly in each `package.json`. To move one:

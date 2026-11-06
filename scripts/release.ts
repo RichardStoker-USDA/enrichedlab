@@ -5,7 +5,9 @@
 //
 // macOS: EnrichedLab-mac.pkg, a universal app that installs into ~/Applications with no administrator, signed with
 //   the Developer ID identities in this Mac's keychain and notarized when NOTARY_PROFILE names a notarytool profile.
-// Windows: EnrichedLab-Setup-x64.exe, a per-user installer (%LOCALAPPDATA%\Programs, no administrator).
+// Windows: EnrichedLab-Setup-x64.exe, a per-user installer (%LOCALAPPDATA%\Programs, no administrator). Signed with
+//   Azure Artifact Signing when EL_WINDOWS_SIGNING_* are set (scripts/windows_signing.cjs): the app, installer,
+//   uninstaller and every el.exe. Unset, Windows shows its unknown-publisher warning.
 // Linux: EnrichedLab-linux-<arch>.AppImage. Every platform: el-<os>-<arch> and install.sh for the terminal.
 //
 // The manifest is signed with the release key (RELEASE_KEY, default ~/.secrets/enriched/release_signing.jwk), read
@@ -17,6 +19,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { $ } from "bun";
 import { NEWS, VERSION } from "../packages/engine/src/util.ts";
+import windowsSigning from "./windows_signing.cjs";
 
 const root = join(import.meta.dir, "..");
 const desktop = join(root, "apps", "desktop");
@@ -36,6 +39,12 @@ mkdirSync(release, { recursive: true });
 console.log("Binaries");
 await $`bun ${join(root, "scripts", "build.ts")} --all`.cwd(root);
 for (const name of readdirSync(join(root, "dist", "bin"))) if (name.startsWith("el-")) copyFileSync(join(root, "dist", "bin", name), join(release, name));
+const signWindows = windowsSigning.enabled();
+if (signWindows) {
+	console.log("Windows binaries (Azure Artifact Signing)");
+	for (const name of readdirSync(release)) if (/^el-windows-.*\.exe$/.test(name)) windowsSigning.signFile(join(release, name));
+	for (const dir of ["win-x64", "win-arm64"]) if (existsSync(join(root, "dist", "stage", dir, "el.exe"))) windowsSigning.signFile(join(root, "dist", "stage", dir, "el.exe"));
+} else console.warn("EL_WINDOWS_SIGNING_* aren't set: Windows files are unsigned, so SmartScreen warns on first run.");
 copyFileSync(join(root, "scripts", "install.sh"), join(release, "install.sh"));
 copyFileSync(join(root, "dist", "sbom.cdx.json"), join(release, "sbom.cdx.json"));
 
@@ -116,7 +125,7 @@ if (notary) {
 rmSync(stage, { recursive: true, force: true });
 
 console.log("Windows setup (per user)");
-await builder(["--win", "--x64", "--publish", "never"]);
+await builder(["--win", "--x64", "--publish", "never", ...(signWindows ? [`-c.win.signtoolOptions.sign=${join(root, "scripts", "windows_signing.cjs")}`, "-c.win.signtoolOptions.signingHashAlgorithms=sha256"] : [])]);
 console.log("Linux AppImages");
 await builder(["--linux", "AppImage", "--x64", "--publish", "never"]);
 await builder(["--linux", "AppImage", "--arm64", "--publish", "never"]);
