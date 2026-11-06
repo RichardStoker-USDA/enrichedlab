@@ -4,7 +4,7 @@
 	// in the bar say whose sandbox it runs in.
 	import type { BrowserFrame, BrowserInput } from "@enrichedlab/protocol";
 	import { normalize } from "../../lib/address.ts";
-	import { placeOf } from "../../lib/places.ts";
+	import { mac, placeOf } from "../../lib/places.ts";
 	import { lab } from "../../lib/store.svelte.ts";
 
 	let { site, active }: { site: string; active: boolean } = $props();
@@ -129,16 +129,18 @@
 		const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 600 : 1;
 		send({ kind: "wheel", x: at.x, y: at.y, deltaX: e.deltaX * unit, deltaY: e.deltaY * unit });
 	}
-	// Escape twice leaves the page, so the keyboard can always get back to the rest of the window.
-	let escaped = 0;
+	let addressField: HTMLInputElement | undefined = $state();
+	/** Hand the keyboard back to the window: to the address bar, as F6 and Cmd/Ctrl+L do in a browser. */
+	function release() {
+		addressField?.focus();
+		addressField?.select();
+	}
 	function key(e: KeyboardEvent, type: "keyDown" | "keyUp") {
-		if (type === "keyDown" && e.key === "Escape") {
-			if (Date.now() - escaped < 600) {
-				e.preventDefault();
-				canvas?.blur();
-				return;
-			}
-			escaped = Date.now();
+		// F6 and Cmd/Ctrl+L always leave the page; every other key, Escape included, goes to it.
+		if (e.key === "F6" || ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "l")) {
+			e.preventDefault();
+			if (type === "keyDown") release();
+			return;
 		}
 		// Paste goes through the paste event, with the text.
 		if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "v") return;
@@ -173,7 +175,7 @@
 		<button type="button" class="icon-btn" onclick={() => void lab.screenNavigate(site, { step: "reload" })} disabled={!page} aria-label="Reload">
 			<svg viewBox="0 0 16 16"><path d="M12.5 8a4.5 4.5 0 1 1-1.3-3.2M12.5 3v2.5H10" /></svg>
 		</button>
-		<input class="field address" bind:value={address} onfocus={() => (editing = true)} onblur={() => (editing = false)} placeholder="Address, or a page served in the sandbox such as localhost:8000" aria-label="Address" spellcheck="false" />
+		<input class="field address" bind:this={addressField} bind:value={address} onfocus={() => (editing = true)} onblur={() => (editing = false)} placeholder="Address, or a page served in the sandbox such as localhost:8000" aria-label="Address" spellcheck="false" />
 	</form>
 	{#if reach}<p class="reach">{reach}</p>{/if}
 	<div class="stage" bind:this={stage} class:loading={page?.loading}>
@@ -181,7 +183,7 @@
 			bind:this={canvas}
 			class:hidden={!drawn}
 			tabindex="0"
-			aria-label={`${page?.title || "Page"} in the ${place.title} sandbox browser. Clicks and typing go to the page; press Escape twice to leave it.`}
+			aria-label={`${page?.title || "Page"} in the ${place.title} sandbox browser. Clicks and typing go to the page; press F6 to leave it.`}
 			onpointerdown={(e) => mouse(e, "mousePressed")}
 			onpointerup={(e) => mouse(e, "mouseReleased")}
 			onpointermove={(e) => mouse(e, "mouseMoved")}
@@ -199,7 +201,14 @@
 			</div>
 		{/if}
 	</div>
-	{#if focused}<p class="hint">Typing goes to the page · Esc twice to leave it</p>{/if}
+	{#if lab.lost && drawn}
+		<p class="hint lost" role="status">Not connected to the engine: this is the last picture of the page.</p>
+	{:else if focused}
+		<p class="hint">
+			<span>Typing goes to the page · <kbd>F6</kbd> or <kbd>{mac ? "⌘L" : "Ctrl+L"}</kbd> to leave it</span>
+			<button type="button" class="btn" onmousedown={(e) => e.preventDefault()} onclick={release}>Release Keyboard</button>
+		</p>
+	{/if}
 </div>
 
 <style>
@@ -244,7 +253,24 @@
 		border-bottom: 1px solid var(--rule);
 	}
 	.hint {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
 		border-top: 1px solid var(--rule);
+		color: var(--text-muted);
+	}
+	.hint .btn {
+		height: 24px;
+		padding: 0 10px;
+		font-size: 12px;
+	}
+	.hint.lost {
+		color: var(--text);
+		font-weight: 500;
+	}
+	.hint kbd {
+		font: 11px var(--font-mono);
 	}
 	.stage {
 		position: relative;
