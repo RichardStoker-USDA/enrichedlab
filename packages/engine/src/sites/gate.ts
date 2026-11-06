@@ -976,7 +976,8 @@ export class GateSite implements SiteAdapter, SandboxApi {
 						const ran = long.status === 200 && long.body.stdout?.trim() === String(filler.length);
 						add("long command", ran || long.status === 413 ? "pass" : "fail", ran ? "a 64 KB command ran" : long.status === 413 ? "413: the lab says it's too long" : `answered ${long.status}: ${String(long.body.stdout ?? "").slice(0, 120)}`);
 					});
-					await attempt("background job", async () => {
+					if (d?.sandbox_jobs === false) add("background job", "skip", "not offered (the descriptor says sandbox_jobs: false)");
+					else await attempt("background job", async () => {
 						const job = await this.json<{ id: string }>("POST", `/v1/containers/${made.id}/jobs`, { json: { command: "echo el-job-ok" }, signal: t() });
 						let state: { status?: string; exit_code?: number | null; log?: string } = {};
 						for (const until = Date.now() + 30_000; Date.now() < until; await sleep(1_000)) {
@@ -1500,7 +1501,7 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		const run: Tool = {
 			name: `${site}_sandbox_run`,
 			kind: "sandbox",
-			description: `Run a shell command in your ${site} sandbox: an isolated Linux machine with no network, which keeps its files while this engine runs. Files copied in with ${site}_sandbox_upload are there. Returns output and exit code. For anything over a few minutes use ${site}_sandbox_job_start.`,
+			description: `Run a shell command in your ${site} sandbox: an isolated Linux machine with no network, which keeps its files between sessions. Files copied in with ${site}_sandbox_upload are there. Returns output and exit code.${this.jobsOffered() ? ` For anything over a few minutes use ${site}_sandbox_job_start.` : ""}`,
 			parameters: {
 				type: "object",
 				properties: { command: { type: "string" }, timeout: { type: "integer", description: "Seconds, default 120." } },
@@ -1673,7 +1674,8 @@ export class GateSite implements SiteAdapter, SandboxApi {
 				return { ok: true, content: `Open ${opened.url} in a browser on this computer. The address works only here, while this engine runs.`, view: { result: opened.origin } };
 			},
 		};
-		return [run, jobStart, jobStatus, jobCancel, upload, download, repoSend, repoFetch, ...(this.offers("ports") ? [openPortTool] : [])];
+		// A lab that doesn't run background jobs doesn't get offered job tools (a model calls what it's offered).
+		return [run, ...(this.jobsOffered() ? [jobStart, jobStatus, jobCancel] : []), upload, download, repoSend, repoFetch, ...(this.offers("ports") ? [openPortTool] : [])];
 	}
 
 	/** Stop using this connection but keep the sandbox: a reconnect (refresh, sign-in, route change) hands it on. */
@@ -1735,6 +1737,11 @@ export class GateSite implements SiteAdapter, SandboxApi {
 		const url = `${this.route.base}${path}${new URL(found.webSocketDebuggerUrl).pathname}`;
 		await this.freshNonce();
 		return Cdp.open(url.replace(/^http/, "ws"), await this.authHeaders("GET", url), this.route.ca);
+	}
+
+	/** Background jobs, unless the lab's descriptor says it doesn't run them (sandbox_jobs: false). */
+	private jobsOffered(): boolean {
+		return this.descriptor?.sandbox_jobs !== false;
 	}
 
 	/**

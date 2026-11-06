@@ -82,6 +82,10 @@ export interface LabDescriptor {
 	sandbox_images?: { name: string; title?: string; description?: string; browser?: BrowserInfo }[];
 	/** Networks a sandbox can be made on (POST /v1/containers {network}): always none, and internet where offered. */
 	sandbox_networks?: { name: string; title?: string; description?: string }[];
+	/** Whether the sandbox runs background jobs (/v1/containers/{id}/jobs); absent means it does. */
+	sandbox_jobs?: boolean;
+	/** What one exec takes: the longest single argument (a `command` is one), and how much stdin. */
+	sandbox_exec?: { max_argument_bytes?: number; max_stdin_bytes?: number };
 	conformance?: { foreign_scope?: string; scan_test?: boolean; data_tool?: { name: string; arguments?: Record<string, unknown> } };
 }
 
