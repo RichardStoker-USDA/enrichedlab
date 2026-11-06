@@ -3,15 +3,17 @@
 // locally: bun scripts/desktop_smoke.ts <out folder>.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { EngineClient, findEngine } from "../packages/engine/src/index.ts";
 
 const root = join(import.meta.dir, "..");
-const out = process.argv[2] ?? join(root, "dist", "smoke");
+// Absolute, because the app runs from apps/desktop and writes its screenshots where this says.
+const out = resolve(process.argv[2] ?? join(root, "dist", "smoke"));
 mkdirSync(out, { recursive: true });
 const home = mkdtempSync(join(tmpdir(), "el-smoke-"));
 const project = mkdtempSync(join(tmpdir(), "el-smoke-project-"));
 const env = { ...process.env, EL_HOME: home };
+let app: ReturnType<typeof Bun.spawn> | undefined;
 const engine = Bun.spawn(["bun", join(root, "packages/cli/src/main.ts"), "serve", "--foreground"], { env, stdout: "ignore", stderr: "inherit" });
 try {
 	process.env.EL_HOME = home;
@@ -41,7 +43,7 @@ try {
 	})()`;
 	const electron = join(root, "apps/desktop/node_modules/.bin", process.platform === "win32" ? "electron.cmd" : "electron");
 	const shot = join(out, `window-${process.platform}.png`);
-	const app = Bun.spawn([electron, ".", `--user-data-dir=${join(home, "electron")}`, "--use-mock-keychain", "--session", session.id], {
+	app = Bun.spawn([electron, ".", `--user-data-dir=${join(home, "electron")}`, "--use-mock-keychain", "--session", session.id], {
 		cwd: join(root, "apps/desktop"),
 		env: { ...env, EL_SHOT: shot, EL_SHOT_DELAY: "4000", EL_SHOT_AFTER: "7000", EL_SHOT_JS: scene, EL_SHOT_TYPE: "https://example.com/" },
 		stdout: "inherit",
@@ -58,8 +60,15 @@ try {
 	if (!/example\.com/.test(page.url) || !/Example Domain/.test(page.title)) throw new Error(`The browser pane didn't load the page (it shows ${page.url}).`);
 	console.log("desktop smoke: window and browser pane OK");
 } finally {
+	app?.kill();
 	engine.kill();
 	await engine.exited;
-	rmSync(home, { recursive: true, force: true });
-	rmSync(project, { recursive: true, force: true });
+	// Windows keeps the app's files locked for a moment after it exits; a cleanup failure never hides the result.
+	for (const dir of [home, project]) {
+		try {
+			rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+		} catch (error) {
+			console.warn(`couldn't remove ${dir}: ${(error as Error).message}`);
+		}
+	}
 }

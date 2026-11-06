@@ -19,7 +19,7 @@ import { EngineClient, ensureEngine, NEWS, VERSION } from "@enrichedlab/engine";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { type Appearance, type Theme, theme as makeTheme } from "./theme.ts";
-import { answerView, Lines, LiveView, noticeView, permissionView, promptView, ruleView, statusLine, toolView, welcomeView } from "./views.ts";
+import { answerView, Lines, LiveView, modelView, noticeView, permissionView, promptView, ruleView, statusLine, toolView, welcomeView } from "./views.ts";
 
 export interface TuiOptions {
 	cwd: string;
@@ -96,12 +96,13 @@ export async function runTui(options: TuiOptions): Promise<void> {
 
 	const header = new Lines(
 		(width) => {
-			const left = `${t.prompt("EnrichedLab")}  ${t.muted(summary?.title && summary.title !== "New session" ? summary.title : "new session")}`;
+			const left = `${t.prompt("EnrichedLab")} ${t.faint(VERSION)}  ${t.muted(summary?.title && summary.title !== "New session" ? summary.title : "new session")}`;
 			const path = shortPath(options.cwd);
 			const room = Math.max(12, width - visibleWidth(left) - 6);
 			const right = t.faint(path.length > room ? `…${path.slice(path.length - room + 1)}` : path);
-			const gap = Math.max(2, width - visibleWidth(left) - visibleWidth(right) - 2);
-			return ["", ` ${left}${" ".repeat(gap)}${right}`];
+			// Two columns in, like everything below it, and the version beside the name.
+			const gap = Math.max(2, width - visibleWidth(left) - visibleWidth(right) - 3);
+			return ["", `  ${left}${" ".repeat(gap)}${right}`];
 		},
 		() => `${summary?.title}|${appearance}`,
 	);
@@ -140,7 +141,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
 			case "undo":
 				return ruleView(t, `undone: ${event.files.join(", ")}`);
 			case "model":
-				return new Lines(() => [`  ${t.faint(`model ${event.model}${event.effort ? ` · ${event.effort}` : ""}`)}`]);
+				return modelView(t, event.model, event.effort);
 			default:
 				return undefined;
 		}

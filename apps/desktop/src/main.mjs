@@ -199,6 +199,7 @@ async function open(argv) {
 	});
 	await window.loadURL(url);
 	if (process.env.EL_SHOT) {
+		console.log(`shot: window loaded ${new URL(url).pathname}`);
 		await new Promise((r) => setTimeout(r, Number(process.env.EL_SHOT_DELAY) || 2500));
 		// A screenshot run can set the scene first (open a sheet, the palette, a pane).
 		if (process.env.EL_SHOT_JS) {
@@ -216,6 +217,7 @@ async function open(argv) {
 		const image = await window.webContents.capturePage();
 		const { writeFileSync } = await import("node:fs");
 		writeFileSync(process.env.EL_SHOT, image.toPNG());
+		console.log(`shot: window captured, ${views.size} browser ${views.size === 1 ? "view" : "views"}`);
 		// Browser panes are native views over the page: each is captured on its own, with what it shows.
 		let n = 0;
 		for (const view of views.values()) {
@@ -591,6 +593,11 @@ else {
 	});
 	app.whenReady().then(() => appMenu());
 	app.whenReady().then(() => permissions()).then(() => open(process.argv).catch((error) => {
+		// A screenshot run has no one to close an error box: it says why on stderr and exits.
+		if (process.env.EL_SHOT) {
+			console.error(`shot: failed: ${error.stack ?? error.message}`);
+			return app.exit(1);
+		}
 		dialog.showErrorBox("EnrichedLab", error.message);
 		app.quit();
 	}));

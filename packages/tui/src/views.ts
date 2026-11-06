@@ -134,17 +134,32 @@ export function welcomeView(t: Theme, info: { version: string; place: string; la
 	const tip = TIPS[Math.floor(Date.now() / 86_400_000) % TIPS.length]!;
 	const row = (label: string, text: string) => `${INDENT}${t.muted(label.padEnd(9))}${text}`;
 	return new Lines((width) => {
-		const fit = (text: string) => truncateToWidth(text, Math.max(20, width - INDENT.length - 9));
+		const room = Math.max(20, width - INDENT.length - 9);
+		// Long text breaks between words; past `max` lines the last one ends with an ellipsis instead of mid-word.
+		const clip = (text: string, max: number, style: (s: string) => string = (s) => s) => {
+			const lines = wrapTextWithAnsi(text, room);
+			const kept = lines.slice(0, max);
+			if (lines.length > max) kept[max - 1] = `${kept[max - 1]!.replace(/\s+\S*$/, "")}…`;
+			return kept.map(style);
+		};
+		const labelled = (label: string, lines: string[]) => lines.map((line, i) => `${INDENT}${t.muted((i ? "" : label).padEnd(9))}${line}`);
+		const latest = info.news[0];
+		// The name and version sit in the header above; the news line says which version is new.
 		return [
-			"",
-			`${INDENT}${t.prompt("EnrichedLab")}  ${t.muted(info.version)}`,
 			"",
 			row("Runs on", info.place),
 			...(info.labs.length ? [row("Labs", info.labs.join(t.muted("  ·  ")))] : []),
-			...info.news.slice(0, 2).map((line, i) => row(i ? "" : "New", fit(line))),
-			row("Tip", t.muted(fit(tip))),
+			...(latest ? labelled("New", clip(latest, 2)) : [row("Version", info.version)]),
+			...labelled("Tip", clip(tip, 2, t.muted)),
 		];
 	});
+}
+
+/** The session's model: a row in the opening lines, and a line of its own when it changes later. */
+export function modelView(t: Theme, model: string, effort?: string): Component {
+	const [provider, ...rest] = model.split("/");
+	const name = rest.length ? rest.join("/") : model;
+	return new Lines(() => [`${INDENT}${t.muted("Model".padEnd(9))}${t.text(name)}${t.muted(`${rest.length ? `  ${provider}` : ""}${effort ? ` · ${effort}` : ""}`)}`]);
 }
 
 export function ruleView(t: Theme, label: string): Component {
