@@ -214,8 +214,30 @@ async function open(argv) {
 
 // ── Menus: the menu bar, right-click on text and links, and the page's own context menus ─────────────────────────
 // Commands the page carries out go to it by id; the page owns what each one does.
-const send = (command) => window?.webContents.send("command", command);
-const item = (label, command, accelerator) => ({ label, accelerator, click: () => send(command) });
+// The page reports what applies now (a session open, a turn running, the sidebar shown), so items read and enable
+// as they would in a native app.
+let menuState = { session: false, busy: false, sidebar: true, workbench: false, undoable: false };
+
+/** Send a command to the main window, opening it again first if it was closed. */
+async function send(command) {
+	if (!window || window.isDestroyed()) {
+		await open([]);
+		await new Promise((r) => setTimeout(r, 600));
+	}
+	window.show();
+	window.webContents.send("command", command);
+}
+
+/** A menu item: in a view window, Close closes that window and the rest act on the main one. */
+const item = (label, command, accelerator, enabled = true) => ({
+	label,
+	accelerator,
+	enabled,
+	click: (_item, focused) => {
+		if (command === "close-pane" && focused && focused !== window) return focused.close();
+		void send(command);
+	},
+});
 
 function appMenu() {
 	const mac = process.platform === "darwin";
@@ -244,7 +266,7 @@ function appMenu() {
 			label: "File",
 			submenu: [
 				item("New Session", "new-session", "CmdOrCtrl+N"),
-				item("New Terminal", "new-terminal", "Ctrl+`"),
+				item("New Terminal", "new-terminal", "Ctrl+`", menuState.session),
 				{ type: "separator" },
 				item("Add a Lab…", "add-lab"),
 				item("Model Services…", "services"),
@@ -259,8 +281,8 @@ function appMenu() {
 			submenu: [
 				item("Search and Commands…", "palette", "CmdOrCtrl+K"),
 				{ type: "separator" },
-				item("Toggle Sidebar", "toggle-sidebar", mac ? "Ctrl+Cmd+S" : "Ctrl+Shift+S"),
-				item("Toggle Workbench", "toggle-workbench", "CmdOrCtrl+\\"),
+				item(menuState.sidebar ? "Hide Sidebar" : "Show Sidebar", "toggle-sidebar", mac ? "Ctrl+Cmd+S" : "Ctrl+Shift+S"),
+				item(menuState.workbench ? "Hide Workbench" : "Show Workbench", "toggle-workbench", "CmdOrCtrl+\\", menuState.session),
 				{ type: "separator" },
 				{
 					label: "Appearance",
@@ -283,12 +305,12 @@ function appMenu() {
 		{
 			label: "Session",
 			submenu: [
-				item("Rename…", "rename"),
-				item("Stop", "stop", "CmdOrCtrl+."),
-				item("Summarize Older Turns", "compact"),
-				item("Undo File Changes", "undo-files"),
+				item("Rename…", "rename", undefined, menuState.session),
+				item("Stop", "stop", "CmdOrCtrl+.", menuState.busy),
+				item("Summarize Older Turns", "compact", undefined, menuState.session && !menuState.busy),
+				item("Undo File Changes", "undo-files", undefined, menuState.undoable && !menuState.busy),
 				{ type: "separator" },
-				item("Show in Finder", "reveal"),
+				item(mac ? "Show Project in Finder" : "Show Project Folder", "reveal", undefined, menuState.session),
 			],
 		},
 		{ role: "windowMenu" },
@@ -302,6 +324,14 @@ function appMenu() {
 	];
 	Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
+
+ipcMain.on("menu:state", (event, state) => {
+	if (event.sender !== window?.webContents || typeof state !== "object" || !state) return;
+	const next = { session: Boolean(state.session), busy: Boolean(state.busy), sidebar: state.sidebar !== false, workbench: Boolean(state.workbench), undoable: Boolean(state.undoable) };
+	if (JSON.stringify(next) === JSON.stringify(menuState)) return;
+	menuState = next;
+	appMenu();
+});
 
 let currentTheme = "auto";
 // The page's appearance choice drives the window material too, so a light page never sits on dark glass.
@@ -336,27 +366,29 @@ function textMenu(params) {
 }
 
 /** The page's own context menu (a session, a place, a tab, a file), shown natively. Resolves with the chosen id. */
-ipcMain.handle("menu:popup", (event, entries) => {
+ipcMain.handle("menu:popup", (event, entries, at) => {
 	if (event.sender !== window?.webContents || !Array.isArray(entries)) return undefined;
+	let budget = 400;
 	return new Promise((resolve) => {
 		let chosen;
-		const build = (list) =>
-			list.slice(0, 40).map((e) =>
-				e?.separator
-					? { type: "separator" }
-					: {
-							label: String(e?.label ?? ""),
-							enabled: !e?.disabled,
-							type: e?.checked === undefined ? "normal" : "checkbox",
-							checked: Boolean(e?.checked),
-							...(Array.isArray(e?.submenu) ? { submenu: build(e.submenu) } : { click: () => (chosen = String(e?.id ?? "")) }),
-						},
-			);
-		Menu.buildFromTemplate(build(entries)).popup({ window, callback: () => resolve(chosen) });
+		const build = (list, depth) =>
+			list.slice(0, budget).flatMap((e) => {
+				if (budget-- <= 0 || typeof e !== "object" || !e) return [];
+				if (e.separator) return [{ type: "separator" }];
+				const label = String(e.label ?? "").slice(0, 200);
+				const base = { label, enabled: !e.disabled };
+				if (Array.isArray(e.submenu) && depth < 3) return [{ ...base, submenu: build(e.submenu, depth + 1) }];
+				const type = e.checked === undefined ? "normal" : e.radio ? "radio" : "checkbox";
+				return [{ ...base, type, checked: Boolean(e.checked), click: () => (chosen = String(e.id ?? "").slice(0, 64)) }];
+			});
+		const options = { window, callback: () => resolve(chosen) };
+		const x = Number(at?.x);
+		const y = Number(at?.y);
+		if (Number.isFinite(x) && Number.isFinite(y) && x >= 0 && y >= 0 && x < 20000 && y < 20000) Object.assign(options, { x: Math.round(x), y: Math.round(y) });
+		Menu.buildFromTemplate(build(entries, 0)).popup(options);
 	});
 });
 
-// ⌘W closes the open pane first; with none open the page asks for the window to close, as Mac apps do.
 ipcMain.on("window:close", (event) => {
 	if (event.sender === window?.webContents) window.close();
 });
@@ -504,7 +536,8 @@ ipcMain.on("browser:close", (event, id) => {
 	views.delete(String(id));
 });
 
-ipcMain.handle("pick-folder", async () => {
+ipcMain.handle("pick-folder", async (event) => {
+	if (event.sender !== window?.webContents) return undefined;
 	const result = await dialog.showOpenDialog(window, { properties: ["openDirectory", "createDirectory"] });
 	return result.canceled ? undefined : result.filePaths[0];
 });

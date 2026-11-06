@@ -7,6 +7,8 @@ export interface MenuEntry {
 	label?: string;
 	disabled?: boolean;
 	checked?: boolean;
+	/** One choice of several (a place, a level): drawn as a radio item. */
+	radio?: true;
 	separator?: true;
 	submenu?: MenuEntry[];
 }
@@ -29,7 +31,7 @@ interface Pending {
 export const pageMenu = $state<{ current?: Pending }>({});
 
 function strip(entries: MenuAction[], prefix = ""): MenuEntry[] {
-	return entries.map((e, i) => (e.separator ? { separator: true } : { id: `${prefix}${i}`, label: e.label, disabled: e.disabled, checked: e.checked, submenu: e.submenu ? strip(e.submenu, `${prefix}${i}.`) : undefined }));
+	return entries.map((e, i) => (e.separator ? { separator: true } : { id: `${prefix}${i}`, label: e.label, disabled: e.disabled, checked: e.checked, radio: e.radio, submenu: e.submenu ? strip(e.submenu, `${prefix}${i}.`) : undefined }));
 }
 
 function find(entries: MenuAction[], id: string): MenuAction | undefined {
@@ -55,7 +57,7 @@ export async function showMenu(entries: MenuAction[], at: MouseEvent | HTMLEleme
 		y = box.bottom + 4;
 	}
 	const native = typeof window !== "undefined" ? window.labDesktop?.menu : undefined;
-	const id = native ? await native(strip(list)) : await new Promise<string | undefined>((resolve) => (pageMenu.current = { entries: list, x, y, resolve }));
+	const id = native ? await native(strip(list), { x, y }) : await new Promise<string | undefined>((resolve) => (pageMenu.current = { entries: list, x, y, resolve }));
 	if (id === undefined || id === "") return;
 	await find(list, id)?.run?.();
 }

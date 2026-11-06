@@ -221,5 +221,9 @@
 			width: 100vw;
 			border-left: 0;
 		}
+		/* Full width, its bar is the window's title bar: room for the traffic lights. */
+		:global(.shell.mac.desktop) .bar {
+			padding-left: var(--traffic-inset, 84px);
+		}
 	}
 </style>

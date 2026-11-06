@@ -90,7 +90,7 @@
 	}
 </script>
 
-<section class="group">
+<section class="group" onpointerdowncapture={() => (lab.lastGroup = group.id)} onfocusin={() => (lab.lastGroup = group.id)}>
 	<div class="tabs" bind:this={strip} role="tablist" aria-label="Open panes" tabindex="-1" ondragover={(e) => e.dataTransfer?.types.includes(TYPE) && e.preventDefault()} ondrop={(e) => drop(e, "center")}>
 		{#each group.tabs as tab, index (tab.id)}
 			{@const place = placeFor(tab.ref, tab.kind)}

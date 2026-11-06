@@ -48,7 +48,7 @@
 
 	function folderMenu(): MenuAction[] {
 		return [
-			...recent.map((path) => ({ label: folderName(path), checked: folder === path, run: () => ((folder = path), (typingPath = false)) })),
+			...recent.map((path) => ({ label: folderName(path), checked: folder === path, radio: true as const, run: () => ((folder = path), (typingPath = false)) })),
 			separator,
 			...(window.labDesktop ? [{ label: "Choose Folder…", run: pickFolder }] : []),
 			{ label: "Type a Path…", run: () => (typingPath = true) },
@@ -60,11 +60,11 @@
 		const sections: [string, typeof lab.models][] = [];
 		for (const provider of new Set(offered.filter((m) => m.source === "site").map((m) => m.provider))) sections.push([`From ${labTitle(provider)}`, offered.filter((m) => m.source === "site" && m.provider === provider)]);
 		sections.push(["Your plans and keys", offered.filter((m) => m.source === "config")], ["On this computer", offered.filter((m) => m.source === "local")]);
-		const entries: MenuAction[] = [{ label: fallback ? `Default (${named(fallback)})` : "Default model", checked: !model, run: () => (model = undefined) }];
+		const entries: MenuAction[] = [{ label: fallback ? `Default (${named(fallback)})` : "Default model", checked: !model, radio: true as const, run: () => (model = undefined) }];
 		for (const [label, models] of sections) {
 			if (!models.length) continue;
 			entries.push(separator, { label, disabled: true });
-			for (const m of models) entries.push({ label: `${named(m)}  ·  ${tokens(m.context)}`, checked: model === m.ref, run: () => (model = m.ref) });
+			for (const m of models) entries.push({ label: `${named(m)}  ·  ${tokens(m.context)}`, checked: model === m.ref, radio: true as const, run: () => (model = m.ref) });
 		}
 		entries.push(separator, { label: "Model Services…", run: () => (lab.services = true) });
 		return entries;
@@ -384,6 +384,9 @@
 	@media (max-width: 860px) {
 		.menu-toggle {
 			display: inline-grid;
+		}
+		:global(.shell.mac.desktop) .head {
+			padding-left: var(--traffic-inset, 84px);
 		}
 		.start {
 			padding: 6vh 16px 32px;

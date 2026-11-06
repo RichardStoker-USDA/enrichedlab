@@ -277,8 +277,9 @@
 		padding: 10px 0;
 		border-top: 1px solid var(--rule);
 	}
-	.models li.dim .what {
-		opacity: 0.55;
+	/* Too large for this computer: the name steps back, the reason stays readable. */
+	.models li.dim .name {
+		color: var(--text-muted);
 	}
 	.what {
 		flex: 1;
@@ -314,7 +315,7 @@
 		min-height: 32px;
 		min-width: 64px;
 		padding: 0 14px;
-		border: 1px solid var(--rule-strong);
+		border: 1px solid var(--edge);
 		border-radius: 8px;
 		font-size: 13px;
 		font-weight: 500;
@@ -366,7 +367,7 @@
 		font: 13px var(--font-mono);
 		color: var(--text);
 		padding: 7px 10px;
-		border: 1px solid var(--rule-strong);
+		border: 1px solid var(--edge);
 		border-radius: 8px;
 		background: var(--canvas);
 	}

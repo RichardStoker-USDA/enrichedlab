@@ -15,11 +15,13 @@ interface Window {
 		pickFolder(): Promise<string | undefined>;
 		platform: string;
 		/** A native context menu; resolves with the chosen entry's id. */
-		menu?(entries: import("./lib/menu.svelte.ts").MenuEntry[]): Promise<string | undefined>;
+		menu?(entries: import("./lib/menu.svelte.ts").MenuEntry[], at?: { x: number; y: number }): Promise<string | undefined>;
 		/** Show a file or folder in Finder or Explorer. */
 		reveal?(path: string): Promise<boolean>;
 		/** The appearance choice, so the window material matches the page. */
 		setTheme?(theme: "auto" | "light" | "dark"): void;
+		/** What applies now, so the menu bar's items read and enable to match. */
+		menuState?(state: { session: boolean; busy: boolean; sidebar: boolean; workbench: boolean; undoable: boolean }): void;
 		/** Close the window (⌘W with no pane open). */
 		closeWindow?(): void;
 		/** Full screen on or off: the traffic lights hide in full screen. */

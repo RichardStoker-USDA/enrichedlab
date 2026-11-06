@@ -276,7 +276,7 @@
 		align-items: center;
 		min-height: 32px;
 		padding: 0 12px;
-		border: 1px solid var(--rule-strong);
+		border: 1px solid var(--edge);
 		border-radius: 8px;
 		font-size: 13px;
 		cursor: pointer;
@@ -305,7 +305,7 @@
 		font: 13px var(--font-mono);
 		color: var(--text);
 		padding: 8px 10px;
-		border: 1px solid var(--rule-strong);
+		border: 1px solid var(--edge);
 		border-radius: 8px;
 		background: var(--canvas);
 	}

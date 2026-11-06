@@ -61,20 +61,6 @@
 		void toBottom();
 	});
 
-	const editingTitle = $derived(Boolean(lab.current) && lab.renaming === lab.current);
-	let titleDraft = $state("");
-	function startRename() {
-		titleDraft = lab.summary?.title ?? "";
-		lab.renaming = lab.current;
-	}
-	$effect(() => {
-		if (editingTitle) titleDraft = lab.summary?.title ?? "";
-	});
-	async function finishRename(keep = true) {
-		if (!editingTitle) return;
-		lab.renaming = undefined;
-		if (keep && titleDraft.trim() && titleDraft !== lab.summary?.title) await lab.rename(titleDraft);
-	}
 	const desktop = typeof window !== "undefined" && Boolean(window.labDesktop);
 	/** Right-click on a message: copy it whole. With text selected, the system's own menu (Copy, Look Up) shows. */
 	function messageActions(text: string, what: string): MenuAction[] {
@@ -85,7 +71,7 @@
 		const s = lab.summary;
 		if (!s) return [];
 		return [
-			{ label: "Rename", run: startRename },
+			{ label: "Rename…", run: () => lab.startRename() },
 			{ label: lab.workbench ? "Hide Workbench" : "Show Workbench", run: () => lab.toggleWorkbench() },
 			{ label: "Open Terminal", run: () => lab.openPane("terminal") },
 			separator,
@@ -106,7 +92,7 @@
 	let thinkingOpen = $state<Record<string, boolean>>({});
 </script>
 
-<header class="head toolbar" style:--marker={`var(${lab.place.color})`} class:moving={lab.moving} class:inset={!lab.sidebar}>
+<header class="head toolbar" style:--marker={`var(${lab.place.color})`} class:moving={lab.moving} class:inset={!lab.sidebar} use:contextMenu={sessionMenu}>
 	<button class="icon-btn menu-toggle" onclick={onMenu} aria-label="Show places and sessions">
 		<svg viewBox="0 0 16 16"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" /></svg>
 	</button>
@@ -116,12 +102,8 @@
 		</button>
 	{/if}
 	<div class="heading">
-		{#if editingTitle}
-			<!-- svelte-ignore a11y_autofocus -->
-			<input class="title-input" bind:value={titleDraft} onblur={() => finishRename()} onkeydown={(e) => (e.key === "Enter" ? finishRename() : e.key === "Escape" && finishRename(false))} autofocus aria-label="Session title" />
-		{:else}
-			<button class="title" ondblclick={startRename} onclick={startRename} title="Rename">{lab.summary?.title ?? "Session"}</button>
-		{/if}
+		<!-- The title is part of the title bar: drag it to move the window. Rename from the menu bar, More, or right-click. -->
+		<h1 class="title" title={lab.summary?.title}>{lab.summary?.title ?? "Session"}</h1>
 		<span class="crumb">
 			{#if lab.summary?.parent}
 				<button class="back" onclick={() => lab.go(lab.summary!.parent!)}>Subagent of the lead session</button>
@@ -255,18 +237,8 @@
 		display: grid;
 		gap: 1px;
 	}
-	.heading .title {
-		justify-self: start;
-		max-width: 100%;
-		border-radius: 5px;
-		padding: 0 4px;
-		margin-left: -4px;
-	}
-	.heading .title:hover {
-		background: var(--hover);
-	}
-	.title,
-	.title-input {
+	.title {
+		margin: 0;
 		font-family: var(--font-display);
 		font-size: 14px;
 		font-weight: 600;
@@ -276,13 +248,6 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		max-width: 100%;
-	}
-	.title-input {
-		border: 0;
-		outline: none;
-		background: var(--hover);
-		border-radius: 4px;
-		padding: 0 4px;
 	}
 	.crumb {
 		display: flex;
@@ -452,6 +417,9 @@
 		}
 		.head {
 			padding-left: 8px;
+		}
+		:global(.shell.mac.desktop) .head {
+			padding-left: var(--traffic-inset, 84px);
 		}
 		.column {
 			padding: 20px 18px 32px;

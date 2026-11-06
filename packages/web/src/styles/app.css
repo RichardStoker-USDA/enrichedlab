@@ -32,11 +32,14 @@
 	/* Hairlines between regions, and the stronger edge that marks a control (3:1 against the canvas). */
 	--rule: light-dark(#d6dde6, #2b2b2b);
 	--rule-strong: light-dark(var(--aggie-blue-20), var(--black-70));
-	--edge: light-dark(#8794a6, #6b6b6b);
+	--edge: light-dark(#7a889b, #6b6b6b);
+	/* A destructive button: its own fill, so error-text colors never become a background under white text. */
+	--danger-bg: light-dark(#b3261e, #c5221f);
+	--danger-fg: #ffffff;
 	--fill: light-dark(rgb(2 40 81 / 0.05), rgb(255 255 255 / 0.07));
 	--text: light-dark(#0b1a2e, #f2f2f2);
-	--text-muted: light-dark(#3f5167, #b0b0b0);
-	--text-faint: light-dark(#5b6c82, #8c8c8c);
+	--text-muted: light-dark(#3f5167, #bdbdbd);
+	--text-faint: light-dark(#5b6c82, #a0a0a0);
 	--prompt: light-dark(var(--aggie-blue), #ffffff);
 	--accent: light-dark(var(--aggie-blue), var(--aggie-gold));
 	--accent-text: light-dark(var(--aggie-blue-80), var(--aggie-gold-70));
@@ -671,8 +674,8 @@ dialog.sheet[open] {
 .segmented button.on {
 	background: var(--raised);
 	color: var(--text);
-	font-weight: 500;
-	box-shadow: 0 0 0 0.5px var(--rule-strong), 0 1px 3px var(--shadow-color);
+	font-weight: 600;
+	box-shadow: 0 0 0 1px var(--edge), 0 1px 3px var(--shadow-color);
 }
 
 /* Full screen hides the traffic lights: the rows that make room for them don't need to. */

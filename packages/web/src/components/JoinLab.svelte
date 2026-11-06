@@ -98,7 +98,7 @@
 		font: 13px var(--font-mono);
 		color: var(--text);
 		padding: 8px 10px;
-		border: 1px solid var(--rule-strong);
+		border: 1px solid var(--edge);
 		border-radius: 8px;
 		background: var(--canvas);
 	}

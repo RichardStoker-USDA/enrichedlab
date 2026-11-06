@@ -6,10 +6,11 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("labDesktop", {
 	platform: process.platform,
 	pickFolder: () => ipcRenderer.invoke("pick-folder"),
-	menu: (entries) => ipcRenderer.invoke("menu:popup", entries),
+	menu: (entries, at) => ipcRenderer.invoke("menu:popup", entries, at),
 	reveal: (path) => ipcRenderer.invoke("reveal", path),
 	setTheme: (theme) => ipcRenderer.send("theme", theme),
 	closeWindow: () => ipcRenderer.send("window:close"),
+	menuState: (state) => ipcRenderer.send("menu:state", state),
 	onFullscreen: (listener) => {
 		const handler = (_event, on) => listener(Boolean(on));
 		ipcRenderer.on("fullscreen", handler);

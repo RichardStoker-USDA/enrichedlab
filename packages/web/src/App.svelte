@@ -15,7 +15,6 @@
 	import ContextMenu from "./components/ContextMenu.svelte";
 	import { groups } from "./lib/layout.ts";
 
-	let railOpen = $state(false);
 	const desktop = typeof window !== "undefined" && "labDesktop" in window;
 
 	// The workbench's share of the width, dragged at its edge and remembered.
@@ -47,11 +46,13 @@
 		else if (id === "toggle-workbench") lab.current && lab.toggleWorkbench();
 		else if (id === "new-terminal") lab.current && lab.openPane("terminal");
 		else if (id === "close-pane") {
-			const active = groups(lab.layout).find((g) => g.tabs.length)?.active;
+			// The group last used, else the first with tabs.
+			const all = groups(lab.layout).filter((g) => g.tabs.length);
+			const active = (all.find((g) => g.id === lab.lastGroup) ?? all[0])?.active;
 			if (lab.workbench && lab.current && active) lab.closePane(active);
 			else window.labDesktop?.closeWindow?.();
 		} else if (id.startsWith("theme-")) void lab.setTheme(id.slice(6) as "auto" | "light" | "dark");
-		else if (id === "rename") lab.current && (lab.renaming = lab.current);
+		else if (id === "rename") lab.startRename();
 		else if (id === "stop") lab.busy && lab.cancel();
 		else if (id === "compact") lab.current && void lab.compact();
 		else if (id === "undo-files") lab.current && void lab.undo();
@@ -98,6 +99,10 @@
 	});
 
 	$effect(() => {
+		window.labDesktop?.menuState?.({ session: Boolean(lab.current), busy: lab.busy, sidebar: lab.sidebar, workbench: lab.workbench, undoable: Boolean(lab.status?.undoable?.length) });
+	});
+
+	$effect(() => {
 		document.title = lab.summary ? `${lab.summary.title} · EnrichedLab` : "EnrichedLab";
 	});
 
@@ -107,12 +112,12 @@
 <svelte:window onkeydown={keys} />
 
 <div class="shell" class:desktop class:mac class:bench={benchOpen} class:no-rail={!lab.sidebar} style:--bench={`${benchWidth}%`}>
-	<Rail bind:open={railOpen} />
+	<Rail bind:open={lab.drawer} />
 	<main class="main">
 		{#if lab.current}
-			<RunSheet onMenu={() => (railOpen = true)} />
+			<RunSheet onMenu={() => (lab.drawer = true)} />
 		{:else}
-			<Start onMenu={() => (railOpen = true)} />
+			<Start onMenu={() => (lab.drawer = true)} />
 		{/if}
 	</main>
 	{#if benchOpen}

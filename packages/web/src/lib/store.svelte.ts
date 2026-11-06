@@ -78,8 +78,18 @@ class Lab {
 	confirming = $state<{ title: string; detail: string; action: string; tone?: "danger" | "plain"; run: () => unknown } | undefined>();
 	/** The place the new-session screen starts on (the rail's "New session in <place>"). */
 	newPlace = $state<string | undefined>();
-	/** A session whose title is being edited in place, from the rail or the header. */
+	/** The sidebar as a drawer, on a narrow window. */
+	drawer = $state(false);
+	/** The session whose title is being edited, in its sidebar row: the one place titles are edited. */
 	renaming = $state<string | undefined>();
+
+	/** Rename a session: the sidebar opens (or slides in on a narrow window) with its row ready to edit. */
+	startRename(sessionId: string | undefined = this.current): void {
+		if (!sessionId) return;
+		if (typeof window !== "undefined" && window.matchMedia("(max-width: 860px)").matches) this.drawer = true;
+		else this.sidebar = true;
+		this.renaming = sessionId;
+	}
 	private flashTimer?: ReturnType<typeof setTimeout>;
 
 	get busy(): boolean {
@@ -344,7 +354,11 @@ class Lab {
 		if (!groups(this.layout).some((g) => g.tabs.length)) this.toggleWorkbench(false);
 	}
 
+	/** The workbench group last used: ⌘W closes its front tab. */
+	lastGroup = $state<string | undefined>();
+
 	focusPane(tabId: string): void {
+		this.lastGroup = groups(this.layout).find((g) => g.tabs.some((t) => t.id === tabId))?.id;
 		this.setLayout(activate(this.layout, tabId));
 	}
 

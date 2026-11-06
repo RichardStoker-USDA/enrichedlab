@@ -92,7 +92,7 @@
 				? [
 						{
 							label: "Run On",
-							submenu: lab.places.map((p) => ({ label: p.id === "local" ? p.title : `${p.title} sandbox`, checked: p.id === lab.place.id, disabled: !p.ready || Boolean(p.site?.isolated) || lab.busy, run: () => lab.movePlace(p.id) })),
+							submenu: lab.places.map((p) => ({ label: p.id === "local" ? p.title : `${p.title} sandbox`, checked: p.id === lab.place.id, radio: true as const, disabled: !p.ready || Boolean(p.site?.isolated) || lab.busy, run: () => lab.movePlace(p.id) })),
 						},
 					]
 				: []),
@@ -114,9 +114,13 @@
 	}
 
 	function startRename(s: SessionSummary) {
-		draft = s.title;
-		lab.renaming = s.id;
+		lab.startRename(s.id);
 	}
+	// However renaming starts (this row, the menu bar, the session's More menu), the draft starts from the title.
+	$effect(() => {
+		const id = lab.renaming;
+		if (id) draft = lab.sessions.find((s) => s.id === id)?.title ?? "";
+	});
 
 	async function finishRename(s: SessionSummary, keep: boolean) {
 		if (lab.renaming !== s.id) return;
@@ -355,6 +359,10 @@
 	.place.here .place-main {
 		background: var(--selected);
 	}
+	.place.here .sub,
+	.place.here .here-mark {
+		color: var(--text);
+	}
 	.place-text {
 		display: grid;
 		min-width: 0;
@@ -449,9 +457,26 @@
 	.session:hover {
 		background: var(--hover);
 	}
+	/* The open session: a filled row and an accent bar, so the selection reads at a glance in both themes. */
+	.session {
+		position: relative;
+	}
 	.session.current {
 		background: var(--selected);
-		font-weight: 500;
+		font-weight: 600;
+	}
+	.session.current::before {
+		content: "";
+		position: absolute;
+		left: 16px;
+		top: 8px;
+		bottom: 8px;
+		width: 3px;
+		border-radius: 2px;
+		background: var(--accent);
+	}
+	.session.current .when {
+		color: var(--text-muted);
 	}
 	.session .title {
 		white-space: nowrap;
