@@ -122,15 +122,18 @@
 				</button>
 			{/if}
 
-			<span class="what runs" aria-hidden="true">Runs on</span>
-			<div class="segmented places" role="radiogroup" aria-label="Files and commands run on">
-				{#each lab.places as p (p.id)}
-					<button type="button" role="radio" aria-checked={place === p.id} class:on={place === p.id} disabled={!p.ready} onclick={() => (place = p.id)} title={p.ready ? "" : p.site?.signedIn ? `${p.title} has no sandbox for you yet` : `Sign in to ${p.title} first`}>
-						<span class="place-dot" class:local={p.id === "local"} style:--dot={`var(${p.color})`}></span>
-						{p.title}
-					</button>
-				{/each}
-			</div>
+			<!-- The label and its choice wrap as one, so "Runs on" never ends a line alone. -->
+			<span class="runs-on">
+				<span class="what runs" aria-hidden="true">Runs on</span>
+				<div class="segmented places" role="radiogroup" aria-label="Files and commands run on">
+					{#each lab.places as p (p.id)}
+						<button type="button" role="radio" aria-checked={place === p.id} class:on={place === p.id} disabled={!p.ready} onclick={() => (place = p.id)} title={p.ready ? "" : p.site?.signedIn ? `${p.title} has no sandbox for you yet` : `Sign in to ${p.title} first`}>
+							<span class="place-dot" class:local={p.id === "local"} style:--dot={`var(${p.color})`}></span>
+							{p.title}
+						</button>
+					{/each}
+				</div>
+			</span>
 
 			<button type="button" class="chip" onclick={(e) => showMenu(modelMenu(), e.currentTarget as HTMLElement)} title="Choose the model">
 				<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="2.5" /><path d="M6 6.5h4M6 9.5h2.5" /></svg>
@@ -169,6 +172,12 @@
 </form>
 
 <style>
+	.runs-on {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		min-width: 0;
+	}
 	.head {
 		display: flex;
 		border-bottom: 0;

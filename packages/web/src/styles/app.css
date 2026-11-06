@@ -578,9 +578,11 @@ html.material body {
 
 /* ── Sheets: modal dialogs (settings, model services, add a lab, confirmations) ─────────────────────────────────── */
 
+/* Sheets hang from just under the toolbar, as a Mac window's sheets do, whatever their height. */
 dialog.sheet {
+	margin: max(60px, 9dvh) auto auto;
 	width: min(var(--sheet-width, 520px), calc(100vw - 32px));
-	max-height: calc(100dvh - 48px);
+	max-height: calc(100dvh - max(60px, 9dvh) - 24px);
 	padding: 0 22px 20px;
 	border: 0;
 	border-radius: 14px;
@@ -601,7 +603,7 @@ dialog.sheet[open] {
 @keyframes sheet-in {
 	from {
 		opacity: 0;
-		transform: translateY(8px) scale(0.99);
+		transform: translateY(-6px) scale(0.99);
 	}
 }
 

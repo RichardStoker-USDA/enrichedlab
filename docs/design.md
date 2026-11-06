@@ -93,9 +93,16 @@ the session logic, and changes how they look and behave:
   reveal folder, delete), files, tabs and messages.
 - **Contrast.** Light mode rebuilt for WCAG AA on every text and control role; borders and fills strong enough to
   separate surfaces; one accent per state.
-- **Places.** One place control, at the top of the rail, the way a Mac app switches accounts: this computer and each
-  lab, with sign-in state and what each grants. A session shows where it runs in its header; moving it is one
-  action with a clear before and after, not a menu hunt.
+- **Places.** Where a session runs is chosen in the composer, beside its model: this computer or a lab's sandbox,
+  each with its sign-in state. Moving a session shows what moves (the project folder, or only the conversation)
+  before it runs; the model stays the same. The sidebar lists the places; each row signs in or opens that place's
+  actions. Models are filtered to the ones the session's place allows.
+- **Layout.** The workbench stays beside the session while both fit at 360 px: from 984 px with the sidebar and from
+  720 px without it. Between 861 and 983 px the sidebar steps aside while the workbench is open and comes back when it
+  closes; asking for it then floats the workbench over the session instead. Under 720 px the workbench covers the
+  window.
+- **Sheets and notices.** Settings, Model services, Add a lab, device requests and confirmations hang from just under
+  the toolbar at one position. Notices show above an open sheet.
 - **Every screen.** New session, run sheet, composer, model menu, Model services, Add a lab, workbench panes (files,
   terminal, browser, tables, plots, apps, views), palette, settings and every dialog, each in all nine states, light
   and dark, at phone and desktop widths; then an independent review by GPT-6 Astra.
