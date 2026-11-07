@@ -104,8 +104,9 @@ public final class AppModel {
 	private func watchState() async {
 		for await state in connection.states {
 			connection_ = state
-			if case let .connected(engine, _) = state {
+			if case let .connected(engine, reconnected) = state {
 				engineVersion = engine
+				if reconnected { terminals.restartAll() }
 				if let file = await locator.running() { engineBase = URL(string: "http://127.0.0.1:\(file.port)") }
 				await reload()
 			}
@@ -134,7 +135,13 @@ public final class AppModel {
 		if let value = await modelList { models = value.models; defaultModel = value.default }
 		if let value = await appList { apps = value }
 		labApps = (try? await connection.labApps()) ?? labApps
-		if let current = session?.id { await open(current, force: true) }
+		if let current = session?.id {
+			await open(current, force: true)
+			// A lab browser pane that was showing asks for its pictures again.
+			if session?.workbench.tabs.contains(where: { if case .screen = $0.pane { true } else { false } }) == true {
+				if let page = try? await connection.watchBrowser(sessionId: current, on: true) { session?.screen = page }
+			}
+		}
 	}
 
 	// MARK: Derived

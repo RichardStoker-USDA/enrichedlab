@@ -72,7 +72,8 @@ public struct TerminalOpened: Decodable, Sendable {
 
 public struct DesktopAnswer: Decodable, Sendable {
 	public var frame: DesktopFrame?
-	public var cursor: [Int]?
+	/// From the lab, in its pixels (a lab may send fractions).
+	public var cursor: [Double]?
 }
 
 public struct AppOpened: Decodable, Sendable {

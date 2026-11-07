@@ -40,6 +40,7 @@ public final class SessionModel {
 
 	/// Events and questions that arrived while the snapshot was on its way, joined after it without repeats.
 	private var held: [SessionEvent] = []
+	@ObservationIgnored private var lastToolRebuild = Date.distantPast
 	private var heldRequests: [PermissionRequest] = []
 
 	func apply(_ snapshot: SessionSnapshot) {
@@ -80,6 +81,11 @@ public final class SessionModel {
 				rebuild()
 			} else if let i = partial.tools.firstIndex(where: { $0.index == index }) {
 				partial.tools[i].args += text
+				// The step's target shows as its arguments arrive, redrawn a few times a second at most.
+				if Date().timeIntervalSince(lastToolRebuild) > 0.25 {
+					lastToolRebuild = Date()
+					rebuild()
+				}
 			}
 		case "output":
 			if let callId { partial.output[callId] = String(((partial.output[callId] ?? "") + text).suffix(20_000)) }
@@ -115,6 +121,10 @@ public final class SessionModel {
 		var calls: [RunningCall] = []
 		if let last = events.last(where: { if case .assistant = $0 { true } else { false } }), case let .assistant(step) = last {
 			calls = (step.toolCalls ?? []).map { RunningCall(id: $0.id, name: $0.name, target: argumentPreview($0.args)) }
+		}
+		// Calls the model is still writing show as steps too, with what they'll act on once it appears.
+		for tool in partial.tools {
+			calls.append(RunningCall(id: "streaming-\(tool.index)", name: tool.name, target: argumentPreview(tool.args)))
 		}
 		return calls
 	}

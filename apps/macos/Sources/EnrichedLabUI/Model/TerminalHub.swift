@@ -14,6 +14,7 @@ public final class TerminalSession: NSObject, TerminalViewDelegate {
 	public private(set) var ended: Int??
 	private weak var connection: EngineConnection?
 	private var pendingSize: (Int, Int)?
+	private var sessionId: String?
 
 	init(paneId: String) {
 		self.paneId = paneId
@@ -31,6 +32,7 @@ public final class TerminalSession: NSObject, TerminalViewDelegate {
 	func start(connection: EngineConnection, sessionId: String?) async throws {
 		guard termId == nil else { return }
 		self.connection = connection
+		self.sessionId = sessionId
 		let size = view.terminalDimensions
 		let opened = try await connection.openTerminal(sessionId: sessionId, cols: max(20, size.cols), rows: max(5, size.rows))
 		termId = opened.termId
@@ -47,6 +49,15 @@ public final class TerminalSession: NSObject, TerminalViewDelegate {
 	func exited(code: Int?) {
 		ended = .some(code)
 		view.feed(text: "\r\n\u{1b}[2m[The shell ended\(code.map { " with code \($0)" } ?? ""). Close this tab, or open a new terminal.]\u{1b}[0m\r\n")
+	}
+
+	/// The engine closes a window's terminals when its connection drops: start a new one in the same place.
+	func restart() {
+		guard termId != nil, let connection else { return }
+		termId = nil
+		ended = nil
+		view.feed(text: "\r\n\u{1b}[2m[Reconnected to the engine: a new shell started.]\u{1b}[0m\r\n")
+		Task { try? await start(connection: connection, sessionId: sessionId) }
 	}
 
 	func close() {
@@ -102,6 +113,10 @@ public final class TerminalHub {
 
 	func exited(_ termId: String, code: Int?) {
 		sessions.values.first { $0.termId == termId }?.exited(code: code)
+	}
+
+	func restartAll() {
+		for session in sessions.values { session.restart() }
 	}
 
 	func close(paneId: String) {
