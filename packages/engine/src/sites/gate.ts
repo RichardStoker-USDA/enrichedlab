@@ -5,10 +5,10 @@
 //   POST /mcp           the tools their role grants (MCP, Streamable HTTP)
 //   /v1/containers      their sandbox: run, background jobs, copy files in and out
 
-import { hostname } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { createReadStream, realpathSync } from "node:fs";
-import { mkdir, open, rename, rm, stat } from "node:fs/promises";
-import { basename, dirname } from "node:path";
+import { mkdir, mkdtemp, open, rename, rm, stat } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { Readable } from "node:stream";
 import type { BundleGrant } from "../bundles.ts";
@@ -1161,13 +1161,17 @@ export class GateSite implements SiteAdapter, SandboxApi, DesktopApi {
 						add("desktop state", Array.isArray(windows) ? "pass" : "fail", Array.isArray(windows) ? `${windows.length} window${windows.length === 1 ? "" : "s"}` : "the answer has no state.windows");
 						const app = desktopInfo.apps?.find((a) => a.id !== "browser")?.id ?? desktopInfo.apps?.[0]?.id;
 						if (app && desktopInfo.actions.includes("launch") && desktopInfo.actions.includes("focus_window")) {
-							const launched = await act<{ window?: { id?: string } }>({ action: "launch", app });
-							let id = launched.window?.id;
-							for (let i = 0; !id && i < 10; i++) {
+							// The new window: the one launch names, else one that wasn't there before it.
+							const before = new Set((first.state?.windows ?? []).map((w) => w.id));
+							const launched = await act<{ window?: { id?: string } | string }>({ action: "launch", app });
+							let id = typeof launched.window === "string" ? launched.window : launched.window?.id;
+							let seen: { id?: string; app?: string; title?: string }[] = [];
+							for (let i = 0; !id && i < 15; i++) {
 								await sleep(1_000);
-								id = (await act<State>({ action: "state" })).state?.windows?.find((w) => w.app === app)?.id;
+								seen = (await act<State>({ action: "state" })).state?.windows ?? [];
+								id = seen.find((w) => w.id && !before.has(w.id))?.id;
 							}
-							if (!id) add("desktop launch and focus", "fail", `no ${app} window appeared within 10 s`);
+							if (!id) add("desktop launch and focus", "fail", `no new window within 15 s of launch ${app}${seen.length ? `; windows: ${seen.map((w) => `${w.id} ${w.app ?? ""} "${w.title ?? ""}"`).join(", ")}` : ""}`);
 							else {
 								await act({ action: "focus_window", window: id });
 								const after = await act<State>({ action: "state" });
@@ -1498,11 +1502,11 @@ export class GateSite implements SiteAdapter, SandboxApi, DesktopApi {
 		return { ok: !r.timedOut && r.exitCode === 0, output, status: r.timedOut ? "timed out" : `exit ${r.exitCode ?? "?"}` };
 	}
 
-	/** Copy a local file into the sandbox (the site scans it first). Returns where it landed. */
-	async put(path: string, signal?: AbortSignal): Promise<{ path: string; bytes: number }> {
+	/** Copy a local file into the sandbox, or another of the person's sandboxes (the site scans it first). */
+	async put(path: string, signal?: AbortSignal, container?: string): Promise<{ path: string; bytes: number }> {
 		const info = await stat(path).catch(() => undefined);
 		if (!info?.isFile()) throw new ToolError(`${path} isn't a file.`);
-		const id = await this.sandbox(signal);
+		const id = container ?? (await this.sandbox(signal));
 		const boundary = `enrichedlab-${randomBytes(12).toString("hex")}`;
 		const name = basename(path).replace(/["\r\n]/g, "_");
 		const head = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${name}"\r\nContent-Type: application/octet-stream\r\n\r\n`);
@@ -1903,6 +1907,18 @@ export class GateSite implements SiteAdapter, SandboxApi, DesktopApi {
 		if (frame) this.onDesktopFrame?.(frame);
 		const cursor = (answer as { cursor?: unknown } | undefined)?.cursor;
 		return { frame, cursor: Array.isArray(cursor) && cursor.length === 2 ? (cursor as [number, number]) : undefined, answer };
+	}
+
+	/** A file from the workspace sandbox onto the desktop, through this computer; the lab scans it both ways. */
+	async desktopCopy(from: string, signal?: AbortSignal): Promise<{ path: string; bytes: number }> {
+		const dir = await mkdtemp(join(tmpdir(), "el-desktop-"));
+		try {
+			const local = join(dir, basename(from));
+			await this.get(from, local, signal);
+			return await this.put(local, signal, await this.desktopSandbox(signal));
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
 	}
 
 	async desktopOpen(target: string, by: "agent" | "person", signal?: AbortSignal, app?: string): Promise<DesktopResult> {

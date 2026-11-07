@@ -5,8 +5,9 @@ description: Use a lab's desktop sandbox (a Linux or macOS desktop in the lab) w
 
 # The lab's desktop
 
-The desktop tools are `<lab>_desktop` (one action per call) and `<lab>_desktop_open` (open an address or a
-`/sandbox` file). The person may be watching and using the same desktop.
+The desktop tools are `<lab>_desktop` (one action per call), `<lab>_desktop_open` (open an address or a desktop
+`/sandbox` file, optionally `with` an app) and `<lab>_desktop_copy` (a file from the workspace sandbox onto the
+desktop). The person may be watching and using the same desktop.
 
 1. **Look before acting.** Take a `screenshot` first; where the lab offers `state`, read it: the windows, the focused
    window and its accessibility tree (roles, names, values, bounds). Act on elements from the tree, using the center
@@ -17,7 +18,7 @@ The desktop tools are `<lab>_desktop` (one action per call) and `<lab>_desktop_o
    before the next. Dialogs and menus take a moment to draw: `wait` one second when the picture looks unchanged.
 4. **Typing** goes to the focused field: click the field first, then `type`. Use `key` for Return, Tab, Escape and
    chords such as ctrl+s.
-5. **No shell on desktops.** Desktops refuse commands by design. Run commands in the lab's workspace sandbox, and move
-   files between the two with the lab's file tools.
+5. **No shell on desktops.** Desktops refuse commands by design. Run commands in the lab's workspace sandbox. The
+   desktop has its own files: copy one onto it with `<lab>_desktop_copy`, then open the path that returns.
 6. **If stuck** (an error dialog repeats, or nothing changes after two tries), stop, describe what the screen shows,
    and ask the person instead of clicking further.

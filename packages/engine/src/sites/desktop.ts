@@ -44,6 +44,8 @@ export interface DesktopApi {
 	desktop(): DesktopInfo | undefined;
 	desktopAct(action: DesktopAction, by: "agent" | "person", signal?: AbortSignal): Promise<DesktopResult>;
 	desktopOpen(target: string, by: "agent" | "person", signal?: AbortSignal, app?: string): Promise<DesktopResult>;
+	/** Copy a file from the workspace sandbox onto the desktop; absent where a lab can't. */
+	desktopCopy?(from: string, signal?: AbortSignal): Promise<{ path: string; bytes: number }>;
 }
 
 const TYPE_MAX = 4_000;
@@ -271,7 +273,7 @@ export function desktopTools(site: string, title: string, api: DesktopApi): Tool
 	const open: Tool = {
 		name: `${site}_desktop_open`,
 		kind: "sandbox",
-		description: `Open an https address or a file under /sandbox on the ${title} desktop, in the program that opens it${info.open_with?.length ? ` (or the app named in with: ${info.open_with.join(", ")})` : ""}.`,
+		description: `Open an https address or a file under /sandbox on the ${title} desktop, in the program that opens it${info.open_with?.length ? ` (or the app named in with: ${info.open_with.join(", ")})` : ""}. The desktop has its own files, apart from your workspace sandbox${api.desktopCopy ? `: copy one over with ${site}_desktop_copy first` : ""}.`,
 		parameters: {
 			type: "object",
 			properties: {
@@ -285,12 +287,31 @@ export function desktopTools(site: string, title: string, api: DesktopApi): Tool
 			const target = String(args.target ?? "").trim();
 			if (!/^https:\/\//.test(target) && !target.startsWith("/sandbox/")) throw new ToolError("target is an https address or a /sandbox/... file.");
 			const app = typeof args.with === "string" && info.open_with?.includes(args.with) ? args.with : undefined;
-			await api.desktopOpen(target, "agent", ctx.signal, app);
+			try {
+				await api.desktopOpen(target, "agent", ctx.signal, app);
+			} catch (error) {
+				if (!target.startsWith("/sandbox/")) throw error;
+				throw new ToolError(`${(error as Error).message} If ${target} is in your workspace sandbox, it isn't on the desktop: the desktop has its own files${api.desktopCopy ? `. Copy it over with ${site}_desktop_copy, then open the path that returns` : ""}.`);
+			}
 			// A program takes a moment to open its window.
 			await sleep(1_500, ctx.signal);
 			const frame = (await api.desktopAct({ action: "screenshot" }, "agent", ctx.signal)).frame;
 			return { ok: true, content: `Opened ${target}.`, images: frame && ctx.vision ? [{ type: "image", mime: "image/png", data: frame.png }] : undefined };
 		},
 	};
-	return [desktop, open];
+	if (!api.desktopCopy) return [desktop, open];
+	const copy: Tool = {
+		name: `${site}_desktop_copy`,
+		kind: "sandbox",
+		description: `Copy a file from your ${title} workspace sandbox onto its desktop, to open it there with ${site}_desktop_open. The lab scans it on the way. Returns its path on the desktop.`,
+		parameters: { type: "object", properties: { path: { type: "string", description: "the file in your workspace sandbox, such as /sandbox/work/form.pdf" } }, required: ["path"] },
+		view: (args) => ({ verb: "desktop copy", target: clip(String(args.path ?? ""), 120) }),
+		async run(args, ctx) {
+			const path = String(args.path ?? "").trim();
+			if (!path.startsWith("/sandbox/")) throw new ToolError("path is a file under /sandbox/ in your workspace sandbox.");
+			const placed = await api.desktopCopy!(path, ctx.signal);
+			return { ok: true, content: `Copied to ${placed.path} on the desktop (${placed.bytes} bytes).`, view: { result: placed.path } };
+		},
+	};
+	return [desktop, open, copy];
 }

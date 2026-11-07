@@ -78,6 +78,7 @@ describe("a lab's desktop sandbox", () => {
 		expect(tool?.site).toBe("field");
 		expect(tool?.kind).toBe("sandbox");
 		expect(s.tools.some((t) => t.name === "field_desktop_open")).toBe(true);
+		expect(s.tools.some((t) => t.name === "field_desktop_copy")).toBe(true);
 		const result = await tool!.run({ action: "left_click", coordinate: [640.4, 200] }, { signal: new AbortController().signal, vision: true } as never);
 		expect(result.content).toBe("Left click at (640, 200).");
 		expect(result.images?.[0]).toEqual({ type: "image", mime: "image/png", data: PNG });
