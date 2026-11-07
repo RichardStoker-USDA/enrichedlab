@@ -2006,21 +2006,23 @@ export class GateSite implements SiteAdapter, SandboxApi, DesktopApi {
 			throw new ToolError(`Your ${this.title} desktop didn't become ${want} within 5 minutes. Try again, or ask the lab's support.`);
 		};
 		this.onNotice?.(`Updating your ${this.title} desktop. Its files come along; its open windows close.`);
-		await this.json("POST", `${at}/stop`, { json: {}, signal }).catch((error: { code?: string }) => {
-			if (error.code !== "sandbox_stopped") throw error;
-		});
-		// The lab may still be stopping it or busy with another change: try again for a minute.
-		for (let attempt = 0; ; attempt++) {
-			try {
-				await this.json("POST", `${at}/archive`, { json: {}, signal });
-				break;
-			} catch (error) {
-				const code = (error as { code?: string }).code;
-				if (attempt >= 30 || (code !== "sandbox_running" && code !== "sandbox_busy")) throw error;
-				await sleep(2_000, signal);
+		// Stop answers stopped (or archived, when it already is), or stopping while it gets there.
+		const stopped = (await this.json<{ status?: string }>("POST", `${at}/stop`, { json: {}, signal })).status;
+		if (stopped === "stopping") await until("stopped");
+		if (stopped !== "archived") {
+			// The lab may still be busy with another change: try again for a minute.
+			for (let attempt = 0; ; attempt++) {
+				try {
+					await this.json("POST", `${at}/archive`, { json: {}, signal });
+					break;
+				} catch (error) {
+					const code = (error as { code?: string }).code;
+					if (attempt >= 30 || (code !== "sandbox_running" && code !== "sandbox_busy")) throw error;
+					await sleep(2_000, signal);
+				}
 			}
+			await until("archived");
 		}
-		await until("archived");
 		await this.json("POST", `${at}/restore`, { json: {}, signal });
 		await until("running");
 		this.desktopOutdated = false;

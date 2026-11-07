@@ -73,8 +73,10 @@ const server = Bun.serve<{ id: string }>({
 		const step = /^\/v1\/containers\/([^/]+)\/(stop|archive)$/.exec(url.pathname);
 		if (step && request.method === "POST") {
 			lab.steps.push(step[2]!);
-			if (step[2] === "archive") lab.archived.add(step[1]!);
-			return Response.json({ id: step[1], status: step[2] === "stop" ? "stopped" : "archiving" }, { status: step[2] === "stop" ? 200 : 202 });
+			// As Gate does: stop answers 200 stopped, or archived when the desktop already is.
+			if (step[2] === "stop") return Response.json({ id: step[1], status: lab.archived.has(step[1]!) ? "archived" : "stopped" });
+			lab.archived.add(step[1]!);
+			return Response.json({ id: step[1], status: "archiving" }, { status: 202 });
 		}
 		const restore = /^\/v1\/containers\/([^/]+)\/restore$/.exec(url.pathname);
 		if (restore && request.method === "POST") {
@@ -273,5 +275,11 @@ describe("an outdated desktop", () => {
 		expect(s.desktopOutdated).toBe(false);
 		expect(changes).toBe(2);
 		await s.desktopAct({ action: "left_click", coordinate: [1, 1] }, "agent");
+		// One already archived goes straight to restore.
+		lab.outdated.add(id);
+		lab.archived.add(id);
+		lab.steps = [];
+		await s.desktopUpdate();
+		expect(lab.steps).toEqual(["stop", "restore"]);
 	});
 });
