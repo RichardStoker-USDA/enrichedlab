@@ -123,3 +123,8 @@ public final class TerminalHub {
 		sessions.removeValue(forKey: paneId)?.close()
 	}
 }
+
+/// A picture sent as base64 (PNG or JPEG).
+func decodeImage(_ base64: String) -> NSImage? {
+	Data(base64Encoded: base64).flatMap(NSImage.init(data:))
+}

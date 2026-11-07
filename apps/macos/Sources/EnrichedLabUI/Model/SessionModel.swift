@@ -1,3 +1,4 @@
+import AppKit
 import EnrichedLabKit
 import Foundation
 import Observation
@@ -27,7 +28,11 @@ public final class SessionModel {
 	public let browser = BrowserController()
 	/// The agent's page in a lab's sandbox browser, and its latest picture.
 	public var screen: BrowserPageState?
-	public var screenFrame: BrowserFrame?
+	public var screenFrame: BrowserFrame? {
+		didSet { screenImage = screenFrame.flatMap { decodeImage($0.data) } }
+	}
+	/// The sandbox browser's newest picture, decoded once when it arrives.
+	public private(set) var screenImage: NSImage?
 	/// Set when a compaction lands, so the context gauge can show it once.
 	public private(set) var compactedAt: Date?
 

@@ -294,7 +294,7 @@ struct DesktopPane: View {
 				if app.desktopBusy.contains(site) { ProgressView().progressViewStyle(.linear).controlSize(.mini).tint(Theme.accent) }
 			}
 			Divider()
-			if let frame, let data = Data(base64Encoded: frame.png), let image = NSImage(data: data) {
+			if let frame, let image = app.desktopImages[site]?.image {
 				CanvasHost(image: image, size: CGSize(width: frame.width, height: frame.height), raw: false) { input in act(input) }
 			} else {
 				ContentUnavailableView {
@@ -375,7 +375,7 @@ struct ScreenPane: View {
 			Divider()
 			GeometryReader { geometry in
 				Group {
-					if let frame = session.screenFrame, let data = Data(base64Encoded: frame.data), let image = NSImage(data: data) {
+					if let frame = session.screenFrame, let image = session.screenImage {
 						CanvasHost(image: image, size: CGSize(width: frame.width, height: frame.height), raw: true) { input in send(input) }
 					} else {
 						ContentUnavailableView("Waiting for the Page", systemImage: "globe", description: Text("The agent's browser in the \(app.place(of: site).title) sandbox shows here."))

@@ -47,7 +47,11 @@ public final class AppModel {
 	public private(set) var apps: [AppSummary] = []
 	public private(set) var labApps: [LabApp] = []
 	public var deviceRequests: [DeviceRequest] = []
-	public private(set) var desktops: [String: DesktopFrame] = [:]
+	public private(set) var desktops: [String: DesktopFrame] = [:] {
+		didSet { for (site, frame) in desktops where desktopImages[site]?.at != frame.at { desktopImages[site] = (frame.at, decodeImage(frame.png)) } }
+	}
+	/// Each lab desktop's newest picture, decoded once when it arrives.
+	public private(set) var desktopImages: [String: (at: String, image: NSImage?)] = [:]
 	public private(set) var desktopBusy: Set<String> = []
 	public var sessionLimit = 200
 

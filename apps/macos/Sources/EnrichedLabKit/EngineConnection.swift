@@ -16,13 +16,16 @@ public struct EngineError: Error, LocalizedError, Sendable, Hashable {
 	public static let notConnected = EngineError(code: -2, message: "Not connected to the engine yet.")
 }
 
-/// A notification from the engine: its method and the raw JSON of its params, decoded by whoever handles it.
+/// A notification from the engine: its method and the whole message, whose params the one handler that knows their
+/// shape decodes, once.
 public struct EngineNotification: Sendable {
 	public var method: String
-	public var params: Data
+	public var message: Data
+
+	private struct Wrapped<T: Decodable>: Decodable { var params: T }
 
 	public func decode<T: Decodable>(_ type: T.Type) throws -> T {
-		try JSONDecoder().decode(type, from: params)
+		try JSONDecoder().decode(Wrapped<T>.self, from: message).params
 	}
 }
 
@@ -132,14 +135,10 @@ public actor EngineConnection {
 		var error: Failure?
 	}
 
-	private struct ParamsOnly: Decodable { var params: JSONValue? }
-
 	private func handle(_ data: Data) {
 		guard let envelope = try? JSONDecoder().decode(Envelope.self, from: data) else { return }
 		if let method = envelope.method {
-			// The params' raw JSON: re-encoded once here, decoded by the one handler that knows its shape.
-			let params = (try? JSONDecoder().decode(ParamsOnly.self, from: data).params).flatMap { try? JSONEncoder().encode($0) } ?? Data("{}".utf8)
-			notify.yield(EngineNotification(method: method, params: params))
+			notify.yield(EngineNotification(method: method, message: data))
 			return
 		}
 		guard let id = envelope.id, let waiter = waiting.removeValue(forKey: id) else { return }
