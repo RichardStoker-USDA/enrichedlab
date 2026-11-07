@@ -305,6 +305,8 @@ export interface PermissionRequest {
 	reason: string;
 	/** The answer can't be remembered for the session (pushes, unreviewed lab tools): offer allow and deny only. */
 	once?: boolean;
+	/** For a subagent's question: the session it works for, whose windows show the question. */
+	lead?: string;
 }
 
 export type PermissionDecision = "allow" | "allow_session" | "deny";

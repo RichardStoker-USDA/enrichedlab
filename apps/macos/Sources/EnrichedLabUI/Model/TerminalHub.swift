@@ -51,13 +51,13 @@ public final class TerminalSession: NSObject, TerminalViewDelegate {
 		view.feed(text: "\r\n\u{1b}[2m[The shell ended\(code.map { " with code \($0)" } ?? ""). Close this tab, or open a new terminal.]\u{1b}[0m\r\n")
 	}
 
-	/// The engine closes a window's terminals when its connection drops: start a new one in the same place.
-	func restart() {
-		guard termId != nil, let connection else { return }
+	/// The engine closes a window's terminals when its connection drops: a live one gets a new shell in the same
+	/// place, now when its session is open, else when its pane shows again. One whose shell had ended stays ended.
+	func restart(showing: String?) {
+		guard termId != nil, ended == nil, let connection else { return }
 		termId = nil
-		ended = nil
 		view.feed(text: "\r\n\u{1b}[2m[Reconnected to the engine: a new shell started.]\u{1b}[0m\r\n")
-		Task { try? await start(connection: connection, sessionId: sessionId) }
+		if sessionId == showing { Task { try? await start(connection: connection, sessionId: sessionId) } }
 	}
 
 	func close() {
@@ -115,8 +115,8 @@ public final class TerminalHub {
 		sessions.values.first { $0.termId == termId }?.exited(code: code)
 	}
 
-	func restartAll() {
-		for session in sessions.values { session.restart() }
+	func restartAll(showing: String?) {
+		for session in sessions.values { session.restart(showing: showing) }
 	}
 
 	func close(paneId: String) {

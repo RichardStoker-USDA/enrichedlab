@@ -30,8 +30,11 @@ public struct RootView: View {
 		updateRoom()
 	}
 
+	/// The workbench shows once the window has room for it; once showing, it stays (dragging a divider wider can't
+	/// hide it), and the window's minimum keeps that room.
 	private func updateRoom() {
-		let room = !widening && (width == 0 || width >= roomy - 1 || columns == .detailOnly)
+		let showing = workbenchOpen && app.workbenchRoom
+		let room = !widening && (showing || width == 0 || width >= roomy - 1 || columns == .detailOnly)
 		if app.workbenchRoom != room { app.workbenchRoom = room }
 	}
 
@@ -62,10 +65,27 @@ public struct RootView: View {
 				if frame.maxX > visible.maxX { frame.origin.x = max(visible.minX, visible.maxX - frame.width) }
 				widening = true
 				window.setFrame(frame, display: true, animate: !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+				// The frame may end narrower than asked (tiling, a window across two screens): then the sidebar steps aside.
+				widening = false
+				width = window.contentLayoutRect.width
+				if width < roomy - 1 { asideSidebar() }
+				updateRoom()
 				return
 			}
 		}
 		asideSidebar()
+		// Without the sidebar, widen as far as the screen allows toward what the run sheet and workbench need.
+		if let window, let screen = window.screen, !window.styleMask.contains(.fullScreen) {
+			let visible = screen.visibleFrame
+			var frame = window.frame
+			let wanted = min(AppModel.runSheetWidth + app.workbenchWidth + (frame.width - width), visible.width)
+			if frame.width < wanted {
+				frame.size.width = wanted
+				if frame.maxX > visible.maxX { frame.origin.x = max(visible.minX, visible.maxX - frame.width) }
+				window.setFrame(frame, display: true, animate: !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+				width = window.contentLayoutRect.width
+			}
+		}
 	}
 
 	public var body: some View {

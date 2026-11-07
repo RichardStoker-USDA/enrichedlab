@@ -67,7 +67,8 @@ struct ColumnOrder: SortComparator {
 	var order: SortOrder = .forward
 
 	func compare(_ a: DataTable.Row, _ b: DataTable.Row) -> ComparisonResult {
-		let x = a.values[column], y = b.values[column]
+		let x = a.values.indices.contains(column) ? a.values[column] : ""
+		let y = b.values.indices.contains(column) ? b.values[column] : ""
 		let result: ComparisonResult
 		if let p = Double(x), let q = Double(y) { result = p < q ? .orderedAscending : p > q ? .orderedDescending : .orderedSame }
 		else { result = x.localizedStandardCompare(y) }
@@ -86,7 +87,8 @@ struct TablePane: View {
 	@State private var selection = Set<Int>()
 	@State private var shown: [DataTable.Row] = []
 
-	private struct Shape: Equatable { var filter: String; var order: [ColumnOrder]; var rows: Int }
+	/// What the shown rows depend on: the data's version, the filter and the order.
+	private struct Shape: Equatable { var version: String; var filter: String; var order: [ColumnOrder] }
 
 	var body: some View {
 		VStack(spacing: 0) {
@@ -94,7 +96,8 @@ struct TablePane: View {
 				Table(shown, selection: $selection, sortOrder: $order) {
 					TableColumnForEach(Array(table.columns.enumerated()), id: \.offset) { i, name in
 						TableColumn(name, sortUsing: ColumnOrder(column: i)) { row in
-							Text(row.values[i]).font(.system(size: 12, design: Double(row.values[i]) != nil ? .monospaced : .default)).lineLimit(1)
+							let value = row.values.indices.contains(i) ? row.values[i] : ""
+							Text(value).font(.system(size: 12, design: Double(value) != nil ? .monospaced : .default)).lineLimit(1)
 						}
 					}
 				}
@@ -117,18 +120,21 @@ struct TablePane: View {
 		}
 		.task(id: "\(view.id):\(view.version)") { await load() }
 		// Filtering and sorting run off the main thread, only when the filter, the order or the data change.
-		.task(id: Shape(filter: filter, order: order, rows: table?.rows.count ?? -1)) {
+		.task(id: Shape(version: "\(view.version):\(table?.columns.count ?? -1):\(table?.rows.count ?? -1)", filter: filter, order: order)) {
 			guard let table else { return }
 			if !filter.isEmpty { try? await Task.sleep(for: .milliseconds(150)) }
 			guard !Task.isCancelled else { return }
 			let words = filter.trimmingCharacters(in: .whitespaces).lowercased()
 			let order = order
-			shown = await Task.detached(priority: .userInitiated) {
+			let rows = await Task.detached(priority: .userInitiated) {
 				var rows = table.rows
 				if !words.isEmpty { rows = rows.filter { $0.values.contains { $0.lowercased().contains(words) } } }
 				if !order.isEmpty { rows.sort(using: order) }
 				return rows
 			}.value
+			// A newer filter, order or version replaced this one while it ran: its own result follows.
+			guard !Task.isCancelled else { return }
+			shown = rows
 		}
 	}
 
@@ -142,6 +148,8 @@ struct TablePane: View {
 			let name = data.name, text = data.text ?? ""
 			// Large files parse off the main thread.
 			guard let parsed = await Task.detached(priority: .userInitiated, operation: { DataTable.parse(name: name, text: text) }).value else { error = "The data didn't read as a table."; return }
+			// The rows shown change with the columns, so no row is drawn against columns it doesn't have.
+			shown = parsed.rows
 			table = parsed
 		} catch let failure {
 			error = (failure as? LocalizedError)?.errorDescription ?? failure.localizedDescription

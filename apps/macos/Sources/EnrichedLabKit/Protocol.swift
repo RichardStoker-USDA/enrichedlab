@@ -200,6 +200,8 @@ public struct PermissionRequest: Codable, Sendable, Hashable, Identifiable {
 	public var view: StepView
 	public var reason: String
 	public var once: Bool?
+	/// For a subagent's question: the session it works for.
+	public var lead: String?
 
 	public var id: String { requestId }
 }

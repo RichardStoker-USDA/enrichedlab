@@ -902,7 +902,7 @@ class Lab {
 		rpc.on("permission.request", (request) => {
 			if (request.sessionId === this.opening?.id) return void this.opening.requests.push(request);
 			// The open session's own questions, and those of its subagents (the engine sends those to the lead's windows).
-			const mine = request.sessionId === this.current || this.sessions.some((s) => s.id === request.sessionId && s.parent === this.current);
+			const mine = request.sessionId === this.current || (!!request.lead && request.lead === this.current);
 			if (mine && !this.pending.some((p) => p.requestId === request.requestId)) this.pending.push(request);
 		});
 		rpc.on("permission.settled", ({ requestId }) => {

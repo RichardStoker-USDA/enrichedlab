@@ -14,7 +14,7 @@ and open it:
 
 | Computer | File |
 | --- | --- |
-| Mac (Apple silicon or Intel) | `EnrichedLab-mac.pkg` (installs into your home folder) |
+| Mac (Apple silicon or Intel, macOS 15 or later) | `EnrichedLab-mac.pkg` (installs into your home folder) |
 | Windows 11 | `EnrichedLab-Setup-x64.exe` (installs for you only) |
 | Linux | `EnrichedLab-linux-x64.AppImage` or `-arm64` |
 

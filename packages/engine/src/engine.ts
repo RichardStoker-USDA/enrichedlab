@@ -439,16 +439,20 @@ export class Engine {
 	/** Ask whichever surface answers first. A headless run answers by its own rule. */
 	private ask(request: PermissionRequest, signal: AbortSignal): Promise<PermissionDecision | "cancelled"> {
 		if (this.options.headlessAnswer) return Promise.resolve(this.options.headlessAnswer(request));
+		// A subagent's question goes to the windows showing its lead session, where the person is, and to any showing
+		// the subagent itself; a window holding both gets it twice and keeps one (by requestId).
+		const lead = this.leadOf(request.sessionId);
+		if (lead !== request.sessionId) request = { ...request, lead };
+		const scopes = lead === request.sessionId ? [lead] : [lead, request.sessionId];
 		return new Promise((done) => {
 			const finish = (decision: PermissionDecision | "cancelled") => {
 				if (!this.waiting.delete(request.requestId)) return;
-				this.emit("permission.settled", { requestId: request.requestId, decision }, this.leadOf(request.sessionId));
+				for (const scope of scopes) this.emit("permission.settled", { requestId: request.requestId, decision }, scope);
 				done(decision);
 			};
 			this.waiting.set(request.requestId, { request, resolve: finish });
 			signal.addEventListener("abort", () => finish("cancelled"), { once: true });
-			// A subagent's question goes to the windows showing its lead session, where the person is.
-			this.emit("permission.request", request, this.leadOf(request.sessionId));
+			for (const scope of scopes) this.emit("permission.request", request, scope);
 		});
 	}
 
