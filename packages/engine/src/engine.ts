@@ -442,13 +442,25 @@ export class Engine {
 		return new Promise((done) => {
 			const finish = (decision: PermissionDecision | "cancelled") => {
 				if (!this.waiting.delete(request.requestId)) return;
-				this.emit("permission.settled", { requestId: request.requestId, decision }, request.sessionId);
+				this.emit("permission.settled", { requestId: request.requestId, decision }, this.leadOf(request.sessionId));
 				done(decision);
 			};
 			this.waiting.set(request.requestId, { request, resolve: finish });
 			signal.addEventListener("abort", () => finish("cancelled"), { once: true });
-			this.emit("permission.request", request, request.sessionId);
+			// A subagent's question goes to the windows showing its lead session, where the person is.
+			this.emit("permission.request", request, this.leadOf(request.sessionId));
 		});
+	}
+
+	/** The session a subagent works for (itself when it isn't one), following parents to the top. */
+	private leadOf(sessionId: string): string {
+		let id = sessionId;
+		for (let depth = 0; depth < 8; depth++) {
+			const parent = this.sessions.get(id)?.parent;
+			if (!parent) return id;
+			id = parent;
+		}
+		return id;
 	}
 
 	/** Sessions no surface has open. */

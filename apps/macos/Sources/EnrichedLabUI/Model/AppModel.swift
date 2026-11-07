@@ -464,7 +464,9 @@ public final class AppModel {
 			if let summary = try? note.decode(SessionSummary.self) { upsert(summary) }
 		case "permission.request":
 			guard let request = try? note.decode(PermissionRequest.self) else { return }
-			if session?.id == request.sessionId { session?.ask(request) }
+			// The open session's own questions, and its subagents' (the engine sends those to the lead's windows).
+			let child = sessions.first { $0.id == request.sessionId }?.parent
+			if session?.id == request.sessionId || (child != nil && child == session?.id) { session?.ask(request) }
 			else { notifyElsewhere(request) }
 		case "permission.settled":
 			struct P: Decodable { var requestId: String }
