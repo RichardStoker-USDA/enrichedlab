@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "n
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-export const VERSION = "0.2.27";
+export const VERSION = "0.2.28";
 
 /**
  * How the harness names itself to a lab. Gate files every request under the User-Agent's first word, so the lab's
@@ -13,6 +13,7 @@ export const CLIENT_AGENT = `EnrichedLab/${VERSION} (${process.platform}; ${proc
 
 /** What changed in this version, one line each, newest first. Surfaces show the first lines when a session opens. */
 export const NEWS = [
+	"0.2.28: Update Desktop works whether the desktop is running, stopping, stopped or already archived.",
 	"0.2.27: a lab desktop made before the lab updated its desktop shows Update Desktop in its pane, which moves it to the current one and keeps its files; the agent names each window by its app.",
 	"0.2.26: a lab desktop shows live in its pane where the lab streams it, so you see the agent and your own clicks as they happen; the agent can copy a file from its workspace sandbox onto the desktop to open it there; el lab check opens a desktop's live view.",
 	"0.2.25: on a lab desktop that offers it, the agent reads the windows and their buttons and fields before it clicks, starts apps by name and brings a window forward, so it clicks the right thing the first time; el lab check reads the desktop's state and starts and focuses an app.",
