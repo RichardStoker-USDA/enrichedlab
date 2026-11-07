@@ -26,6 +26,7 @@ import { isReadOnlyCommand } from "../tools/shell.ts";
 import { runHooks } from "../hooks.ts";
 import { projectRoot } from "../prompt.ts";
 import { findSkills, type Skill, skillDirs, skillTool } from "../skills.ts";
+import { DEFER_ABOVE, findTools, foundNames, offered } from "../catalog.ts";
 import type { AgentResult } from "../tools/agents.ts";
 import { join } from "node:path";
 import { decide } from "../permissions.ts";
@@ -144,7 +145,21 @@ export class SessionRuntime {
 	private visibleTools(): Tool[] {
 		const local = this.place === "local";
 		const visible = this.deps.tools(this.site).filter((t) => !(this.parent && t.name.startsWith("agent_")) && (local || !t.localOnly));
-		return this.skills().length ? [...visible, this.skillTool] : visible;
+		const all = this.skills().length ? [...visible, this.skillTool] : visible;
+		// Many tools: the agent searches for the ones it needs (catalog.ts).
+		return all.length > DEFER_ABOVE ? [...all, this.findTool] : all;
+	}
+
+	private findTool = findTools(() => this.visibleTools());
+
+	/** Tools the agent has found or used in this session, from its log: they stay in its requests. */
+	private loadedTools(): Set<string> {
+		const names = new Set<string>();
+		for (const e of this.events) {
+			if (e.t === "assistant") for (const call of e.toolCalls ?? []) names.add(call.name);
+			else if (e.t === "tool" && e.name === "find_tools" && e.ok) for (const name of foundNames(e.content)) names.add(name);
+		}
+		return names;
 	}
 
 	private skillTool = skillTool(() => this.skills());
@@ -240,7 +255,7 @@ export class SessionRuntime {
 	}
 
 	private toolSchemas(): ToolSchema[] {
-		return this.visibleTools().map((t) => ({ name: t.name, description: t.description, parameters: t.parameters }));
+		return offered(this.visibleTools(), this.loadedTools()).map((t) => ({ name: t.name, description: t.description, parameters: t.parameters }));
 	}
 
 	status(): SessionStatus {
