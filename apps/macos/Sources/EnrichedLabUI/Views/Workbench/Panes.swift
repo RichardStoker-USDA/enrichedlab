@@ -118,6 +118,7 @@ struct FilesPane: View {
 /// A terminal where the session works: the person's shell on this Mac, or a console in the lab sandbox.
 struct TerminalPane: View {
 	@Environment(AppModel.self) private var app
+	@Environment(\.colorScheme) private var scheme
 	var paneId: String
 	var session: SessionModel
 	@State private var error: String?
@@ -125,8 +126,9 @@ struct TerminalPane: View {
 	var body: some View {
 		let terminal = app.terminalHub.session(for: paneId)
 		TerminalHost(view: terminal.view)
-			.padding(.leading, 6)
-			.background(Color(nsColor: .textBackgroundColor))
+			.padding(.leading, 8)
+			.padding(.top, 6)
+			.background(scheme == .dark ? Color(red: 0.09, green: 0.09, blue: 0.10) : .white)
 			.overlay {
 				if let error { ContentUnavailableView("The Terminal Didn't Start", systemImage: "terminal", description: Text(error)) }
 			}
@@ -143,8 +145,16 @@ struct TerminalPane: View {
 
 private struct TerminalHost: NSViewRepresentable {
 	var view: TerminalView
+	@Environment(\.colorScheme) private var scheme
+
 	func makeNSView(context: Context) -> TerminalView { view }
-	func updateNSView(_ nsView: TerminalView, context: Context) {}
+
+	/// The terminal follows the window's appearance: resolved colors, set again when it changes.
+	func updateNSView(_ nsView: TerminalView, context: Context) {
+		let dark = scheme == .dark
+		nsView.nativeBackgroundColor = dark ? NSColor(srgbRed: 0.09, green: 0.09, blue: 0.10, alpha: 1) : .white
+		nsView.nativeForegroundColor = dark ? NSColor(srgbRed: 0.90, green: 0.90, blue: 0.92, alpha: 1) : NSColor(srgbRed: 0.11, green: 0.11, blue: 0.12, alpha: 1)
+	}
 }
 
 // MARK: Web pages (views, running apps)

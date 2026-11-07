@@ -70,6 +70,12 @@ call at a model's pace while resizing the window, and prints frame times, long t
 window's size. Build the window first
 (`bun run build:web`). Run it before calling a change to the window done, and add a scene with each new surface.
 
+The native macOS app builds with `swift build` in `apps/macos` (tests: `swift test`, which also start a real engine
+from source in a scratch home). `bun scripts/dev_lab.ts --mac --shots <folder>` runs the debug build against the same
+stand-in lab and captures each native scene in light and dark (`--scene mac_files` for one); it captures only the app's
+own windows. `bun scripts/build_mac_app.ts --adhoc` builds `dist/mac/EnrichedLab.app` (universal, with the universal
+`el` inside) for a local check; the release signs it with the Developer ID.
+
 A development run of the desktop app (`apps/desktop`, unpackaged) takes these for screenshots and tests:
 
 | Variable | Does |

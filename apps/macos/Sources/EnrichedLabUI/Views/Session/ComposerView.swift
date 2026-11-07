@@ -255,6 +255,7 @@ struct PlaceMenu: View {
 		}
 		.menuStyle(.button)
 		.buttonStyle(.borderless)
+		.tint(.primary)
 		.fixedSize()
 		.help(session.place.isLocal ? "Runs on This Mac, contained to the project folder. Choose to move it to a lab." : "Runs in the \(session.place.title) sandbox")
 		.disabled(session.busy || session.moving != nil)
@@ -312,6 +313,7 @@ struct ModelMenu: View {
 		}
 		.menuStyle(.button)
 		.buttonStyle(.borderless)
+		.tint(.primary)
 		.fixedSize()
 		.help(app.model(current).map { whereNote($0.where) } ?? "Choose a model")
 	}

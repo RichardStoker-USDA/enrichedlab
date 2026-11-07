@@ -41,7 +41,9 @@ public final class AppModel {
 	public private(set) var sites: [SiteSummary] = []
 	public private(set) var models: [ModelInfo] = []
 	public private(set) var defaultModel: String?
-	public private(set) var ui = UiPrefs()
+	public private(set) var ui = UiPrefs() {
+		didSet { applyAppearance() }
+	}
 	public private(set) var apps: [AppSummary] = []
 	public private(set) var labApps: [LabApp] = []
 	public var deviceRequests: [DeviceRequest] = []
@@ -79,6 +81,11 @@ public final class AppModel {
 	}
 
 	public var terminalHub: TerminalHub { terminals }
+
+	/// The person's appearance for every window, AppKit views (terminals, web views) and Settings included.
+	private func applyAppearance() {
+		NSApp?.appearance = ui.theme == "light" ? NSAppearance(named: .aqua) : ui.theme == "dark" ? NSAppearance(named: .darkAqua) : nil
+	}
 
 	// MARK: Start
 
@@ -119,7 +126,10 @@ public final class AppModel {
 		async let modelList = try? connection.models()
 		async let appList = try? connection.apps()
 		if let value = await prefs { ui = value }
-		if let value = await list { sessions = value }
+		if let value = await list {
+			sessions = value
+			if UserDefaults.standard.url(forKey: "newFolder") == nil, let newest = projects.first?.folder { newFolder = URL(fileURLWithPath: newest) }
+		}
 		if let value = await labs { sites = value }
 		if let value = await modelList { models = value.models; defaultModel = value.default }
 		if let value = await appList { apps = value }

@@ -37,9 +37,29 @@ the interface direction.
 | `packages/protocol` | The Lab protocol: request, notification and event types. Every surface imports only this from the engine side |
 | `packages/engine` | Everything in the box above |
 | `packages/tui` | The terminal surface |
-| `packages/web` | The browser and desktop surface (Svelte 5), served by the engine |
+| `packages/web` | The browser surface (Svelte 5), served by the engine; the Windows and Linux window's contents |
 | `packages/cli` | The `el` command: starts or finds the engine, routes subcommands |
-| `apps/desktop` | The Electron window around the web surface |
+| `apps/macos` | The native macOS app (SwiftUI): `EnrichedLabKit` speaks the protocol, `EnrichedLabUI` is the window |
+| `apps/desktop` | The Electron window around the web surface, for Windows and Linux |
+
+## Windows on each system
+
+One engine, a native window per system. The engine holds everything that decides behavior (sessions, the agent loop,
+models, tools, labs, permissions, apps), so every window does the same things the same way; a window only draws state
+and sends requests.
+
+- **macOS: `apps/macos`, SwiftUI.** A `NavigationSplitView` with places and sessions in the sidebar, the run sheet with
+  the composer, and the workbench as an inspector beside it. Native menus, Settings window, Liquid Glass materials,
+  SwiftTerm terminals, WebKit for pages and apps, Swift Charts for plots, a native table. `EnrichedLabKit` is the
+  protocol client (an actor on `URLSessionWebSocketTask`) and the run sheet's pure logic, tested against a real engine.
+  The app carries the universal `el` in `Contents/Resources/bin` and starts the engine through `el engine ensure`, so
+  the version and start rules stay in the engine. Apps (MCP Apps) run in an embedded engine-served page
+  (`#/embed/app/<id>`), so their bridge and consent are the same code as the other windows'.
+- **Windows and Linux: `apps/desktop`, Electron** around `packages/web`, installed per person without administrator.
+- **Terminal: `packages/tui` and `el`**, and the browser through a pairing link.
+
+A new protocol field reaches every window as data: Swift string unions stay strings and unknown session events decode
+as `other`, so an older window keeps working with a newer engine.
 
 ## The engine
 
