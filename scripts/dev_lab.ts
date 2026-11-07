@@ -18,6 +18,8 @@ const root = join(import.meta.dir, "..");
 const args = process.argv.slice(2);
 const shotsAt = args.includes("--shots") ? resolve(args[args.indexOf("--shots") + 1] ?? join(root, "dist", "shots")) : undefined;
 const only = args.includes("--scene") ? args[args.indexOf("--scene") + 1] : undefined;
+/** --mac: the native macOS app (apps/macos, debug build) instead of the Electron window. */
+const nativeMac = args.includes("--mac");
 const work = mkdtempSync(join(tmpdir(), "el-dev-lab-"));
 const home = join(work, "home");
 const sandbox = join(work, "sandbox");
@@ -271,6 +273,11 @@ async function main(): Promise<void> {
 	await turn(moved.id);
 	console.log(`dev lab: engine on ${found.port}, lab on ${lab.port}, sessions ${local.id} (This Mac) and ${moved.id} (Field Lab)`);
 
+	if (nativeMac) {
+		await macScenes(client, found.version, { local: local.id, lab: moved.id });
+		client.close();
+		return;
+	}
 	if (!shotsAt) {
 		app = electron({}, ["--session", moved.id]);
 		await app.exited;
@@ -306,6 +313,90 @@ async function main(): Promise<void> {
 		}
 	}
 	client.close();
+}
+
+// ── The native macOS app ─────────────────────────────────────────────────────────────────────────────────────────
+
+/** One state of the native window: a session, a pane, Settings, a size (Automation.swift reads these). */
+interface MacScene {
+	name: string;
+	session?: "lab" | "local";
+	pane?: "files" | "terminal" | "browser" | "desktop" | "first";
+	settings?: "general" | "models" | "labs" | "updates";
+	size?: string;
+	advanced?: boolean;
+	after?: number;
+}
+
+const MAC_SCENES: MacScene[] = [
+	{ name: "mac_new_session" },
+	{ name: "mac_session_lab", session: "lab" },
+	{ name: "mac_session_local", session: "local" },
+	{ name: "mac_advanced", session: "lab", advanced: true },
+	{ name: "mac_files", session: "local", pane: "files", after: 2500 },
+	{ name: "mac_terminal", session: "local", pane: "terminal", after: 3000 },
+	{ name: "mac_desktop", session: "lab", pane: "desktop", after: 4000 },
+	{ name: "mac_narrow", session: "lab", size: "900x700" },
+	{ name: "mac_settings_general", settings: "general" },
+	{ name: "mac_settings_models", settings: "models", after: 2500 },
+	{ name: "mac_settings_labs", settings: "labs" },
+];
+
+async function macScenes(client: EngineClient, engineVersion: string, sessions: { local: string; lab: string }): Promise<void> {
+	const binary = join(root, "apps/macos/.build/debug/EnrichedLab");
+	if (!statSync(binary, { throwIfNoEntry: false })) throw new Error("Build the app first: cd apps/macos && swift build");
+	const out = shotsAt ?? join(root, "dist", "shots");
+	mkdirSync(out, { recursive: true });
+	for (const theme of ["light", "dark"] as const) {
+		await client.call("ui.set", { theme });
+		for (const scene of MAC_SCENES) {
+			if (only && scene.name !== only) continue;
+			const sessionId = scene.session ? sessions[scene.session] : undefined;
+			const proc = Bun.spawn([binary], {
+				env: {
+					...env,
+					EL_APP_VERSION: engineVersion,
+					EL_ENGINE_COMMAND: `bun ${join(root, "packages/cli/src/main.ts")}`,
+					EL_SCENE: scene.name,
+					EL_SCENE_SIZE: scene.size ?? "1360x880",
+					EL_SCENE_AFTER: String(scene.after ?? 1800),
+					...(sessionId ? { EL_SCENE_SESSION: sessionId } : {}),
+					...(scene.pane ? { EL_SCENE_PANE: scene.pane } : {}),
+					...(scene.settings ? { EL_SCENE_SETTINGS: scene.settings } : {}),
+					...(scene.advanced ? { EL_SCENE_ADVANCED: "1" } : {}),
+				},
+				stdout: "pipe",
+				stderr: "ignore",
+			});
+			const windows: { id: string; name: string }[] = [];
+			let ready = false;
+			const reading = (async () => {
+				for await (const chunk of proc.stdout.pipeThrough(new TextDecoderStream())) {
+					for (const line of chunk.split("\n")) {
+						const w = /^scene: window (\d+) (.*)$/.exec(line);
+						if (w) windows.push({ id: w[1]!, name: w[2]! });
+						if (line === "scene: ready") ready = true;
+					}
+					if (ready) break;
+				}
+			})();
+			await Promise.race([reading, Bun.sleep(60_000)]);
+			if (!ready) {
+				failed = true;
+				console.log(`${scene.name} (${theme}): FAILED: the app never said it was ready`);
+				proc.kill();
+				continue;
+			}
+			// Only this app's own windows: never the whole screen.
+			const settings = windows.find((w) => /settings|general|models|labs|updates/i.test(w.name));
+			const target = scene.settings ? settings : windows.find((w) => w !== settings);
+			if (target) Bun.spawnSync(["screencapture", "-x", "-o", `-l${target.id}`, join(out, `${scene.name}-${theme}.png`)]);
+			proc.kill();
+			await proc.exited;
+			console.log(`${scene.name} (${theme}): ${target ? "ok" : "FAILED: no window"}`);
+			if (!target) failed = true;
+		}
+	}
 }
 
 function electron(extra: Record<string, string>, argv: string[]): ReturnType<typeof Bun.spawn> {

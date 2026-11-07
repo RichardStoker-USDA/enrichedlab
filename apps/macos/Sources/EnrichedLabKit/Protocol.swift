@@ -90,6 +90,21 @@ public struct SessionSummary: Codable, Sendable, Hashable, Identifiable {
 	public var parent: String?
 	public var place: String?
 	public var discovery: String?
+
+	public init(id: String, cwd: String, title: String, created: String, updated: String, model: String, turns: Int, running: Bool, site: String? = nil, parent: String? = nil, place: String? = nil, discovery: String? = nil) {
+		self.id = id
+		self.cwd = cwd
+		self.title = title
+		self.created = created
+		self.updated = updated
+		self.model = model
+		self.turns = turns
+		self.running = running
+		self.site = site
+		self.parent = parent
+		self.place = place
+		self.discovery = discovery
+	}
 }
 
 // MARK: Models and sites
@@ -442,6 +457,12 @@ public struct PartialResponse: Codable, Sendable, Hashable {
 		public var index: Int
 		public var name: String
 		public var args: String
+
+		public init(index: Int, name: String, args: String) {
+			self.index = index
+			self.name = name
+			self.args = args
+		}
 	}
 
 	public var text: String
@@ -462,6 +483,11 @@ public struct SurfaceAnswer: Codable, Sendable, Hashable {
 	public struct Image: Codable, Sendable, Hashable {
 		public var mime: String
 		public var data: String
+
+		public init(mime: String, data: String) {
+			self.mime = mime
+			self.data = data
+		}
 	}
 
 	public var text: String

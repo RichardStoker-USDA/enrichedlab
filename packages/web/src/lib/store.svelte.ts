@@ -236,7 +236,19 @@ class Lab {
 		if (this.current) await this.open(this.current);
 	}
 
+	/** Set when a native window shows one pane of this page (#/embed/app/<id>?session=<sid>): no sidebar, no session view. */
+	embed = $state<{ app: string; session?: string } | undefined>();
+
 	private async route(): Promise<void> {
+		const embedded = /^#\/embed\/app\/([^?]+)(?:\?(.*))?$/.exec(location.hash);
+		if (embedded) {
+			const q = new URLSearchParams(embedded[2] ?? "");
+			const theme = q.get("theme");
+			if (theme === "light" || theme === "dark") this.ui = { ...this.ui, theme };
+			this.embed = { app: decodeURIComponent(embedded[1]!), session: q.get("session") ?? undefined };
+			if (this.embed.session && this.embed.session !== this.current) await this.open(this.embed.session);
+			return;
+		}
 		const match = /^#\/s\/(s[0-9a-z]+)/.exec(location.hash);
 		if (match) {
 			if (match[1] !== this.current) await this.open(match[1]);

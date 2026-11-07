@@ -97,3 +97,55 @@ extension EngineConnection {
 		try await rename(id, title: "Kit test")
 	}
 }
+
+@Suite("The run sheet's shape")
+struct BlockTests {
+	private func decode(_ json: String) throws -> [SessionEvent] {
+		try JSONDecoder().decode([SessionEvent].self, from: Data(json.utf8))
+	}
+
+	@Test("a turn reads prompt, thinking with its summary, one activity, answer")
+	func turn() throws {
+		let events = try decode("""
+		[{"t":"user","id":"u","at":"2026-11-07T00:00:00Z","text":"Plot it"},
+		 {"t":"assistant","id":"a","at":"2026-11-07T00:00:12Z","model":"m","text":"","reasoning":"plan","toolCalls":[{"id":"c1","name":"read","args":"{}"},{"id":"c2","name":"shell","args":"{}"}],"stop":"tool_use"},
+		 {"t":"tool","id":"r1","at":"2026-11-07T00:00:13Z","callId":"c1","name":"read","ok":true,"content":""},
+		 {"t":"tool","id":"r2","at":"2026-11-07T00:00:14Z","callId":"c2","name":"shell","ok":false,"content":""},
+		 {"t":"reasoning_summary","id":"s","at":"2026-11-07T00:00:15Z","of":"a","text":"Planned it.","model":"m"},
+		 {"t":"assistant","id":"b","at":"2026-11-07T00:00:20Z","model":"m","text":"Done.","stop":"end"}]
+		""")
+		let made = blocks(events)
+		#expect(made.map(\.id) == ["u", "a-r", "a-2", "b"])
+		guard case let .thinking(_, _, summary, seconds) = made[1] else { Issue.record("no thinking block"); return }
+		#expect(summary == "Planned it.")
+		#expect(seconds == 12)
+		guard case let .activity(_, steps) = made[2] else { Issue.record("no activity"); return }
+		#expect(summarize(steps) == "Read 1 file, ran 1 command, 1 failed")
+	}
+
+	@Test("calls still running join the activity, with the question they wait on")
+	func running() throws {
+		let events = try decode("""
+		[{"t":"user","id":"u","at":"2026-11-07T00:00:00Z","text":"Go"},
+		 {"t":"assistant","id":"a","at":"2026-11-07T00:00:01Z","model":"m","text":"","toolCalls":[{"id":"c1","name":"shell","args":"{}"}],"stop":"tool_use"}]
+		""")
+		let question = PermissionRequest(requestId: "q", sessionId: "s", callId: "c1", tool: "shell", view: StepView(verb: "run", target: "rm -rf build"), reason: "changes files", once: nil)
+		let made = blocks(events, running: [RunningCall(id: "c1", name: "shell", target: "")], pending: [question])
+		guard case let .activity(_, steps) = made.last, case let .running(_, name, target, waiting) = steps.first else { Issue.record("no running step"); return }
+		#expect(name == "run")
+		#expect(target == "rm -rf build")
+		#expect(waiting?.requestId == "q")
+	}
+
+	@Test("models a session may use follow the lab's isolation")
+	func models() {
+		let model = { (provider: String, source: String) in ModelInfo(ref: "\(provider)/m", provider: provider, id: "m", label: "m", source: source, where: ModelWhere(kind: source == "site" ? "lab" : "cloud", name: provider), context: 1, maxOutput: 1, vision: false, efforts: []) }
+		let all = [model("home", "site"), model("whnrc", "site"), model("openai", "config")]
+		let site = { (name: String, isolated: Bool) in SiteSummary(name: name, title: name, url: "", kind: "gate", isolated: isolated, signedIn: true, models: 1, tools: 0, sandbox: true) }
+		let sites = [site("home", false), site("whnrc", true)]
+		#expect(allowedModels(all, sites: sites, site: nil).map(\.provider) == ["home", "openai"])
+		#expect(allowedModels(all, sites: sites, site: "whnrc").map(\.provider) == ["whnrc"])
+		#expect(allowedModels(all, sites: sites, site: "home").map(\.provider) == ["home", "openai"])
+		#expect(argumentPreview(#"{"command":"ls -la\nwc"#) == "ls -la wc")
+	}
+}

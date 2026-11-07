@@ -14,6 +14,7 @@
 	import Confirm from "./components/Confirm.svelte";
 	import ContextMenu from "./components/ContextMenu.svelte";
 	import { groups } from "./lib/layout.ts";
+	import AppPane from "./components/panes/AppPane.svelte";
 
 	const desktop = typeof window !== "undefined" && "labDesktop" in window;
 
@@ -128,6 +129,16 @@
 
 <svelte:window onkeydown={keys} />
 
+{#if lab.embed}
+	<!-- One app, for a native window's pane: the same bridge and consent as the workbench's App pane. -->
+	<div class="embed">
+		{#key `${lab.embed.app}:${lab.current ?? ""}`}
+			{#if !lab.embed.session || lab.current === lab.embed.session}
+				<AppPane id={lab.embed.app} active={true} />
+			{/if}
+		{/key}
+	</div>
+{:else}
 <div class="shell" class:desktop class:mac class:bench={benchOpen} class:no-rail={!lab.sidebar} style:--bench={`${benchWidth}%`}>
 	<Rail bind:open={lab.drawer} />
 	<main class="main">
@@ -156,8 +167,15 @@
 		{#if lab.lost}Reconnecting to the engine…{:else if lab.flash}{lab.flash}{#if lab.flashUrl}&nbsp;<a href={lab.flashUrl} target="_blank" rel="noopener noreferrer">Open</a>{/if}{/if}
 	</p>
 </div>
+{/if}
 
 <style>
+	.embed {
+		position: fixed;
+		inset: 0;
+		display: flex;
+		background: var(--canvas);
+	}
 	.shell {
 		display: grid;
 		grid-template-columns: var(--rail-width) minmax(0, 1fr);
