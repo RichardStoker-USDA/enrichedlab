@@ -382,8 +382,12 @@ async function macScenes(client: EngineClient, engineVersion: string, sessions: 
 			const windows: { id: string; name: string }[] = [];
 			let ready = false;
 			const reading = (async () => {
+				let rest = "";
 				for await (const chunk of proc.stdout.pipeThrough(new TextDecoderStream())) {
-					for (const line of chunk.split("\n")) {
+					// Whole lines only: a chunk can end partway through one.
+					const lines = (rest + chunk).split("\n");
+					rest = lines.pop() ?? "";
+					for (const line of lines) {
 						const w = /^scene: window (\d+) (.*)$/.exec(line);
 						if (w) windows.push({ id: w[1]!, name: w[2]! });
 						if (line === "scene: ready") ready = true;

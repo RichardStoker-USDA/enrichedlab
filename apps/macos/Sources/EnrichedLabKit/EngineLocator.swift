@@ -63,13 +63,20 @@ public struct EngineLocator: Sendable {
 	private func runEnsure() async throws {
 		guard let executable = command.first else { throw EngineError(code: -3, message: "This copy of EnrichedLab has no engine.") }
 		let process = Process()
-		process.executableURL = URL(fileURLWithPath: executable)
-		process.arguments = Array(command.dropFirst()) + ["engine", "ensure", "--json"]
+		// A bare name (`bun` in development) is found on the PATH below; the app's own `el` is a full path.
+		if executable.hasPrefix("/") {
+			process.executableURL = URL(fileURLWithPath: executable)
+			process.arguments = Array(command.dropFirst()) + ["engine", "ensure", "--json"]
+		} else {
+			process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+			process.arguments = command + ["engine", "ensure", "--json"]
+		}
 		var env = ProcessInfo.processInfo.environment
 		for (key, value) in environment { env[key] = value }
 		// The engine finds tools the way a login shell would; a Finder-started app has a short PATH.
 		let path = env["PATH"] ?? "/usr/bin:/bin"
-		env["PATH"] = (["/opt/homebrew/bin", "/usr/local/bin", FileManager.default.homeDirectoryForCurrentUser.appending(path: ".local/bin").path] + [path]).joined(separator: ":")
+		let home = FileManager.default.homeDirectoryForCurrentUser
+		env["PATH"] = (["/opt/homebrew/bin", "/usr/local/bin", home.appending(path: ".local/bin").path, home.appending(path: ".bun/bin").path] + [path]).joined(separator: ":")
 		process.environment = env
 		// What it says goes to a file, so a long message can't fill a pipe and hold the process.
 		let said = FileManager.default.temporaryDirectory.appending(path: "el-ensure-\(UUID().uuidString).txt")

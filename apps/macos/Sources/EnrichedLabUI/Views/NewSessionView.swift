@@ -14,6 +14,21 @@ struct NewSessionView: View {
 
 	var body: some View {
 		@Bindable var app = app
+		// In a scroll view sized to the window, so a long task or a short window scrolls instead of growing the window.
+		GeometryReader { proxy in
+			ScrollView {
+				form.frame(maxWidth: .infinity, minHeight: proxy.size.height)
+			}
+			.scrollBounceBehavior(.basedOnSize)
+		}
+		.navigationTitle("New Session")
+		.onAppear {
+			focused = true
+			model = nil
+		}
+	}
+
+	private var form: some View {
 		VStack(spacing: 0) {
 			Spacer(minLength: 40)
 			VStack(alignment: .leading, spacing: 18) {
@@ -51,18 +66,39 @@ struct NewSessionView: View {
 				}
 				.padding(14)
 				.glass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+				if app.connected, app.allowed(site: site).isEmpty { noModel }
+				ForEach(app.places.filter { $0.site.map { !$0.signedIn } ?? false }) { lab in
+					HStack(spacing: 4) {
+						Button("Sign in to \(lab.title)") { if let name = lab.site?.name { Task { _ = await app.signIn(name) } } }
+							.buttonStyle(.link)
+						Text("to work in its sandbox or use its models.").foregroundStyle(.secondary)
+					}
+					.font(.callout)
+				}
 			}
 			.frame(maxWidth: 640)
 			.padding(.horizontal, 32)
 			Spacer(minLength: 40)
 			Spacer(minLength: 40)
 		}
-		.frame(maxWidth: .infinity, maxHeight: .infinity)
-		.navigationTitle("New Session")
-		.onAppear {
-			focused = true
-			model = nil
+	}
+
+	/// No model can run this session yet: what to do about it, and that a task can wait.
+	private var noModel: some View {
+		HStack(alignment: .top, spacing: 16) {
+			VStack(alignment: .leading, spacing: 4) {
+				Text(app.models.isEmpty ? "No model yet." : "No model may work in \(place.title) yet.").fontWeight(.semibold)
+				Text("Sign in to a lab, use your ChatGPT plan or a key, or run an open model on this Mac. A task you write now waits in the session until then.")
+					.foregroundStyle(.secondary)
+			}
+			Spacer(minLength: 0)
+			Button("Set Up a Model…") {
+				app.showSettingsTab = .models
+				openSettings()
+			}
 		}
+		.font(.callout)
+		.padding(.horizontal, 4)
 	}
 
 	private func row(_ label: String, @ViewBuilder content: () -> some View) -> some View {
@@ -129,7 +165,8 @@ struct NewSessionView: View {
 					if let site = place.site, !site.signedIn { Task { _ = await app.signIn(site.name) } }
 					app.newPlace = place.id
 				} label: {
-					Label(place.isLocal ? place.title : "\(place.title) sandbox", systemImage: place.id == app.newPlace ? "checkmark" : "")
+					let title = place.isLocal ? place.title : "\(place.title) sandbox"
+					if place.id == app.newPlace { Label(title, systemImage: "checkmark") } else { Text(title) }
 				}
 				.disabled(!place.isLocal && place.site?.signedIn == true && !place.ready)
 			}
