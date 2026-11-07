@@ -16,7 +16,8 @@
         "containers": { "type": "boolean" }, "stop": { "type": "boolean" }, "ports": { "type": "boolean" },
         "attach": { "type": "boolean" }, "files": { "type": "boolean" }, "apps": { "type": "boolean" },
         "signers": { "type": "boolean" }, "usage": { "type": "boolean" }, "agents": { "type": "boolean" },
-        "runs": { "type": "boolean" }
+        "runs": { "type": "boolean" },
+        "openapi": { "type": "boolean", "description": "GET /v1/openapi.json serves the API as OpenAPI 3.1" }
       }
     },
     "sign_in": { "type": "object", "required": ["kind"], "properties": { "kind": { "type": "string", "enum": ["cloudflare-access-oauth", "oauth"] } } },

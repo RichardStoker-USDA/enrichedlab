@@ -58,7 +58,7 @@ export interface LabSigner {
 	revoked_at?: string | null;
 }
 
-export type Endpoint = "models" | "mcp" | "bundles" | "events" | "guard" | "devices" | "containers" | "stop" | "ports" | "attach" | "files" | "apps" | "signers" | "usage" | "agents" | "runs";
+export type Endpoint = "models" | "mcp" | "bundles" | "events" | "guard" | "devices" | "containers" | "stop" | "ports" | "attach" | "files" | "apps" | "signers" | "usage" | "agents" | "runs" | "openapi";
 
 export interface SandboxProfile {
 	name: string;

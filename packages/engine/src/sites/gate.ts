@@ -1300,6 +1300,16 @@ export class GateSite implements SiteAdapter, SandboxApi, DesktopApi {
 				});
 			}
 		}
+		// A lab that describes its API: OpenAPI 3.1 with paths and the contract's schemas.
+		if (has("openapi")) {
+			await attempt("GET /v1/openapi.json", async () => {
+				const doc = await this.json<{ openapi?: string; paths?: Record<string, unknown>; components?: { schemas?: Record<string, unknown> } }>("GET", "/v1/openapi.json", { signal: t() });
+				const paths = Object.keys(doc.paths ?? {}).length;
+				const schemas = Object.keys(doc.components?.schemas ?? {}).length;
+				const ok = typeof doc.openapi === "string" && doc.openapi.startsWith("3.1") && paths > 0;
+				add("GET /v1/openapi.json", ok ? "pass" : "fail", ok ? `OpenAPI ${doc.openapi}, ${paths} paths, ${schemas} schemas` : `openapi ${doc.openapi ?? "missing"}, ${paths} paths`);
+			});
+		}
 		if (has("events")) {
 			await attempt("GET /v1/events", async () => {
 				const controller = new AbortController();
