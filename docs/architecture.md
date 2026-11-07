@@ -137,6 +137,13 @@ asks. File and shell tools go through a workspace provider. The local one acts
 in the project folder with the person's rights. A site sandbox provider is the next one: switching the workspace
 moves `read`, `write`, `edit` and `shell` into the sandbox without changing the tools.
 
+**Tool catalog.** Every tool a session can use is described for search: a one-line summary, its domains (files, data,
+plots, documents, PDF, the lab's desktop, research and so on) and its argument names (`catalog.ts`). A session with
+more than 40 tools offers the model its core tools (reading, editing, the shell, plans, recall, views, skills) and
+`find_tools`, which searches the rest by what the agent needs; the tools it finds or has used stay in its requests,
+rebuilt from the log when a session resumes. Search is lexical (BM25), so it works offline and needs no model; a
+ranking by meaning can join it through the same search.
+
 **Permissions.** Reads inside the project run. Writes, edits and shell commands ask. A shell command runs without
 asking only when a quote-aware check finds every part read-only (no variables, substitutions, subshells, background
 jobs, writing redirections or environment prefixes; no command that runs another program) and every path argument
