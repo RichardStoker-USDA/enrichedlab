@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "n
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-export const VERSION = "0.2.24";
+export const VERSION = "0.2.25";
 
 /**
  * How the harness names itself to a lab. Gate files every request under the User-Agent's first word, so the lab's
@@ -13,6 +13,7 @@ export const CLIENT_AGENT = `EnrichedLab/${VERSION} (${process.platform}; ${proc
 
 /** What changed in this version, one line each, newest first. Surfaces show the first lines when a session opens. */
 export const NEWS = [
+	"0.2.25: on a lab desktop that offers it, the agent reads the windows and their buttons and fields before it clicks, starts apps by name and brings a window forward, so it clicks the right thing the first time; el lab check reads the desktop's state and starts and focuses an app.",
 	"0.2.24: a table that changes while it's open shows its new rows and columns (the Mac app could quit on a wider table); a subagent's questions reach your window even after it reconnects; on the Mac, the workbench stays open when you drag its edge wider, and a terminal whose shell had ended stays ended after a reconnect.",
 	"0.2.23: on macOS, EnrichedLab is now a native Mac app (macOS 15 and later) with the same sessions, labs, models and tools, and it opens room for the workbench instead of squeezing it; the window no longer slides when something inside it scrolls; agents search all their tools by what they need and come with skills for Shiny figure apps, data analysis in R or Python, Office files, PDF forms, a lab's desktop and research at a lab; a subagent's questions reach the window showing its session.",
 	"0.2.22: el lab check also checks a lab's desktop sandboxes (the picture, no shell, no address with a password) and its runs list; the lab contract adds data scopes to /v1/me.",
