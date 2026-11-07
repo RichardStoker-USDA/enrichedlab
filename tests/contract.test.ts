@@ -13,14 +13,25 @@ const descriptor: LabDescriptor = {
 	contract: "2026-11",
 	name: "devlab",
 	title: "Dev Lab",
-	endpoints: { models: true, bundles: true, events: true, guard: true, usage: true, containers: true, attach: true, files: true },
+	endpoints: { models: true, bundles: true, events: true, guard: true, usage: true, containers: true, attach: true, files: true, runs: true },
 	sign_in: { kind: "cloudflare-access-oauth" },
 	policy: { keep_data_inside: false },
 	support: { url: "https://help.example.org" },
 	sandbox_profiles: [{ name: "small", cpu: 2, memory: "4Gi" }],
 	conformance: { foreign_scope: "otherlab", scan_test: true },
 	sandbox_networks: [{ name: "none", title: "No network" }, { name: "internet", title: "The public web" }],
+	sandbox_desktop: { image: "desktop", screen: { width: 8, height: 4 }, actions: ["screenshot", "left_click"], open: true, max_type_chars: 4000 },
 };
+/** A PNG's signature and the start of its IHDR, enough for a check that reads the size. */
+const TINY_PNG = (() => {
+	const b = Buffer.alloc(33);
+	b.set([137, 80, 78, 71, 13, 10, 26, 10]);
+	b.writeUInt32BE(13, 8);
+	b.write("IHDR", 12, "ascii");
+	b.writeUInt32BE(8, 16);
+	b.writeUInt32BE(4, 20);
+	return b.toString("base64");
+})();
 const me = {
 	subject: "u_9f2c41aa",
 	handle: "pat",
@@ -30,8 +41,9 @@ const me = {
 	],
 	policy: { keep_data_inside: false },
 	sandbox_networks: ["none", "internet"],
+	data_scopes: [{ id: "soils-2026", title: "Soil cores, 2026", research_group: "soils", access: "read" }],
 };
-const seen: { cursor?: string | null; deleted?: string; uploaded: string; keepsTestFile?: boolean; filesDeleted: string[]; internet: string[]; leaks?: boolean; tries?: boolean; passesBadCerts?: boolean } = { uploaded: "", filesDeleted: [], internet: [] };
+const seen: { desktop: string[]; cursor?: string | null; deleted?: string; uploaded: string; keepsTestFile?: boolean; filesDeleted: string[]; internet: string[]; leaks?: boolean; tries?: boolean; passesBadCerts?: boolean } = { desktop: [], uploaded: "", filesDeleted: [], internet: [] };
 /** The EICAR test file's sha-256: the lab here knows it by its hash, so this file never holds it. */
 const EICAR_SHA256 = "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f";
 
@@ -62,10 +74,21 @@ const lab = Bun.serve<{ stdin: string; started: boolean }, never>({
 				return Response.json({ window: "7d", rows: [{ lab: "devlab", tokens: { input: 10, output: 5 }, gpu_seconds: 0, sandbox_seconds: 30 }] });
 			case "/v1/containers": {
 				// An internet sandbox (n1) reaches the public web only, and takes no files.
-				const body = (await request.json().catch(() => ({}))) as { network?: string };
+				const body = (await request.json().catch(() => ({}))) as { network?: string; image?: string };
+				if (body.image === "desktop") return Response.json({ id: "d1", status: "running", image: "desktop" });
 				if (body.network === "internet") return Response.json({ id: "n1", status: "running", network: "internet" });
 				return Response.json({ id: "c1", status: "running", image_digest: `sha256:${"a".repeat(64)}` });
 			}
+			// A desktop sandbox: a picture for screenshot, no shell, and no address with a user and password.
+			case "/v1/containers/d1/desktop":
+				seen.desktop.push(((await request.json()) as { action: string }).action);
+				return Response.json({ ok: true, action: "screenshot", screenshot: { png: TINY_PNG, width: 8, height: 4 } });
+			case "/v1/containers/d1/exec":
+				return Response.json({ error: { code: "desktop_no_shell", message: "a desktop sandbox has no shell" } }, { status: 403 });
+			case "/v1/containers/d1/desktop/open":
+				return Response.json({ error: { code: "invalid_target", message: "no user or password in addresses" } }, { status: 400 });
+			case "/v1/runs":
+				return Response.json({ data: [{ id: "s1", session: "s1", status: "idle", mode: "attended", model: "lab-model" }] });
 			case "/v1/containers/n1/exec": {
 				const { command } = (await request.json()) as { command: string };
 				seen.internet.push(command);
@@ -127,6 +150,10 @@ const lab = Bun.serve<{ stdin: string; started: boolean }, never>({
 						: `: keepalive\n\nid: 8\nevent: job.finished\ndata: {"type":"job.finished","at":"2026-11-04T10:00:00Z","id":"8","status":"done","summary":"model fit"}\n\nid: 9\nevent: quota.warning\ndata: {"type":"quota.warning","at":"2026-11-04T10:01:00Z","id":"9","kind":"GPU hours","used":8,"limit":10}\n\n`;
 				return new Response(body, { headers: { "content-type": "text/event-stream" } });
 			}
+		}
+		if (request.method === "DELETE" && url.pathname === "/v1/containers/d1") {
+			seen.desktop.push("deleted");
+			return Response.json({ ok: true });
 		}
 		if (request.method === "DELETE" && url.pathname === "/v1/containers/n1") {
 			seen.internet.push("deleted");
@@ -198,6 +225,14 @@ describe("lab contract", () => {
 		expect(rows.find((r) => r.row === "old cursor")?.detail).toContain("reset");
 		expect(rows.find((r) => r.row === "another lab's scope")?.status).toBe("pass");
 		expect(rows.find((r) => r.row === "attach")?.status).toBe("pass");
+		// A desktop sandbox: its picture, no shell, no address with a password; removed after.
+		expect(rows.filter((r) => r.row.startsWith("desktop")).map((r) => [r.row, r.status, r.detail])).toEqual([
+			["desktop sandbox", "pass", "a 8x4 screenshot from the desktop image"],
+			["desktop sandbox has no shell", "pass", "exec answered 403 desktop_no_shell"],
+			["desktop refuses an address with a password", "pass", "answered 400 invalid_target"],
+		]);
+		expect(seen.desktop).toEqual(["screenshot", "deleted"]);
+		expect(rows.find((r) => r.row === "GET /v1/runs")?.status).toBe("pass");
 		expect(rows.find((r) => r.row === "attach streams stdin")?.status).toBe("pass");
 		expect(rows.find((r) => r.row === "scanner refuses a test file")).toMatchObject({ status: "pass", detail: "422 file_refused" });
 		// An internet sandbox reaches the public web, not the metadata or a private address, and takes no files.

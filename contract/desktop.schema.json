@@ -26,13 +26,17 @@
     },
     "answer": {
       "type": "object",
+      "required": ["ok", "action"],
+      "description": "screenshot comes only after screenshot and zoom (its size is the PNG's own, so a zoom answers the zoomed size); cursor only after cursor_position. A client that wants to see the result of input asks for a screenshot after it",
       "properties": {
         "ok": { "type": "boolean" },
-        "screenshot": { "type": "object", "required": ["png"], "properties": { "png": { "type": "string", "description": "base64 PNG" }, "width": { "type": "integer" }, "height": { "type": "integer" } } },
+        "action": { "type": "string" },
+        "screenshot": { "type": "object", "required": ["png", "width", "height"], "properties": { "png": { "type": "string", "description": "base64 PNG" }, "width": { "type": "integer" }, "height": { "type": "integer" } } },
         "cursor": { "$ref": "#/$defs/point" }
       }
     },
-    "open": { "type": "object", "required": ["target"], "properties": { "target": { "type": "string", "description": "an https address or a /sandbox file path" }, "by": { "enum": ["agent", "person"] } } }
+    "open": { "type": "object", "required": ["target"], "properties": { "target": { "type": "string", "description": "an http(s) address with a host and no user or password, or a path under /sandbox/ with no . or .. segments" }, "by": { "enum": ["agent", "person"] } } },
+    "opened": { "type": "object", "required": ["opened"], "properties": { "opened": { "type": "string" } } }
   },
   "$ref": "#/$defs/action"
 }

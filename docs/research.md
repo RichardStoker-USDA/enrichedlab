@@ -138,8 +138,10 @@ At WHNRC the same image runs in a Kata microVM on the sandbox node.
 
 ## What WHNRC needs
 
-What it takes for WHNRC to serve EnrichedLab the way Home Lab does. All of it is WHNRC estate work, owned by the broker
-lane and decided with Rich; EnrichedLab's side is ready for each piece as the contract rows show.
+What it takes for WHNRC to serve EnrichedLab the way Home Lab does. Rich confirmed the adapter on November 7 (item 4 of
+WHNRC's current program): WHNRC builds the broker side as part of its research-agent work, and the contract's shapes
+and the `el lab check` conformance rows stay in this repository. EnrichedLab's side is ready for each piece as the
+contract rows show.
 
 1. **The adapter.** The broker serves the contract at one hostname: the descriptor (`title: "WHNRC EnrichedLab"`,
    `policy.keep_data_inside: true`), `/v1/me` from its principals and memberships, `/v1/models` from the reasoner and
@@ -153,19 +155,25 @@ lane and decided with Rich; EnrichedLab's side is ready for each piece as the co
    keep the databases' CPU and memory reserved.
 4. **Desktop image.** The same desktop image as Home Lab, qualified under Kata.
 5. **Discovery mode.** The `discovery` capability mapped onto `research.discovery.autonomous`.
+6. **The research web front end.** EnrichedLab's own web package, served by the lab, so a session changed in the
+   desktop app or in the browser shows in the other through `/v1/runs` and `/v1/events`. EnrichedLab's side is a lab
+   transport for the web package's store: the same windows, reading a run and its events from the lab instead of the
+   engine on the person's computer.
 
 ## Order of work
 
 | # | Piece | Owner | State |
 |---|---|---|---|
 | 1 | Isolate labs that keep data inside; no lab names in EnrichedLab | EnrichedLab | done (`f7c4fc6`) |
-| 2 | Contract rows for runs, desktops, capabilities and sandbox agents | EnrichedLab, with Home Lab | in [labs.md](labs.md) (`ac42ee2`); runs proposed, shape sent to Home Lab |
+| 2 | Contract rows for runs, desktops, capabilities, sandbox agents and data scopes | EnrichedLab, with Home Lab | in [labs.md](labs.md); runs agreed with Home Lab as a thin layer over its sessions; `el lab check` rows for desktops and runs |
 | 3 | Discovery mode client | EnrichedLab | done (`d4a39dc`) |
 | 4 | Reasoning summaries | EnrichedLab | done (`398e4d6`) |
 | 5 | Desktop pane and agent tools | EnrichedLab | done (`4824b45`, `d44bd9d`); checked live against Home Lab, November 6 |
-| 6 | Runs at the lab, client | EnrichedLab | after the shape is agreed with Home Lab |
+| 6 | Runs at the lab, client | EnrichedLab | after Home Lab serves `/v1/runs` |
 | 7 | Run package | EnrichedLab | done (`700eb59`) |
 | 8 | Desktop sandboxes, `Home Lab` title | Home Lab | live (publication 67) |
 | 9 | Runs on Rein and scheduled tasks | Home Lab | next |
 | 10 | Discovery grant and approval holds | Home Lab | after Rich confirms to its owner |
-| 11 | Broker adapter, hostname, Access OAuth, srv4 sandbox profiles | WHNRC broker lane | waits for Rich |
+| 11 | Broker adapter | WHNRC broker lane | confirmed by Rich, November 7; in WHNRC's research-agent work |
+| 12 | Hostname, Access managed OAuth, srv4 sandbox limits | WHNRC, with Rich | to settle |
+| 13 | Web package served by a lab (a lab transport for its store) | EnrichedLab | after runs |

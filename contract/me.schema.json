@@ -29,6 +29,21 @@
     },
     "quotas": { "type": "array" },
     "capabilities": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "named grants; discovery lets the person turn on Discovery mode in this lab's sessions" },
-    "sandbox_agents": { "enum": ["lab", "any"], "description": "whose agents may use this person's sandboxes" }
+    "sandbox_agents": { "enum": ["lab", "any"], "description": "whose agents may use this person's sandboxes" },
+    "data_scopes": {
+      "type": "array",
+      "description": "the lab data the person may reach, by reference: a data tool takes the id, the files stay at the lab, and the lab enforces access",
+      "items": {
+        "type": "object",
+        "required": ["id", "access"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "title": { "type": "string" },
+          "research_group": { "type": ["string", "null"], "description": "absent or null for lab-wide data" },
+          "project": { "type": ["string", "null"], "description": "set when the scope belongs to one project" },
+          "access": { "enum": ["read", "write"] }
+        }
+      }
+    }
   }
 }

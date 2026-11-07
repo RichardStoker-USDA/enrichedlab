@@ -59,6 +59,8 @@ interface GateMe {
 	/** Named grants, such as "discovery". */
 	capabilities?: string[];
 	sandbox_agents?: SandboxAgents;
+	/** The lab data the person may reach, by reference; the lab enforces access. */
+	data_scopes?: { id: string; title?: string; research_group?: string | null; project?: string | null; access: "read" | "write" }[];
 }
 
 /** What a sandbox was made with: its image and network (undefined: the lab's default image, or no network). */
@@ -1122,6 +1124,39 @@ export class GateSite implements SiteAdapter, SandboxApi, DesktopApi {
 				}
 			});
 		}
+		// A lab that offers a desktop sandbox: a PNG of the size it names, no shell, and no address carrying a user and
+		// password. The desktop starts on first contact; call() waits out sandbox_starting and desktop_unavailable.
+		const desktopInfo = d?.sandbox_desktop;
+		if (has("containers") && desktopInfo?.image) {
+			await attempt("desktop sandbox", async () => {
+				const made = await this.json<{ id: string }>("POST", "/v1/containers", { json: { name: "el-lab-check-desktop", image: desktopInfo.image }, signal: AbortSignal.timeout(300_000) });
+				const at = `/v1/containers/${encodeURIComponent(made.id)}`;
+				const refused = (path: string, json: Record<string, unknown>) =>
+					this.call("POST", `${at}/${path}`, { json, signal: t() }).then(
+						async (r) => (await r.arrayBuffer(), { status: r.status as number | undefined, code: undefined as string | undefined }),
+						(e: { status?: number; code?: string }) => ({ status: e.status, code: e.code }),
+					);
+				const said = (got: { status?: number; code?: string }) => `answered ${got.status ?? "?"}${got.code ? ` ${got.code}` : ""}`;
+				try {
+					const shot = await this.json<{ screenshot?: { png?: string } }>("POST", `${at}/desktop`, { json: { action: "screenshot", by: "agent" }, signal: AbortSignal.timeout(180_000) });
+					const png = Buffer.from(shot.screenshot?.png ?? "", "base64");
+					const isPng = png.length > 24 && png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+					const [w, h] = isPng ? [png.readUInt32BE(16), png.readUInt32BE(20)] : [0, 0];
+					const want = desktopInfo.screen;
+					if (!isPng) add("desktop sandbox", "fail", "a screenshot gave no PNG under screenshot.png");
+					else if (want && (w !== want.width || h !== want.height)) add("desktop sandbox", "fail", `the screenshot is ${w}x${h}; the descriptor says ${want.width}x${want.height}`);
+					else add("desktop sandbox", "pass", `a ${w}x${h} screenshot from the ${desktopInfo.image} image`);
+					const exec = await refused("exec", { command: "id", timeout_seconds: 10 });
+					add("desktop sandbox has no shell", exec.status === 403 && exec.code === "desktop_no_shell" ? "pass" : "fail", `exec ${said(exec)}`);
+					if (desktopInfo.open) {
+						const open = await refused("desktop/open", { target: "https://check:check@example.com/", by: "agent" });
+						add("desktop refuses an address with a password", open.status === 400 ? "pass" : "fail", said(open));
+					}
+				} finally {
+					await this.call("DELETE", `/v1/containers/${encodeURIComponent(made.id)}`, { signal: t() }).then((r) => r.arrayBuffer(), () => undefined);
+				}
+			});
+		}
 		// A lab that offers internet sandboxes: one reaches the public web but no private address, and takes no lab files.
 		if (has("containers") && d?.sandbox_networks?.some((n) => n.name === "internet")) {
 			await attempt("internet sandbox", async () => {
@@ -1250,6 +1285,8 @@ export class GateSite implements SiteAdapter, SandboxApi, DesktopApi {
 				}
 			});
 		} else skip("GET /v1/events");
+		if (has("runs")) await attempt("GET /v1/runs", async () => fits("GET /v1/runs", "runs", await this.json("GET", "/v1/runs", { signal: t() })));
+		else skip("GET /v1/runs");
 
 		return rows;
 	}

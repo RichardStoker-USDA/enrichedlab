@@ -10,6 +10,7 @@ import guardSchema from "../../../../contract/guard.schema.json" with { type: "j
 import labSchema from "../../../../contract/lab.schema.json" with { type: "json" };
 import meSchema from "../../../../contract/me.schema.json" with { type: "json" };
 import modelsSchema from "../../../../contract/models.schema.json" with { type: "json" };
+import runSchema from "../../../../contract/run.schema.json" with { type: "json" };
 import signersSchema from "../../../../contract/signers.schema.json" with { type: "json" };
 import usageSchema from "../../../../contract/usage.schema.json" with { type: "json" };
 
@@ -28,6 +29,8 @@ export const SCHEMAS = {
 	container: containerSchema,
 	apps: appsSchema,
 	signers: signersSchema,
+	/** GET /v1/runs: the person's runs at the lab. */
+	runs: { type: "object", required: ["data"] as string[], properties: { data: { type: "array", items: runSchema.$defs.run } } },
 } as const;
 
 /** One version of an app a lab offers (GET /v1/apps). */

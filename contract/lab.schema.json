@@ -35,7 +35,11 @@
         "image": { "type": "string", "minLength": 1 },
         "screen": { "type": "object", "required": ["width", "height"], "properties": { "width": { "type": "integer", "minimum": 1 }, "height": { "type": "integer", "minimum": 1 } } },
         "actions": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-        "open": { "type": "boolean", "description": "POST /v1/containers/{id}/desktop/open is served" }
+        "open": { "type": "boolean", "description": "POST /v1/containers/{id}/desktop/open is served" },
+        "open_targets": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "the kinds of target open takes, such as https and sandbox" },
+        "max_type_chars": { "type": "integer", "minimum": 1, "description": "the most one type action takes" },
+        "max_wait_seconds": { "type": "integer", "minimum": 0, "description": "the longest wait action" },
+        "labels": { "type": "array", "items": { "enum": ["agent", "person"] }, "description": "the by labels the lab records" }
       }
     },
     "support": { "type": "object", "required": ["url"], "properties": { "url": { "type": "string", "pattern": "^https://" } } },
