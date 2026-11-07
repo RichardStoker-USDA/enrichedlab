@@ -27,6 +27,7 @@ import { runHooks } from "../hooks.ts";
 import { projectRoot } from "../prompt.ts";
 import { findSkills, type Skill, skillDirs, skillTool } from "../skills.ts";
 import { DEFER_ABOVE, findTools, foundNames, offered } from "../catalog.ts";
+import { builtinSkillsDir } from "../builtin_skills.ts";
 import type { AgentResult } from "../tools/agents.ts";
 import { join } from "node:path";
 import { decide } from "../permissions.ts";
@@ -168,7 +169,14 @@ export class SessionRuntime {
 	/** The person's and the project's skills, read again at most every 10 seconds. */
 	skills(): Skill[] {
 		if (!this.skillCache || Date.now() - this.skillCache.at > 10_000) {
-			this.skillCache = { at: Date.now(), skills: findSkills(skillDirs(this.deps.config().skills.dirs, projectRoot(this.cwd))) };
+			// Built-in skills first, so the person's and the project's skills of the same name replace them.
+			let builtin: string[] = [];
+			try {
+				builtin = [builtinSkillsDir()];
+			} catch {
+				// An unwritable home: the session works without the built-in skills.
+			}
+			this.skillCache = { at: Date.now(), skills: findSkills([...builtin, ...skillDirs(this.deps.config().skills.dirs, projectRoot(this.cwd))]) };
 		}
 		return this.skillCache.skills;
 	}
