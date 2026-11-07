@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "n
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-export const VERSION = "0.2.21";
+export const VERSION = "0.2.22";
 
 /**
  * How the harness names itself to a lab. Gate files every request under the User-Agent's first word, so the lab's
@@ -13,6 +13,7 @@ export const CLIENT_AGENT = `EnrichedLab/${VERSION} (${process.platform}; ${proc
 
 /** What changed in this version, one line each, newest first. Surfaces show the first lines when a session opens. */
 export const NEWS = [
+	"0.2.22: el lab check also checks a lab's desktop sandboxes (the picture, no shell, no address with a password) and its runs list; the lab contract adds data scopes to /v1/me.",
 	"0.2.21: the Desktop pane and the agent's desktop tools work with a lab desktop as Home Lab serves it: a fresh picture after each action, and an archived desktop is restored with its files instead of replaced.",
 	"0.2.20: a lab can offer a desktop sandbox that you and the agent both use, in a Desktop pane; a lab can grant Discovery mode, turned on by typing /discover, where the agent works on its own inside the lab without asking; each step's reasoning gets a short summary made where its model runs, with the full text a click away, and compaction stays there too; el session package writes a session as an RO-Crate to check or rerun; a lab that says it keeps data inside stays isolated.",
 	"0.2.19: connections into a lab sandbox (a terminal, its browser, a Shiny app's live updates) no longer fail once right after your lab sign-in renews itself.",
