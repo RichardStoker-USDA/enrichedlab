@@ -91,7 +91,7 @@ const HELP = `EnrichedLab ${VERSION}
   el service add <service>        use your own key: openai, anthropic, gemini, openrouter, custom --address <url>
   el doctor                       check the setup
   el update [--check]             install the newest release (signed; no administrator)
-  el engine status|stop|restart
+  el engine status|stop|restart|ensure [--json]
   el serve [--foreground] [--port N]
 
 Settings and sessions live in ~/.el (EL_HOME moves them).`;
@@ -722,6 +722,12 @@ async function main(): Promise<void> {
 				await stopEngine();
 				const file = await ensureEngine();
 				return out(`Engine running on port ${file.port} (pid ${file.pid}).`);
+			}
+			if (rest[0] === "ensure") {
+				// For windows that start the engine through this binary: find or start it, then say where it is. The token
+				// stays in run/engine.json (owner-only); the caller reads it from there.
+				const file = await ensureEngine();
+				return out(flags.json ? JSON.stringify({ port: file.port, pid: file.pid, version: file.version, busy: file.busy ?? false }) : `Engine ${file.version} on port ${file.port} (pid ${file.pid}).`);
 			}
 			const file = await findEngine();
 			return out(file ? `Engine ${file.version} on port ${file.port}, pid ${file.pid}, since ${file.started}.` : "No engine running. It starts on demand.");
