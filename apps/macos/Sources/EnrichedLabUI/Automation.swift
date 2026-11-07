@@ -13,6 +13,8 @@ import SwiftUI
 /// EL_SCENE_RESIZE   a content size applied after the pane opens (narrowing a window with the workbench open)
 /// EL_SCENE_ADVANCED 1 to show advanced controls
 /// EL_SCENE_AFTER    milliseconds to wait before saying the scene is ready
+/// EL_SCENE_PROMPT   start a new session in the newest project with this task, as the New Session view does
+/// EL_SCENE_UNTIL    streaming (a long tool call is arriving), question (it asks), or done (allowed, then finished)
 @MainActor
 enum Automation {
 	static var active: Bool { ProcessInfo.processInfo.environment["EL_SCENE"] != nil }
@@ -28,6 +30,7 @@ enum Automation {
 			window.setContentSize(NSSize(width: size[0], height: size[1]))
 			window.center()
 		}
+		if let prompt = env["EL_SCENE_PROMPT"] { await live(app: app, prompt: prompt, until: env["EL_SCENE_UNTIL"] ?? "done") }
 		if let id = env["EL_SCENE_SESSION"] {
 			app.selection = id
 			for _ in 0 ..< 100 where app.session?.id != id || app.session?.opening == true { try? await Task.sleep(for: .milliseconds(100)) }
@@ -63,6 +66,47 @@ enum Automation {
 
 	private static var mainWindow: NSWindow? {
 		NSApp.windows.first { $0.isVisible && $0.frame.width > 400 && !$0.title.contains("Settings") }
+	}
+
+	/// A live turn from the window, measured: how soon output appears, and the longest the main thread was busy.
+	private static func live(app: AppModel, prompt: String, until: String) async {
+		guard let folder = app.projects.first?.folder else { print("scene: live: no project"); return }
+		// The longest the main thread was busy, before the first output (opening the session) and after (streaming).
+		var opening: Duration = .zero
+		var streaming: Duration = .zero
+		var first: Duration?
+		var watching = true
+		let clock = ContinuousClock()
+		let watch = Task { @MainActor in
+			while watching {
+				let start = clock.now
+				try? await Task.sleep(for: .milliseconds(10))
+				let stall = clock.now - start - .milliseconds(10)
+				if first == nil { opening = max(opening, stall) } else { streaming = max(streaming, stall) }
+			}
+		}
+		let sent = clock.now
+		guard await app.create(folder: URL(fileURLWithPath: folder), place: "local", model: nil, prompt: prompt) != nil else { print("scene: live: not started"); return }
+		var answered = false
+		for _ in 0 ..< 600 {
+			guard let session = app.session else { break }
+			if first == nil, !session.partial.text.isEmpty || !session.partial.tools.isEmpty || !session.blocks.isEmpty { first = clock.now - sent }
+			if until == "streaming", (session.partial.tools.first?.args.count ?? 0) > 4000 { break }
+			if until == "question", !session.pending.isEmpty { break }
+			if until == "done" {
+				if let question = session.pending.first, !answered {
+					answered = true
+					await session.answer(question, .allow)
+				}
+				if answered, !session.busy { break }
+			}
+			try? await Task.sleep(for: .milliseconds(100))
+		}
+		watching = false
+		_ = await watch.value
+		let ms = { (d: Duration?) in d.map { String(Int($0.components.seconds * 1000 + $0.components.attoseconds / 1_000_000_000_000_000)) } ?? "none" }
+		let session = app.session
+		print("scene: live \(until): first output \(ms(first)) ms, longest main-thread stall opening \(ms(opening)) ms, streaming \(ms(streaming)) ms, steps \(session?.blocks.count ?? 0), questions \(session?.pending.count ?? 0), busy \(session?.busy ?? false)")
 	}
 }
 #endif

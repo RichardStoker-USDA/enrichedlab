@@ -71,7 +71,7 @@ struct Composer: View {
 						Image(systemName: "stop.fill").font(.system(size: 11, weight: .bold)).frame(width: 26, height: 26)
 					}
 					.buttonStyle(.plain)
-					.background(.primary.opacity(0.85), in: .circle)
+					.background(Color.primary.opacity(0.85), in: .circle)
 					.foregroundStyle(Color(nsColor: .windowBackgroundColor))
 					.help("Stop (⌘.)")
 					.accessibilityLabel("Stop")
@@ -222,7 +222,7 @@ struct ContextGauge: View {
 				.scaleEffect(0.42)
 				.frame(width: 18, height: 18)
 				.tint(Double(context.used) / Double(max(context.threshold, 1)) > 0.85 ? .orange : Theme.accent)
-			if let rate { Text("\(Int(rate)) tok/s").font(.caption).foregroundStyle(.secondary).monospacedDigit() }
+			if let rate { Text("\(Int(rate)) tok/s").font(.caption).foregroundStyle(.secondary).monospacedDigit().lineLimit(1).fixedSize() }
 		}
 		.help("\(context.estimated ? "About " : "")\(tokenCount(context.used)) of \(tokenCount(context.threshold)) tokens before older turns are summarized (window \(tokenCount(context.window)))")
 	}

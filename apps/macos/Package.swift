@@ -28,7 +28,13 @@ let package = Package(
 			],
 			resources: [.process("Resources")]
 		),
-		.executableTarget(name: "EnrichedLab", dependencies: ["EnrichedLabUI"]),
+		.executableTarget(
+			name: "EnrichedLab",
+			dependencies: ["EnrichedLabUI"],
+			// SwiftPM records the minimum macOS as the SDK version; AppKit reads that to choose its design, so the
+			// app states the SDK it was built for and keeps the current design while still running on macOS 15.
+			linkerSettings: [.unsafeFlags(["-Xlinker", "-platform_version", "-Xlinker", "macos", "-Xlinker", "15.0", "-Xlinker", "26.0"])]
+		),
 		.testTarget(name: "EnrichedLabKitTests", dependencies: ["EnrichedLabKit"]),
 	],
 	swiftLanguageModes: [.v6]

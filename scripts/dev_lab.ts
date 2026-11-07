@@ -326,6 +326,9 @@ interface MacScene {
 	size?: string;
 	/** A size applied after the pane opens: narrowing a window with the workbench open. */
 	resize?: string;
+	/** A task started from the window in a new session, run until it streams, asks, or is done. */
+	prompt?: string;
+	until?: "streaming" | "question" | "done";
 	advanced?: boolean;
 	after?: number;
 }
@@ -340,6 +343,9 @@ const MAC_SCENES: MacScene[] = [
 	{ name: "mac_desktop", session: "lab", pane: "desktop", after: 4000 },
 	{ name: "mac_narrow", session: "lab", pane: "desktop", size: "900x700", after: 3000 },
 	{ name: "mac_narrowed", session: "lab", pane: "desktop", resize: "900x700", after: 3000 },
+	{ name: "mac_live_streaming", prompt: "Write the big page", until: "streaming", after: 300 },
+	{ name: "mac_live_question", prompt: "Write the big page", until: "question", after: 800 },
+	{ name: "mac_live_done", prompt: "Write the big page", until: "done", after: 800 },
 	{ name: "mac_settings_general", settings: "general" },
 	{ name: "mac_settings_models", settings: "models", after: 2500 },
 	{ name: "mac_settings_labs", settings: "labs" },
@@ -366,6 +372,7 @@ async function macScenes(client: EngineClient, engineVersion: string, sessions: 
 					...(sessionId ? { EL_SCENE_SESSION: sessionId } : {}),
 					...(scene.pane ? { EL_SCENE_PANE: scene.pane } : {}),
 					...(scene.resize ? { EL_SCENE_RESIZE: scene.resize } : {}),
+					...(scene.prompt ? { EL_SCENE_PROMPT: scene.prompt, EL_SCENE_UNTIL: scene.until ?? "done" } : {}),
 					...(scene.settings ? { EL_SCENE_SETTINGS: scene.settings } : {}),
 					...(scene.advanced ? { EL_SCENE_ADVANCED: "1" } : {}),
 				},
@@ -385,7 +392,7 @@ async function macScenes(client: EngineClient, engineVersion: string, sessions: 
 					if (ready) break;
 				}
 			})();
-			await Promise.race([reading, Bun.sleep(60_000)]);
+			await Promise.race([reading, Bun.sleep(scene.prompt ? 120_000 : 60_000)]);
 			if (!ready) {
 				failed = true;
 				console.log(`${scene.name} (${theme}): FAILED: the app never said it was ready`);
