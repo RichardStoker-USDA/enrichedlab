@@ -12,6 +12,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, wr
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { deflateSync } from "node:zlib";
+import type { ServerWebSocket } from "bun";
 import { EngineClient, findEngine } from "../packages/engine/src/index.ts";
 
 const root = join(import.meta.dir, "..");
@@ -172,19 +173,47 @@ function desktopPng(): string {
 	return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]).toString("base64");
 }
 
+/** The stand-in desktop's live view (gate.desktop.v1): the whole screen as one band when it opens and after each action. */
+const watching = new Set<ServerWebSocket<unknown>>();
+function sendScreen(ws: ServerWebSocket<unknown>): void {
+	const head = Buffer.alloc(8);
+	head.writeUInt16BE(0, 0);
+	head.writeUInt16BE(0, 2);
+	head.writeUInt16BE(DESK.width, 4);
+	head.writeUInt16BE(DESK.height, 6);
+	// A PNG where Gate sends JPEG: the windows decode by content.
+	ws.send(Buffer.concat([head, Buffer.from(desktopPng(), "base64")]));
+}
+
 const lab = Bun.serve({
 	port: 0,
 	hostname: "127.0.0.1",
-	async fetch(request) {
+	websocket: {
+		open(ws) {
+			watching.add(ws);
+			ws.send(JSON.stringify({ type: "hello", width: DESK.width, height: DESK.height, format: "jpeg-stripes", input: true, seq_ack: true, max_fps: 15 }));
+			sendScreen(ws);
+		},
+		close(ws) {
+			watching.delete(ws);
+		},
+		message() {},
+	},
+	async fetch(request, server) {
 		const path = new URL(request.url).pathname;
 		if (request.headers.get("authorization") !== `Bearer ${KEY}`) return new Response("", { status: 401 });
+		if (path === "/v1/containers/d1/desktop/stream") {
+			const asked = (request.headers.get("sec-websocket-protocol") ?? "").split(/,\s*/);
+			if (!asked.includes("gate.desktop.v1")) return Response.json({ error: { code: "invalid_request", message: "subprotocol gate.desktop.v1" } }, { status: 400 });
+			return server.upgrade(request, { headers: { "sec-websocket-protocol": "gate.desktop.v1" } }) ? undefined : new Response("", { status: 500 });
+		}
 		if (path === "/v1/chat/completions" && request.method === "POST") {
 			await Bun.sleep(300);
 			return reply((await request.json()) as ChatBody);
 		}
 		if (path === "/mcp") return request.method === "POST" ? mcp((await request.json()) as { id?: number; method: string }) : new Response("", { status: 405 });
 		if (path === "/.well-known/enrichedlab-lab") {
-			return Response.json({ contract: "2026-11", name: "devlab", title: "Field Lab", endpoints: { models: true, containers: true }, sign_in: { kind: "cloudflare-access-oauth" }, policy: { keep_data_inside: false }, sandbox_networks: [{ name: "none", title: "No network" }], sandbox_desktop: { image: "desktop", screen: DESK, actions: ["screenshot", "left_click", "right_click", "double_click", "left_click_drag", "type", "key", "scroll"], open: true } });
+			return Response.json({ contract: "2026-11", name: "devlab", title: "Field Lab", endpoints: { models: true, containers: true }, sign_in: { kind: "cloudflare-access-oauth" }, policy: { keep_data_inside: false }, sandbox_networks: [{ name: "none", title: "No network" }], sandbox_desktop: { image: "desktop", screen: DESK, actions: ["screenshot", "left_click", "right_click", "double_click", "left_click_drag", "type", "key", "scroll"], open: true, stream: true } });
 		}
 		if (path === "/v1/me") return Response.json({ subject: "u_dev", handle: "pat", memberships: [{ lab: "devlab", research_group: null, roles: ["member"] }], policy: { keep_data_inside: false }, sandbox_networks: ["none"], sandboxes: { enabled: true }, capabilities: ["discovery"] });
 		if (path === "/v1/models") return Response.json({ data: [{ id: "field-coder", gate: { context: 131072, capabilities: ["reasoning", "tools"], efforts: ["low", "medium", "high"] } }] });
@@ -197,6 +226,7 @@ const lab = Bun.serve({
 			const action = (await request.json()) as { action?: string; coordinate?: [number, number]; text?: string };
 			if (action.coordinate && action.action?.includes("click")) lastClick = action.coordinate;
 			if (action.action === "type") typedChars += action.text?.length ?? 0;
+			if (action.action !== "screenshot") for (const ws of watching) sendScreen(ws);
 			return Response.json({ ok: true, screenshot: { png: desktopPng(), ...DESK } });
 		}
 		if (path === "/v1/containers/c1") return Response.json({ id: "c1", status: "running", image: null, network: null });

@@ -172,6 +172,33 @@ public struct SiteSummary: Codable, Sendable, Hashable, Identifiable {
 	public var displayTitle: String { title.isEmpty ? name : title }
 }
 
+/// A changed band of a watched desktop's screen: a JPEG (base64) to draw at x, y, w by h desktop pixels.
+public struct DesktopBand: Codable, Sendable {
+	public var site: String
+	public var x: Int
+	public var y: Int
+	public var w: Int
+	public var h: Int
+	public var jpeg: String
+}
+
+/// Whether a desktop's live view runs, its size, and why it ended.
+public struct DesktopStream: Codable, Sendable, Hashable {
+	public var site: String
+	public var live: Bool
+	public var width: Int?
+	public var height: Int?
+	public var reason: String?
+
+	public init(site: String, live: Bool, width: Int? = nil, height: Int? = nil, reason: String? = nil) {
+		self.site = site
+		self.live = live
+		self.width = width
+		self.height = height
+		self.reason = reason
+	}
+}
+
 public struct DesktopFrame: Codable, Sendable, Hashable {
 	public var site: String
 	/// base64 PNG

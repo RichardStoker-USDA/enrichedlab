@@ -271,7 +271,11 @@ struct DesktopPane: View {
 	}
 
 	@ViewBuilder private func tools(_ frame: DesktopFrame?) -> some View {
-		if let frame { Text("\(frame.width) × \(frame.height)").font(.caption).foregroundStyle(.secondary).monospacedDigit().fixedSize() }
+		if let size = screenSize(frame) {
+			Text("\(live ? "Live · " : "")\(Int(size.width)) × \(Int(size.height))")
+				.font(.caption).foregroundStyle(.secondary).monospacedDigit().fixedSize()
+				.help(live ? "The desktop shows live" : "The picture updates after each action")
+		}
 		Button { Task { await app.desktopAct(site: site, action: ["action": "screenshot"]) } } label: { Image(systemName: "arrow.clockwise") }
 			.buttonStyle(.borderless)
 			.help("Refresh the picture")
@@ -315,8 +319,8 @@ struct DesktopPane: View {
 				if app.desktopBusy.contains(site) { ProgressView().progressViewStyle(.linear).controlSize(.mini).tint(Theme.accent) }
 			}
 			Divider()
-			if let frame, let image = app.desktopImages[site]?.image {
-				CanvasHost(image: image, size: CGSize(width: frame.width, height: frame.height), raw: false) { input in act(input) }
+			if let image = app.desktopImages[site]?.image, let size = screenSize(frame) {
+				CanvasHost(image: image, size: size, raw: false) { input in act(input) }
 			} else {
 				ContentUnavailableView {
 					Label("Desktop", systemImage: "display")
@@ -332,6 +336,18 @@ struct DesktopPane: View {
 		.task(id: site) {
 			if app.desktops[site] == nil { await app.desktopAct(site: site, action: ["action": "screenshot"]) }
 		}
+		// Live where the lab streams its desktop, while this pane shows.
+		.onAppear { app.watchDesktop(site) }
+		.onDisappear { app.unwatchDesktop(site) }
+	}
+
+	private var live: Bool { app.desktopLive[site]?.live == true }
+
+	/// The desktop's size in its own pixels: the live view's, else the last picture's.
+	private func screenSize(_ frame: DesktopFrame?) -> CGSize? {
+		if live, let stream = app.desktopLive[site], let width = stream.width, let height = stream.height, width > 0, height > 0 { return CGSize(width: width, height: height) }
+		if let frame { return CGSize(width: frame.width, height: frame.height) }
+		return app.desktopImages[site]?.image?.size
 	}
 
 	private func act(_ input: RemoteInput) {
@@ -359,8 +375,10 @@ struct DesktopPane: View {
 		}
 	}
 
-	/// The lab answers input without a picture: one a moment after the last input shows what it did.
+	/// The lab answers input without a picture: one a moment after the last input shows what it did (a live view
+	/// shows it as it happens).
 	private func settleShot(after seconds: Double) {
+		guard !live else { return }
 		settle?.cancel()
 		settle = Task {
 			try? await Task.sleep(for: .seconds(seconds))

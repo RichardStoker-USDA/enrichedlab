@@ -328,6 +328,11 @@ extension EngineConnection {
 		return try await call("desktop.act", P(site: site, action: action))
 	}
 
+	public func watchDesktop(site: String, on: Bool) async throws -> DesktopStream {
+		struct P: Encodable, Sendable { var site: String; var on: Bool }
+		return try await call("desktop.watch", P(site: site, on: on))
+	}
+
 	public func desktopOpen(site: String, target: String) async throws -> DesktopAnswer {
 		try await call("desktop.open", ["site": site, "target": target])
 	}

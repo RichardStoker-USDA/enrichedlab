@@ -1152,6 +1152,28 @@ export class GateSite implements SiteAdapter, SandboxApi, DesktopApi {
 						const open = await refused("desktop/open", { target: "https://check:check@example.com/", by: "agent" });
 						add("desktop refuses an address with a password", open.status === 400 ? "pass" : "fail", said(open));
 					}
+					// A desktop that streams: the live view opens with the screen's size and sends a band of it.
+					if (desktopInfo.stream) {
+						const url = `${this.route.base}${at}/desktop/stream`;
+						const socket = new WebSocket(url.replace(/^http/, "ws"), { headers: await this.authHeaders("GET", url), protocols: ["gate.desktop.v1"], ...(this.route.ca ? { tls: { ca: this.route.ca } } : {}) } as unknown as string[]);
+						socket.binaryType = "arraybuffer";
+						const seen = await new Promise<string>((resolve) => {
+							let size = "";
+							const timer = setTimeout(() => (socket.close(), resolve(size ? `${size}, but no band within 20 s` : "no hello within 20 s")), 20_000);
+							socket.onmessage = (event) => {
+								if (typeof event.data === "string") {
+									const hello = JSON.parse(event.data) as { type?: string; width?: number; height?: number };
+									if (hello.type === "hello") size = `${hello.width}x${hello.height}`;
+									return;
+								}
+								clearTimeout(timer);
+								socket.close(1000);
+								resolve(`ok ${size}, a ${(event.data as ArrayBuffer).byteLength}-byte band`);
+							};
+							socket.onclose = (event) => (clearTimeout(timer), resolve(`closed ${event.code}${event.reason ? ` ${event.reason}` : ""}`));
+						});
+						add("desktop live view", seen.startsWith("ok ") ? "pass" : "fail", seen.replace(/^ok /, "hello "));
+					}
 					// A desktop that reads its own state: the windows, then an app started and brought forward by its id.
 					const act = <T>(json: Record<string, unknown>) => this.json<T>("POST", `${at}/desktop`, { json: { ...json, by: "agent" }, signal: AbortSignal.timeout(120_000) });
 					type State = { state?: { windows?: { id?: string; app?: string; title?: string }[]; focused?: { nodes?: number } } };

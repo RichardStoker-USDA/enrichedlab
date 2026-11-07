@@ -48,11 +48,16 @@ public final class AppModel {
 	public private(set) var labApps: [LabApp] = []
 	public var deviceRequests: [DeviceRequest] = []
 	public private(set) var desktops: [String: DesktopFrame] = [:] {
-		didSet { for (site, frame) in desktops where desktopImages[site]?.at != frame.at { desktopImages[site] = (frame.at, decodeImage(frame.png)) } }
+		// A desktop shown live keeps its live picture; an action's screenshot would only step back in time.
+		didSet { for (site, frame) in desktops where desktopImages[site]?.at != frame.at && desktopScreens[site] == nil { desktopImages[site] = (frame.at, decodeImage(frame.png)) } }
 	}
 	/// Each lab desktop's newest picture, decoded once when it arrives.
 	public private(set) var desktopImages: [String: (at: String, image: NSImage?)] = [:]
 	public private(set) var desktopBusy: Set<String> = []
+	/// Each watched lab desktop's live view, when the lab streams it.
+	public private(set) var desktopLive: [String: DesktopStream] = [:]
+	@ObservationIgnored private var desktopWatchers: [String: Int] = [:]
+	@ObservationIgnored private var desktopScreens: [String: DesktopScreen] = [:]
 	public var sessionLimit = 200
 
 	// The open session
@@ -135,6 +140,8 @@ public final class AppModel {
 
 	/// Each part shows as it arrives; one failure doesn't hold back the rest.
 	public func reload() async {
+		// The engine forgets a window's live views when it reconnects: ask again for those still shown.
+		for site in desktopWatchers.keys { Task { await askDesktopLive(site) } }
 		async let prefs = try? connection.uiPrefs()
 		async let list = try? connection.sessions(limit: sessionLimit)
 		async let labs = try? connection.sites()
@@ -426,6 +433,42 @@ public final class AppModel {
 		}
 	}
 
+	/// Watch a lab desktop live while a pane shows it (where the lab streams it).
+	public func watchDesktop(_ site: String) {
+		desktopWatchers[site, default: 0] += 1
+		guard desktopWatchers[site] == 1 else { return }
+		Task { await askDesktopLive(site) }
+	}
+
+	public func unwatchDesktop(_ site: String) {
+		guard let count = desktopWatchers[site], count > 0 else { return }
+		desktopWatchers[site] = count - 1
+		guard count == 1 else { return }
+		desktopWatchers[site] = nil
+		desktopScreens[site] = nil
+		desktopLive[site] = DesktopStream(site: site, live: false)
+		Task { _ = try? await connection.watchDesktop(site: site, on: false) }
+	}
+
+	private func askDesktopLive(_ site: String) async {
+		let stream = (try? await connection.watchDesktop(site: site, on: true)) ?? DesktopStream(site: site, live: false)
+		if desktopWatchers[site, default: 0] > 0 { desktopLive[site] = stream }
+	}
+
+	/// Bands arrive many times a second: the picture is made once per turn of the main loop.
+	@ObservationIgnored private var publishing: Set<String> = []
+	private func publishDesktop(_ site: String) {
+		guard publishing.insert(site).inserted else { return }
+		DispatchQueue.main.async { [weak self] in
+			MainActor.assumeIsolated {
+				guard let self else { return }
+				self.publishing.remove(site)
+				guard let screen = self.desktopScreens[site], let image = screen.image() else { return }
+				self.desktopImages[site] = ("live-\(screen.drawn)", image)
+			}
+		}
+	}
+
 	public func desktopOpen(site: String, target: String) async {
 		desktopBusy.insert(site)
 		defer { desktopBusy.remove(site) }
@@ -512,6 +555,16 @@ public final class AppModel {
 		case "browser.frame":
 			guard let frame = try? note.decode(BrowserFrame.self), session?.id == frame.sessionId else { return }
 			session?.screenFrame = frame
+		case "desktop.band":
+			guard let band = try? note.decode(DesktopBand.self), desktopWatchers[band.site, default: 0] > 0 else { return }
+			let live = desktopLive[band.site]
+			let screen = desktopScreens[band.site] ?? DesktopScreen(width: live?.width ?? band.x + band.w, height: live?.height ?? band.y + band.h, under: desktopImages[band.site]?.image)
+			desktopScreens[band.site] = screen
+			if screen.draw(band) { publishDesktop(band.site) }
+		case "desktop.stream":
+			guard let stream = try? note.decode(DesktopStream.self) else { return }
+			desktopLive[stream.site] = stream
+			if !stream.live { desktopScreens[stream.site] = nil }
 		case "desktop.frame":
 			guard let frame = try? note.decode(DesktopFrame.self) else { return }
 			desktops[frame.site] = frame
