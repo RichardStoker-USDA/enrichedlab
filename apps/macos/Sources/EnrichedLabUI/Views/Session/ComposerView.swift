@@ -103,7 +103,7 @@ struct Composer: View {
 			focused = true
 		}
 		.onChange(of: text) { _, value in UserDefaults.standard.set(value.isEmpty ? nil : value, forKey: "draft.\(session.id)") }
-		.onChange(of: session.draft) { _, returned in
+		.onChange(of: session.draft, initial: true) { _, returned in
 			guard let returned else { return }
 			text = text.isEmpty ? returned : "\(returned)\n\n\(text)"
 			session.draft = nil

@@ -188,13 +188,13 @@ public final class AppModel {
 		if !force, session?.id == id { return }
 		openGeneration += 1
 		let generation = openGeneration
-		let holding = SessionModel(id: id, app: self)
-		holding.opening = true
-		if session?.id != id { session = holding }
+		// Events and questions that arrive while the snapshot is on its way are held and joined after it.
+		let target = session?.id == id ? session! : SessionModel(id: id, app: self)
+		target.opening = true
+		if session?.id != id { session = target }
 		do {
 			let snapshot = try await connection.openSession(id)
 			guard generation == openGeneration else { return }
-			let target = session?.id == id ? session! : holding
 			target.apply(snapshot)
 			target.canvases = (try? await connection.canvases(sessionId: id)) ?? []
 			guard generation == openGeneration else { return }
@@ -202,7 +202,10 @@ public final class AppModel {
 			session = target
 		} catch {
 			guard generation == openGeneration else { return }
-			said(error)
+			// A session that won't open (deleted elsewhere, the engine gone) leaves the window on New Session, saying why.
+			said(error, prefix: "That session didn't open")
+			session = nil
+			if selection == id { selection = nil }
 		}
 	}
 
@@ -210,10 +213,12 @@ public final class AppModel {
 	@discardableResult
 	public func create(folder: URL, place: String, model: String?, prompt: String?, images: [Part]? = nil) async -> String? {
 		var made: String?
+		// A lab that keeps its data inside binds the session to it from the start: its models, its sandbox.
+		let isolated = sites.first { $0.name == place }?.isolated == true
 		do {
-			var summary = try await connection.createSession(cwd: folder.path, model: model)
+			var summary = try await connection.createSession(cwd: folder.path, model: model, site: isolated ? place : nil)
 			made = summary.id
-			if place != "local", summary.place != place {
+			if place != "local", !isolated, summary.place != place {
 				summary = try await connection.moveSession(summary.id, to: place).summary
 			}
 			upsert(summary)

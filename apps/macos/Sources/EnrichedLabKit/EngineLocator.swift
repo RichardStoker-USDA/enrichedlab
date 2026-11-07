@@ -71,7 +71,12 @@ public struct EngineLocator: Sendable {
 		let path = env["PATH"] ?? "/usr/bin:/bin"
 		env["PATH"] = (["/opt/homebrew/bin", "/usr/local/bin", FileManager.default.homeDirectoryForCurrentUser.appending(path: ".local/bin").path] + [path]).joined(separator: ":")
 		process.environment = env
-		let errors = Pipe()
+		// What it says goes to a file, so a long message can't fill a pipe and hold the process.
+		let said = FileManager.default.temporaryDirectory.appending(path: "el-ensure-\(UUID().uuidString).txt")
+		FileManager.default.createFile(atPath: said.path, contents: nil)
+		defer { try? FileManager.default.removeItem(at: said) }
+		let errors = try FileHandle(forWritingTo: said)
+		defer { try? errors.close() }
 		process.standardOutput = FileHandle.nullDevice
 		process.standardError = errors
 		process.standardInput = FileHandle.nullDevice
@@ -85,8 +90,8 @@ public struct EngineLocator: Sendable {
 			}
 		}
 		if status != 0 {
-			let said = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-			throw EngineError(code: -3, message: said.isEmpty ? "The engine didn't start (exit \(status))." : said)
+			let text = String(decoding: (try? Data(contentsOf: said)) ?? Data(), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+			throw EngineError(code: -3, message: text.isEmpty ? "The engine didn't start (exit \(status))." : String(text.suffix(600)))
 		}
 	}
 }

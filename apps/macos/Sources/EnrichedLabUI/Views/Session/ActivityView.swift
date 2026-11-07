@@ -289,14 +289,13 @@ struct ApprovalCard: View {
 				Text("This lab tool hasn't been reviewed by the lab yet.").font(.caption).foregroundStyle(.orange)
 			}
 			HStack(spacing: 8) {
+				// No Return or Escape shortcuts: a stray key in the composer must never answer a question.
 				Button("Decline") { answer(.deny) }
-					.keyboardShortcut(.cancelAction)
 				Spacer()
 				if request.once != true {
 					Button("Allow for This Session") { answer(.allowSession) }
 				}
 				Button("Allow") { answer(.allow) }
-					.keyboardShortcut(.defaultAction)
 					.buttonStyle(.borderedProminent)
 			}
 			.disabled(answering)

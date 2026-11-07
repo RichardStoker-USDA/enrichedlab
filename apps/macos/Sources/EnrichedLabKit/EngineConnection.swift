@@ -81,11 +81,15 @@ public actor EngineConnection {
 	private func connect() async {
 		guard started else { return }
 		stateOut.yield(.connecting)
+		var mine: URLSessionWebSocketTask?
 		do {
 			let file = try await locator.ensure()
+			// One socket at a time: an older one is closed before the next replaces it.
+			task?.cancel(with: .goingAway, reason: nil)
 			var request = URLRequest(url: URL(string: "ws://127.0.0.1:\(file.port)/rpc")!)
 			request.setValue("Bearer \(file.token)", forHTTPHeaderField: "Authorization")
 			let socket = session.webSocketTask(with: request)
+			mine = socket
 			socket.maximumMessageSize = 64 * 1024 * 1024
 			task = socket
 			socket.resume()
@@ -97,7 +101,8 @@ public actor EngineConnection {
 			attempt = 0
 			stateOut.yield(.connected(engine: hello.engine, reconnected: reconnected))
 		} catch {
-			await lost((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+			// The receive loop may already have reported this socket's loss; only the current socket reconnects.
+			await lost((error as? LocalizedError)?.errorDescription ?? error.localizedDescription, socket: mine)
 		}
 	}
 
@@ -107,7 +112,7 @@ public actor EngineConnection {
 			do {
 				message = try await socket.receive()
 			} catch {
-				if socket === task { await lost("The connection to the engine closed.") }
+				await lost("The connection to the engine closed.", socket: socket)
 				return
 			}
 			let data: Data
@@ -145,7 +150,10 @@ public actor EngineConnection {
 		}
 	}
 
-	private func lost(_ reason: String) async {
+	private func lost(_ reason: String, socket: URLSessionWebSocketTask?) async {
+		// A loss reported for a socket that's no longer current (or already handled) changes nothing. No socket means
+		// the engine couldn't be reached at all.
+		if let socket, socket !== task { return }
 		task?.cancel(with: .goingAway, reason: nil)
 		task = nil
 		failAll(.lost)
