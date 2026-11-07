@@ -1126,7 +1126,7 @@ export class GateSite implements SiteAdapter, SandboxApi, DesktopApi {
 		}
 		// A lab that offers a desktop sandbox: a PNG of the size it names, no shell, and no address carrying a user and
 		// password. The desktop starts on first contact; call() waits out sandbox_starting and desktop_unavailable.
-		const desktopInfo = d?.sandbox_desktop;
+		const desktopInfo = d?.sandbox_desktops?.find((x) => (x.os ?? "linux") === "linux") ?? d?.sandbox_desktop;
 		if (has("containers") && desktopInfo?.image) {
 			await attempt("desktop sandbox", async () => {
 				const made = await this.json<{ id: string }>("POST", "/v1/containers", { json: { name: "el-lab-check-desktop", image: desktopInfo.image }, signal: AbortSignal.timeout(300_000) });
@@ -1151,6 +1151,30 @@ export class GateSite implements SiteAdapter, SandboxApi, DesktopApi {
 					if (desktopInfo.open) {
 						const open = await refused("desktop/open", { target: "https://check:check@example.com/", by: "agent" });
 						add("desktop refuses an address with a password", open.status === 400 ? "pass" : "fail", said(open));
+					}
+					// A desktop that reads its own state: the windows, then an app started and brought forward by its id.
+					const act = <T>(json: Record<string, unknown>) => this.json<T>("POST", `${at}/desktop`, { json: { ...json, by: "agent" }, signal: AbortSignal.timeout(120_000) });
+					type State = { state?: { windows?: { id?: string; app?: string; title?: string }[]; focused?: { nodes?: number } } };
+					if (desktopInfo.actions.includes("state")) {
+						const first = await act<State>({ action: "state" });
+						const windows = first.state?.windows;
+						add("desktop state", Array.isArray(windows) ? "pass" : "fail", Array.isArray(windows) ? `${windows.length} window${windows.length === 1 ? "" : "s"}` : "the answer has no state.windows");
+						const app = desktopInfo.apps?.find((a) => a.id !== "browser")?.id ?? desktopInfo.apps?.[0]?.id;
+						if (app && desktopInfo.actions.includes("launch") && desktopInfo.actions.includes("focus_window")) {
+							const launched = await act<{ window?: { id?: string } }>({ action: "launch", app });
+							let id = launched.window?.id;
+							for (let i = 0; !id && i < 10; i++) {
+								await sleep(1_000);
+								id = (await act<State>({ action: "state" })).state?.windows?.find((w) => w.app === app)?.id;
+							}
+							if (!id) add("desktop launch and focus", "fail", `no ${app} window appeared within 10 s`);
+							else {
+								await act({ action: "focus_window", window: id });
+								const after = await act<State>({ action: "state" });
+								const focused = after.state?.windows?.find((w) => w.id === id) as { focused?: boolean } | undefined;
+								add("desktop launch and focus", focused?.focused ? "pass" : "fail", focused?.focused ? `${app} opened ${id}, focused, with ${after.state?.focused?.nodes ?? "?"} controls` : `${id} isn't focused after focus_window`);
+							}
+						}
 					}
 				} finally {
 					await this.call("DELETE", `/v1/containers/${encodeURIComponent(made.id)}`, { signal: t() }).then((r) => r.arrayBuffer(), () => undefined);
@@ -1816,7 +1840,10 @@ export class GateSite implements SiteAdapter, SandboxApi, DesktopApi {
 
 	/** The lab's desktop sandbox, when it offers one and this person has sandboxes. */
 	desktop(): DesktopInfo | undefined {
-		return this.sandboxOn && this.offers("containers") ? this.descriptor?.sandbox_desktop : undefined;
+		if (!this.sandboxOn || !this.offers("containers")) return undefined;
+		// The Linux desktop for now; a lab may list others (macOS) that later clients choose between.
+		const listed = this.descriptor?.sandbox_desktops;
+		return listed?.find((d) => (d.os ?? "linux") === "linux") ?? listed?.[0] ?? this.descriptor?.sandbox_desktop;
 	}
 
 	/** The person's desktop sandbox: one they already have from the desktop image, or a new one. */
@@ -1850,6 +1877,9 @@ export class GateSite implements SiteAdapter, SandboxApi, DesktopApi {
 				return await this.json<unknown>("POST", `/v1/containers/${encodeURIComponent(id)}/${path}`, { json: body, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000) });
 			} catch (error) {
 				const { status, code } = error as { status?: number; code?: string };
+				if (code === "desktop_outdated") {
+					throw new ToolError(`This ${this.title} desktop started before the lab updated it, so it can't list windows, launch or focus apps yet. Use screenshot and clicks, or ask the person to restart the desktop.`);
+				}
 				if (attempt < 2 && code === "sandbox_archived") {
 					this.onNotice?.(`Restoring your ${this.title} desktop from its archive. Its files come back with it.`);
 					await this.json("POST", `/v1/containers/${encodeURIComponent(id)}/restore`, { json: {}, signal }).catch(() => undefined);
@@ -1872,12 +1902,12 @@ export class GateSite implements SiteAdapter, SandboxApi, DesktopApi {
 		const frame = frameIn(answer, this.config.name, by, this.desktop());
 		if (frame) this.onDesktopFrame?.(frame);
 		const cursor = (answer as { cursor?: unknown } | undefined)?.cursor;
-		return { frame, cursor: Array.isArray(cursor) && cursor.length === 2 ? (cursor as [number, number]) : undefined };
+		return { frame, cursor: Array.isArray(cursor) && cursor.length === 2 ? (cursor as [number, number]) : undefined, answer };
 	}
 
-	async desktopOpen(target: string, by: "agent" | "person", signal?: AbortSignal): Promise<DesktopResult> {
+	async desktopOpen(target: string, by: "agent" | "person", signal?: AbortSignal, app?: string): Promise<DesktopResult> {
 		if (!this.desktop()?.open) throw new ToolError(`${this.title}'s desktop doesn't open addresses or files for you.`);
-		const answer = await this.desktopCall("desktop/open", { target, by }, signal);
+		const answer = await this.desktopCall("desktop/open", { target, by, ...(app ? { with: app } : {}) }, signal);
 		const frame = frameIn(answer, this.config.name, by, this.desktop());
 		if (frame) this.onDesktopFrame?.(frame);
 		return { frame };

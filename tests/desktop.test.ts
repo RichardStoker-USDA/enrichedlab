@@ -2,7 +2,7 @@
 // to POST /v1/containers/{id}/desktop, marked with who asked, and the picture that comes back reaches the windows.
 
 import { afterAll, describe, expect, test } from "bun:test";
-import { checkAction, desktopTools } from "../packages/engine/src/sites/desktop.ts";
+import { checkAction, describeState, desktopTools } from "../packages/engine/src/sites/desktop.ts";
 import { GateSite } from "../packages/engine/src/sites/gate.ts";
 import type { DesktopFrame } from "../packages/protocol/src/index.ts";
 
@@ -118,5 +118,78 @@ describe("a lab's desktop sandbox", () => {
 
 	test("a lab without a desktop offers no desktop tools", () => {
 		expect(desktopTools("home", "Home Lab", { desktop: () => undefined } as never)).toEqual([]);
+	});
+});
+
+describe("reading a desktop's windows and controls", () => {
+	const info = { image: "desktop", screen: { width: 1280, height: 800 }, actions: ["state", "launch", "focus_window", "screenshot", "left_click"], apps: [{ id: "browser", title: "Chromium" }, { id: "text", title: "Text editor" }] };
+
+	test("state, launch and focus_window are checked like any action", () => {
+		expect(checkAction({ action: "state" }, info)).toEqual({ action: "state" });
+		expect(checkAction({ action: "launch", app: "text" }, info)).toEqual({ action: "launch", app: "text" });
+		expect(() => checkAction({ action: "launch", app: "xterm" }, info)).toThrow("This desktop has no app xterm. It has: browser, text.");
+		expect(() => checkAction({ action: "launch" }, info)).toThrow("launch needs app: one of browser, text.");
+		expect(checkAction({ action: "focus_window", window: "0x1a00003" }, info)).toEqual({ action: "focus_window", window: "0x1a00003" });
+		expect(() => checkAction({ action: "focus_window", window: "Text" }, info)).toThrow("focus_window needs window");
+		// A lab that lists only the first fourteen actions isn't sent the new ones.
+		expect(() => checkAction({ action: "state" }, { image: "desktop", actions: ["screenshot"] })).toThrow("This desktop doesn't take state.");
+	});
+
+	test("state reads as windows and the focused window's controls, each with the point to click", () => {
+		const text = describeState({
+			ok: true,
+			action: "state",
+			state: {
+				screen: { width: 1280, height: 800 },
+				cursor: [10, 20],
+				windows: [
+					{ id: "0x1a00003", app: "text", title: "Untitled", bounds: { x: 100, y: 50, width: 800, height: 600 }, focused: true, minimized: false },
+					{ id: "0x1c00001", app: "browser", title: "Example", bounds: [0, 0, 1280, 800], focused: false, minimized: true },
+				],
+				focused: {
+					window: "0x1a00003",
+					nodes: 3,
+					truncated: false,
+					tree: { role: "frame", name: "Untitled", bounds: [100, 50, 800, 600], children: [{ role: "push button", name: "Save", bounds: [110, 60, 40, 20] }, { role: "text", name: "", value: "hello", bounds: [100, 90, 800, 560] }] },
+				},
+			},
+		});
+		expect(text).toBe(
+			[
+				"Screen 1280 by 800. Pointer at (10, 20).",
+				"Windows:",
+				'- 0x1a00003 text "Untitled" at (100, 50), 800 by 600, focused',
+				'- 0x1c00001 browser "Example" at (0, 0), 1280 by 800, minimized',
+				"Controls in the focused window 0x1a00003 (click a control at its center):",
+				'frame "Untitled" at (500, 350)',
+				'  push button "Save" at (130, 70)',
+				'  text value "hello" at (500, 370)',
+			].join("\n"),
+		);
+		expect(describeState({ state: { screen: { width: 1, height: 1 }, windows: [] } })).toContain("No windows are open. Use launch to start an app.");
+	});
+
+	test("the tool reads state without a picture, and names the window launch opened", async () => {
+		const calls: Record<string, unknown>[] = [];
+		const api = {
+			desktop: () => info,
+			desktopAct: async (action: Record<string, unknown>) => {
+				calls.push(action);
+				if (action.action === "state") return { answer: { state: { screen: { width: 1280, height: 800 }, windows: [] } } };
+				if (action.action === "launch") return { answer: { ok: true, window: { id: "0x2200001", title: "Text Editor" } } };
+				return { frame: { site: "home", png: PNG, width: 1280, height: 800, by: "agent", at: "" } };
+			},
+			desktopOpen: async () => ({}),
+		};
+		const tool = desktopTools("home", "Home Lab", api as never)[0]!;
+		expect(tool.description).toStartWith("Use the Linux desktop in your Home Lab sandbox, 1280 by 800 pixels: for programs that only have a window (a PDF form, a viewer, a web page on the lab's network). Start with state:");
+		expect((tool.parameters as { properties: Record<string, unknown> }).properties.app).toEqual({ type: "string", enum: ["browser", "text"] });
+		const state = await tool.run({ action: "state" }, { signal: new AbortController().signal, vision: true } as never);
+		expect(state.content).toContain("No windows are open.");
+		expect(state.images).toBeUndefined();
+		const launched = await tool.run({ action: "launch", app: "text" }, { signal: new AbortController().signal, vision: true } as never);
+		expect(launched.content).toBe('Launched text. Its window is 0x2200001 "Text Editor".');
+		expect(launched.images?.length).toBe(1);
+		expect(calls.map((c) => c.action)).toEqual(["state", "launch", "screenshot"]);
 	});
 });

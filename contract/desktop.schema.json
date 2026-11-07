@@ -11,9 +11,11 @@
         "action": {
           "enum": [
             "screenshot", "cursor_position", "mouse_move", "left_click", "right_click", "middle_click", "double_click",
-            "triple_click", "left_click_drag", "type", "key", "scroll", "zoom", "wait"
+            "triple_click", "left_click_drag", "type", "key", "scroll", "zoom", "wait", "state", "focus_window", "launch"
           ]
         },
+        "window": { "type": "string", "pattern": "^0x[0-9a-fA-F]+$", "description": "focus_window: a window id from state" },
+        "app": { "type": "string", "minLength": 1, "description": "launch: an app id from the descriptor's apps" },
         "coordinate": { "$ref": "#/$defs/point" },
         "start_coordinate": { "$ref": "#/$defs/point" },
         "text": { "type": "string", "maxLength": 4000, "description": "type: the text; key: an xdotool-style key or chord such as ctrl+s" },
@@ -32,10 +34,29 @@
         "ok": { "type": "boolean" },
         "action": { "type": "string" },
         "screenshot": { "type": "object", "required": ["png", "width", "height"], "properties": { "png": { "type": "string", "description": "base64 PNG" }, "width": { "type": "integer" }, "height": { "type": "integer" } } },
-        "cursor": { "$ref": "#/$defs/point" }
+        "cursor": { "$ref": "#/$defs/point" },
+        "state": { "$ref": "#/$defs/state" },
+        "window": { "$ref": "#/$defs/window", "description": "after launch (when a window appeared) or focus_window" }
       }
     },
-    "open": { "type": "object", "required": ["target"], "properties": { "target": { "type": "string", "description": "an http(s) address with a host and no user or password, or a path under /sandbox/ with no . or .. segments" }, "by": { "enum": ["agent", "person"] } } },
+    "bounds": { "type": "object", "required": ["x", "y", "width", "height"], "properties": { "x": { "type": "number" }, "y": { "type": "number" }, "width": { "type": "number" }, "height": { "type": "number" } } },
+    "window": {
+      "type": "object",
+      "required": ["id"],
+      "properties": { "id": { "type": "string" }, "app": { "type": "string" }, "title": { "type": "string" }, "bounds": { "$ref": "#/$defs/bounds" }, "focused": { "type": "boolean" }, "minimized": { "type": "boolean" } }
+    },
+    "state": {
+      "type": "object",
+      "required": ["screen", "windows"],
+      "description": "the answer to state: the windows, and the focused window's accessibility tree (role, name, value, states, bounds, children per node)",
+      "properties": {
+        "screen": { "type": "object", "properties": { "width": { "type": "integer" }, "height": { "type": "integer" } } },
+        "cursor": { "$ref": "#/$defs/point" },
+        "windows": { "type": "array", "items": { "$ref": "#/$defs/window" } },
+        "focused": { "type": "object", "properties": { "window": { "type": "string" }, "tree": { "type": "object" }, "nodes": { "type": "integer" }, "truncated": { "type": "boolean" } } }
+      }
+    },
+    "open": { "type": "object", "required": ["target"], "properties": { "target": { "type": "string", "description": "an http(s) address with a host and no user or password, or a path under /sandbox/ with no . or .. segments" }, "with": { "type": "string", "description": "an app from the descriptor's open_with; the browser when absent" }, "by": { "enum": ["agent", "person"] } } },
     "opened": { "type": "object", "required": ["opened"], "properties": { "opened": { "type": "string" } } }
   },
   "$ref": "#/$defs/action"

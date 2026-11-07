@@ -92,6 +92,8 @@ export interface LabDescriptor {
 	conformance?: { foreign_scope?: string; scan_test?: boolean; data_tool?: { name: string; arguments?: Record<string, unknown> } };
 	/** A desktop sandbox the person and the agent work in through checked actions (POST /v1/containers/{id}/desktop). */
 	sandbox_desktop?: DesktopInfo;
+	/** Every desktop the lab offers (sandbox_desktop repeats the first). */
+	sandbox_desktops?: DesktopInfo[];
 }
 
 /** Whose agents use a lab's sandboxes: only the lab's models, or a person's own agents too. */
@@ -99,8 +101,17 @@ export type SandboxAgents = "lab" | "any";
 
 export interface DesktopInfo {
 	image: string;
+	/** "linux" or "macos"; linux when absent. */
+	os?: string;
+	title?: string;
 	screen?: { width: number; height: number };
 	actions: string[];
+	/** Programs `launch` starts, by id (such as browser and text). */
+	apps?: { id: string; title?: string }[];
+	/** Apps `open` can open a target with (`with`); the browser when not named. */
+	open_with?: string[];
+	/** GET /v1/containers/{id}/desktop/stream serves a live view (subprotocol gate.desktop.v1). */
+	stream?: boolean;
 	/** POST /v1/containers/{id}/desktop/open is served, for these kinds of target (such as "https", "sandbox"). */
 	open?: boolean;
 	open_targets?: string[];

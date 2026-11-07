@@ -12,7 +12,7 @@ import { clip, sleep } from "../util.ts";
 const SETTLE_MS = 400;
 
 /** The actions this client knows, in the computer-use vocabulary models are trained on. */
-export const DESKTOP_ACTIONS = ["screenshot", "cursor_position", "mouse_move", "left_click", "right_click", "middle_click", "double_click", "triple_click", "left_click_drag", "type", "key", "scroll", "zoom", "wait"] as const;
+export const DESKTOP_ACTIONS = ["state", "launch", "focus_window", "screenshot", "cursor_position", "mouse_move", "left_click", "right_click", "middle_click", "double_click", "triple_click", "left_click_drag", "type", "key", "scroll", "zoom", "wait"] as const;
 export type DesktopActionName = (typeof DESKTOP_ACTIONS)[number];
 
 export interface DesktopAction {
@@ -24,6 +24,10 @@ export interface DesktopAction {
 	scroll_amount?: number;
 	region?: [number, number, number, number];
 	duration?: number;
+	/** focus_window: the window's id from state, such as 0x1a00003. */
+	window?: string;
+	/** launch: an app id from the desktop's list. */
+	app?: string;
 }
 
 export type { DesktopFrame };
@@ -31,18 +35,20 @@ export type { DesktopFrame };
 export interface DesktopResult {
 	frame?: DesktopFrame;
 	cursor?: [number, number];
+	/** The lab's whole answer, for state, launch and focus_window. */
+	answer?: unknown;
 }
 
 /** What a lab's adapter gives for its desktop sandbox. */
 export interface DesktopApi {
 	desktop(): DesktopInfo | undefined;
 	desktopAct(action: DesktopAction, by: "agent" | "person", signal?: AbortSignal): Promise<DesktopResult>;
-	desktopOpen(target: string, by: "agent" | "person", signal?: AbortSignal): Promise<DesktopResult>;
+	desktopOpen(target: string, by: "agent" | "person", signal?: AbortSignal, app?: string): Promise<DesktopResult>;
 }
 
 const TYPE_MAX = 4_000;
 /** Input actions a lab answers without a picture: the client takes one just after, so the agent sees the result. */
-const SHOW_AFTER = new Set<DesktopActionName>(["mouse_move", "left_click", "right_click", "middle_click", "double_click", "triple_click", "left_click_drag", "type", "key", "scroll", "wait"]);
+const SHOW_AFTER = new Set<DesktopActionName>(["launch", "focus_window", "mouse_move", "left_click", "right_click", "middle_click", "double_click", "triple_click", "left_click_drag", "type", "key", "scroll", "wait"]);
 const isPoint = (v: unknown): v is [number, number] => Array.isArray(v) && v.length === 2 && v.every((n) => typeof n === "number" && Number.isFinite(n) && n >= 0);
 
 /** Check an action before it goes to the lab, with the reason a model can act on. */
@@ -84,7 +90,87 @@ export function checkAction(raw: Record<string, unknown>, info: DesktopInfo): De
 		out.region = r.map(Math.round) as [number, number, number, number];
 	}
 	if (action === "wait") out.duration = Math.max(0, Math.min(info.max_wait_seconds ?? 30, Number(raw.duration ?? 1) || 1));
+	if (action === "focus_window") {
+		if (typeof raw.window !== "string" || !/^0x[0-9a-f]+$/i.test(raw.window)) throw new ToolError("focus_window needs window: an id from state, such as 0x1a00003.");
+		out.window = raw.window;
+	}
+	if (action === "launch") {
+		const ids = (info.apps ?? []).map((a) => a.id);
+		if (typeof raw.app !== "string" || !raw.app) throw new ToolError(`launch needs app${ids.length ? `: one of ${ids.join(", ")}` : ""}.`);
+		if (ids.length && !ids.includes(raw.app)) throw new ToolError(`This desktop has no app ${raw.app}. It has: ${ids.join(", ")}.`);
+		out.app = raw.app;
+	}
 	return out;
+}
+
+type Bounds = { x: number; y: number; w: number; h: number };
+
+/** A lab's bounds as x, y, width, height, whichever form it sends ([x, y, w, h] or an object). */
+function boundsOf(raw: unknown): Bounds | undefined {
+	if (Array.isArray(raw) && raw.length === 4 && raw.every((n) => typeof n === "number")) return { x: raw[0], y: raw[1], w: raw[2], h: raw[3] };
+	if (raw && typeof raw === "object") {
+		const b = raw as Record<string, unknown>;
+		const n = (k: string[]) => k.map((key) => b[key]).find((v): v is number => typeof v === "number");
+		const x = n(["x", "left"]), y = n(["y", "top"]), w = n(["width", "w"]), h = n(["height", "h"]);
+		if (x !== undefined && y !== undefined && w !== undefined && h !== undefined) return { x, y, w, h };
+	}
+	return undefined;
+}
+
+const center = (b: Bounds) => `(${Math.round(b.x + b.w / 2)}, ${Math.round(b.y + b.h / 2)})`;
+const quoted = (v: unknown) => (typeof v === "string" && v.trim() ? ` "${clip(v.replace(/\s+/g, " ").trim(), 80)}"` : "");
+
+/** The most lines of a window's controls the model gets at once. */
+const TREE_LINES = 160;
+
+/** A desktop's state in words a model can act on: its windows, and the focused window's controls with their centers. */
+export function describeState(answer: unknown): string {
+	const root = (answer && typeof answer === "object" ? ((answer as { state?: unknown }).state ?? answer) : {}) as Record<string, unknown>;
+	const lines: string[] = [];
+	const screen = root.screen as { width?: number; height?: number } | undefined;
+	const cursor = Array.isArray(root.cursor) ? (root.cursor as number[]) : undefined;
+	lines.push(`Screen ${screen?.width ?? "?"} by ${screen?.height ?? "?"}.${cursor ? ` Pointer at (${cursor.map(Math.round).join(", ")}).` : ""}`);
+	const windows = Array.isArray(root.windows) ? (root.windows as Record<string, unknown>[]) : [];
+	if (!windows.length) lines.push("No windows are open. Use launch to start an app.");
+	else {
+		lines.push("Windows:");
+		for (const w of windows) {
+			const b = boundsOf(w.bounds);
+			const flags = [w.focused ? "focused" : "", w.minimized ? "minimized" : ""].filter(Boolean).join(", ");
+			lines.push(`- ${String(w.id ?? "?")} ${String(w.app ?? "")}${quoted(w.title)}${b ? ` at (${b.x}, ${b.y}), ${b.w} by ${b.h}` : ""}${flags ? `, ${flags}` : ""}`);
+		}
+	}
+	const focused = root.focused as { window?: unknown; tree?: unknown; truncated?: unknown } | undefined;
+	if (focused?.tree) {
+		const tree: string[] = [];
+		const walk = (node: unknown, depth: number) => {
+			if (!node || typeof node !== "object" || tree.length >= TREE_LINES) return;
+			if (Array.isArray(node)) {
+				for (const child of node) walk(child, depth);
+				return;
+			}
+			const n = node as Record<string, unknown>;
+			const b = boundsOf(n.bounds);
+			const role = String(n.role ?? n.type ?? "item");
+			const value = n.value !== undefined && n.value !== n.name ? ` value${quoted(String(n.value))}` : "";
+			const states = Array.isArray(n.states) && n.states.length ? ` [${(n.states as unknown[]).map(String).join(", ")}]` : "";
+			tree.push(`${"  ".repeat(Math.min(depth, 12))}${role}${quoted(n.name)}${value}${states}${b && b.w > 0 && b.h > 0 ? ` at ${center(b)}` : ""}`);
+			walk(n.children, depth + 1);
+		};
+		walk(focused.tree, 0);
+		lines.push(`Controls in the focused window ${String(focused.window ?? "")} (click a control at its center):`);
+		lines.push(...tree);
+		if (tree.length >= TREE_LINES || focused.truncated) lines.push("(More controls than shown: use zoom or a screenshot for the rest.)");
+	}
+	return lines.join("\n");
+}
+
+/** A window the lab names in its answer to launch or focus_window. */
+function windowSaid(answer: unknown): string {
+	const w = (answer && typeof answer === "object" ? (answer as { window?: unknown }).window : undefined) as Record<string, unknown> | string | undefined;
+	if (!w) return "";
+	if (typeof w === "string") return ` Its window is ${w}.`;
+	return ` Its window is ${String(w.id ?? "")}${quoted(w.title)}.`;
 }
 
 /** The screenshot in a lab's answer, whichever of the usual names it uses. */
@@ -118,6 +204,12 @@ function said(a: DesktopAction): string {
 			return `Zoomed into (${a.region!.join(", ")}).`;
 		case "cursor_position":
 			return "Read the pointer's position.";
+		case "state":
+			return "Read the desktop's windows and controls.";
+		case "launch":
+			return `Launched ${a.app}.`;
+		case "focus_window":
+			return `Focused window ${a.window}.`;
 		default:
 			return `${a.action.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase())}${at}.`;
 	}
@@ -128,11 +220,13 @@ export function desktopTools(site: string, title: string, api: DesktopApi): Tool
 	const info = api.desktop();
 	if (!info) return [];
 	const size = info.screen ? `${info.screen.width} by ${info.screen.height} pixels` : "the size its screenshot shows";
-	const actions = info.actions.length ? DESKTOP_ACTIONS.filter((a) => info.actions.includes(a)) : [...DESKTOP_ACTIONS];
+	const actions = info.actions.length ? DESKTOP_ACTIONS.filter((a) => info.actions.includes(a)) : DESKTOP_ACTIONS.filter((a) => a !== "state" && a !== "launch" && a !== "focus_window");
+	const reads = actions.includes("state");
+	const apps = info.apps ?? [];
 	const desktop: Tool = {
 		name: `${site}_desktop`,
 		kind: "sandbox",
-		description: `Use the Linux desktop in your ${title} sandbox, ${size}: for programs that only have a window (RStudio, a PDF form, a viewer). Start with a screenshot; coordinates are pixels on that screenshot. Every action answers with a screenshot taken just after it. Typing takes at most ${info.max_type_chars ?? TYPE_MAX} characters; key takes names like Return, Tab, ctrl+s. The person can watch and use the same desktop. It has no shell: use ${site}_sandbox_run in your other sandbox for commands.`,
+		description: `Use the Linux desktop in your ${title} sandbox, ${size}: for programs that only have a window (a PDF form, a viewer, a web page on the lab's network). ${reads ? "Start with state: it lists the windows and the focused window's controls with the point to click for each, which is more exact than reading a screenshot. " : "Start with a screenshot; coordinates are pixels on that screenshot. "}${actions.includes("launch") && apps.length ? `launch starts an app (${apps.map((a) => `${a.id}${a.title ? ` for ${a.title}` : ""}`).join(", ")}); focus_window brings one forward by its id. ` : ""}Input actions answer with a screenshot taken just after them. Typing takes at most ${info.max_type_chars ?? TYPE_MAX} characters; key takes names like Return, Tab, ctrl+s. The person can watch and use the same desktop. It has no shell: use ${site}_sandbox_run in your other sandbox for commands.`,
 		parameters: {
 			type: "object",
 			properties: {
@@ -144,18 +238,24 @@ export function desktopTools(site: string, title: string, api: DesktopApi): Tool
 				scroll_amount: { type: "integer", minimum: 1, maximum: 50 },
 				region: { type: "array", items: { type: "integer" }, minItems: 4, maxItems: 4, description: "zoom: [x0, y0, x1, y1]" },
 				duration: { type: "number", minimum: 0, maximum: 30, description: "wait: seconds" },
+				...(actions.includes("focus_window") ? { window: { type: "string", description: "focus_window: a window id from state, such as 0x1a00003" } } : {}),
+				...(actions.includes("launch") ? { app: apps.length ? { type: "string", enum: apps.map((a) => a.id) } : { type: "string", description: "launch: an app id" } } : {}),
 			},
 			required: ["action"],
 		},
 		view: (args) => {
 			const a = args as Partial<DesktopAction>;
-			const target = a.action === "type" ? `${String(a.text ?? "").length} characters` : a.action === "key" ? String(a.text ?? "") : a.coordinate ? `(${a.coordinate.join(", ")})` : "";
+			const target = a.action === "type" ? `${String(a.text ?? "").length} characters` : a.action === "key" ? String(a.text ?? "") : a.action === "launch" ? String(a.app ?? "") : a.action === "focus_window" ? String(a.window ?? "") : a.coordinate ? `(${a.coordinate.join(", ")})` : "";
 			return { verb: `desktop ${String(a.action ?? "").replace(/_/g, " ")}`, target: clip(target, 80) };
 		},
 		async run(args, ctx) {
 			const action = checkAction(args, info);
 			const result = await api.desktopAct(action, "agent", ctx.signal);
-			const parts = [said(action)];
+			if (action.action === "state") {
+				const text = describeState(result.answer);
+				return { ok: true, content: text, view: { result: `${text.split("\n").length} lines` } };
+			}
+			const parts = [said(action) + (action.action === "launch" || action.action === "focus_window" ? windowSaid(result.answer) : "")];
 			if (result.cursor) parts.push(`The pointer is at (${result.cursor.join(", ")}).`);
 			// The lab answers input with no picture; one taken a moment later shows what the action did.
 			let frame = result.frame;
@@ -171,13 +271,21 @@ export function desktopTools(site: string, title: string, api: DesktopApi): Tool
 	const open: Tool = {
 		name: `${site}_desktop_open`,
 		kind: "sandbox",
-		description: `Open an https address or a file under /sandbox on the ${title} desktop, in the program that opens it.`,
-		parameters: { type: "object", properties: { target: { type: "string", description: "an https address, or a /sandbox/... file" } }, required: ["target"] },
+		description: `Open an https address or a file under /sandbox on the ${title} desktop, in the program that opens it${info.open_with?.length ? ` (or the app named in with: ${info.open_with.join(", ")})` : ""}.`,
+		parameters: {
+			type: "object",
+			properties: {
+				target: { type: "string", description: "an https address, or a /sandbox/... file" },
+				...(info.open_with?.length ? { with: { type: "string", enum: info.open_with, description: "the app to open it in; the browser when not given" } } : {}),
+			},
+			required: ["target"],
+		},
 		view: (args) => ({ verb: "desktop open", target: clip(String(args.target ?? ""), 120) }),
 		async run(args, ctx) {
 			const target = String(args.target ?? "").trim();
 			if (!/^https:\/\//.test(target) && !target.startsWith("/sandbox/")) throw new ToolError("target is an https address or a /sandbox/... file.");
-			await api.desktopOpen(target, "agent", ctx.signal);
+			const app = typeof args.with === "string" && info.open_with?.includes(args.with) ? args.with : undefined;
+			await api.desktopOpen(target, "agent", ctx.signal, app);
 			// A program takes a moment to open its window.
 			await sleep(1_500, ctx.signal);
 			const frame = (await api.desktopAct({ action: "screenshot" }, "agent", ctx.signal)).frame;
