@@ -274,6 +274,26 @@ export interface SiteSummary {
 }
 
 /** A picture of a lab's desktop sandbox after an action (PNG), for the windows that show it. */
+/** A part of a desktop's screen from its live view: a JPEG (base64) to draw at x, y, w by h desktop pixels. */
+export interface DesktopBand {
+	site: string;
+	x: number;
+	y: number;
+	w: number;
+	h: number;
+	jpeg: string;
+}
+
+/** Whether a desktop's live view runs; when it ends, windows go back to pictures after each action. */
+export interface DesktopStream {
+	site: string;
+	live: boolean;
+	width?: number;
+	height?: number;
+	/** Why it ended: access_ended, time_limit, desktop_gone, slow_client, or closed. */
+	reason?: string;
+}
+
 export interface DesktopFrame {
 	site: string;
 	png: string;
@@ -545,6 +565,8 @@ export interface Requests {
 	"desktop.act": { params: { site: string; action: Record<string, unknown> }; result: { frame?: DesktopFrame; cursor?: [number, number] } };
 	/** Open an https address or a /sandbox file on a lab's desktop. */
 	"desktop.open": { params: { site: string; target: string }; result: { frame?: DesktopFrame } };
+	/** Watch a lab desktop live where the lab streams it: desktop.band notifications follow while on. */
+	"desktop.watch": { params: { site: string; on: boolean }; result: DesktopStream };
 	/** Turn Discovery mode on or off; on only in a session at a lab that grants the person `discovery`. */
 	"session.discovery": { params: { sessionId: string; on: boolean }; result: { summary: SessionSummary; detail: string } };
 	"permission.answer": { params: { requestId: string; decision: PermissionDecision }; result: { ok: boolean } };
@@ -771,6 +793,10 @@ export interface Notifications {
 	"browser.frame": BrowserFrame;
 	/** A picture of a lab's desktop after an action, the agent's or the person's. */
 	"desktop.frame": DesktopFrame;
+	/** A changed band of a watched desktop's screen: draw the JPEG at x, y (desktop pixels). */
+	"desktop.band": DesktopBand;
+	/** A watched desktop's live view started or ended. */
+	"desktop.stream": DesktopStream;
 }
 
 export type Notification = keyof Notifications;

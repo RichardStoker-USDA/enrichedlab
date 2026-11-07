@@ -2,7 +2,7 @@
 // layout is the one piece kept here: it belongs to this person's screen, per session, in local storage.
 
 import { pageMenu } from "./menu.svelte.ts";
-import type { AppSummary, BrowserFrame, BrowserInput, BrowserPageState, CanvasSummary, DesktopFrame, DeviceRequest, LabApp, ModelInfo, Part, Partial_, PermissionDecision, PermissionRequest, SessionEvent, SessionStatus, SessionSummary, SiteSummary, UiPrefs } from "@enrichedlab/protocol";
+import type { AppSummary, BrowserFrame, BrowserInput, BrowserPageState, CanvasSummary, DesktopBand, DesktopFrame, DesktopStream, DeviceRequest, LabApp, ModelInfo, Part, Partial_, PermissionDecision, PermissionRequest, SessionEvent, SessionStatus, SessionSummary, SiteSummary, UiPrefs } from "@enrichedlab/protocol";
 import { close as closeTab, emptyLayout, move, place, type Node, open as openTab, resize as resizeSplit, revive, sync, type Edge, type PaneKind, type Tab, uid, activate, groups } from "./layout.ts";
 import { computerName, placeOf, places, type Place } from "./places.ts";
 import { adoptCarried } from "./carried.ts";
@@ -44,6 +44,10 @@ class Lab {
 	/** The newest picture of each lab's desktop sandbox, and whether an action on it is on its way. */
 	desktops = $state<Record<string, DesktopFrame>>({});
 	desktopBusy = $state<Record<string, boolean>>({});
+	/** Each watched lab desktop's live view, when the lab streams it. */
+	desktopLive = $state<Record<string, DesktopStream>>({});
+	/** Panes drawing a desktop's live bands; kept out of reactive state, as bands arrive many times a second. */
+	private desktopBands = new Map<string, Set<(band: DesktopBand) => void>>();
 	/** Other devices asking to use the person's sign-in at a lab, oldest first; the window asks about each. */
 	deviceRequests = $state<DeviceRequest[]>([]);
 	/** How much history the sidebar holds; Show Older Sessions raises it. */
@@ -234,6 +238,8 @@ class Lab {
 		const failed = parts.find((p): p is PromiseRejectedResult => p.status === "rejected");
 		if (failed) this.say(`Part of the app didn't load: ${(failed.reason as Error)?.message ?? failed.reason}. It tries again when the engine reconnects.`);
 		if (this.current) await this.open(this.current);
+		// The engine forgets a window's live views when it reconnects: ask again for those still drawn.
+		for (const site of this.desktopBands.keys()) void this.desktopWatch(site, true);
 	}
 
 	/** Set when a native window shows one pane of this page (#/embed/app/<id>?session=<sid>): no sidebar, no session view. */
@@ -478,6 +484,28 @@ class Lab {
 		} finally {
 			this.desktopBusy = { ...this.desktopBusy, [site]: false };
 		}
+	}
+
+	/** Watch a lab desktop live while `draw` is subscribed; the returned function stops. */
+	watchDesktop(site: string, draw: (band: DesktopBand) => void): () => void {
+		let listeners = this.desktopBands.get(site);
+		if (!listeners) this.desktopBands.set(site, (listeners = new Set()));
+		const first = listeners.size === 0;
+		listeners.add(draw);
+		if (first) void this.desktopWatch(site, true);
+		return () => {
+			listeners.delete(draw);
+			if (listeners.size === 0) {
+				this.desktopBands.delete(site);
+				void rpc.call("desktop.watch", { site, on: false }).catch(() => undefined);
+				this.desktopLive = { ...this.desktopLive, [site]: { site, live: false } };
+			}
+		};
+	}
+
+	private async desktopWatch(site: string, on: boolean): Promise<void> {
+		const stream = await rpc.call("desktop.watch", { site, on }).catch(() => ({ site, live: false }) as DesktopStream);
+		this.desktopLive = { ...this.desktopLive, [site]: stream };
 	}
 
 	async desktopOpen(site: string, target: string): Promise<void> {
@@ -952,6 +980,12 @@ class Lab {
 			this.desktops = { ...this.desktops, [frame.site]: frame };
 			const shown = groups(this.layout).flatMap((g) => g.tabs).some((t) => t.kind === "desktop" && t.ref === frame.site);
 			if (frame.by === "agent" && !shown && this.summary?.place === frame.site) this.openPane("desktop", frame.site, `${this.place.title} desktop`);
+		});
+		rpc.on("desktop.band", (band) => {
+			for (const draw of this.desktopBands.get(band.site) ?? []) draw(band);
+		});
+		rpc.on("desktop.stream", (stream) => {
+			this.desktopLive = { ...this.desktopLive, [stream.site]: stream };
 		});
 		rpc.on("browser.frame", (frame) => {
 			if (frame.sessionId === this.current) for (const listener of this.frames) listener(frame);

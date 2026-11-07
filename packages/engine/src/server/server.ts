@@ -68,6 +68,8 @@ interface Client {
 	capabilities: Set<string>;
 	/** Sessions whose sandbox browser page this client watches: its frames stop when the client goes. */
 	screens: Set<string>;
+	/** Labs whose desktop this client watches live: the bands go only to it, and stop when it goes. */
+	desktops: Set<string>;
 }
 
 const SESSION_SCOPED = new Set<Notification>(["session.event", "session.delta", "session.status", "permission.request", "permission.settled", "surface.wanted"]);
@@ -292,7 +294,7 @@ export class LabServer {
 	}
 
 	private attach(ws: WebSocket, req: IncomingMessage): void {
-		const client: Client = { ws, name: String(req.headers["user-agent"] ?? "surface").slice(0, 60), sessions: new Set(), terms: new Set(), capabilities: new Set(), screens: new Set() };
+		const client: Client = { ws, name: String(req.headers["user-agent"] ?? "surface").slice(0, 60), sessions: new Set(), terms: new Set(), capabilities: new Set(), screens: new Set(), desktops: new Set() };
 		this.clients.add(client);
 		this.options.onIdleChange?.(this.clients.size);
 		ws.on("message", (data) => void this.message(client, data.toString()));
@@ -300,6 +302,7 @@ export class LabServer {
 			this.clients.delete(client);
 			for (const call of this.surfaceCalls.values()) if (call.client === client) call.reject(new Error("The window closed."));
 			for (const id of client.screens) void this.options.engine.handle("browser.watch", { sessionId: id, on: false }).catch(() => undefined);
+			for (const site of client.desktops) void this.options.engine.handle("desktop.watch", { site, on: false }).catch(() => undefined);
 			for (const id of client.sessions) this.releaseIfUnwatched(id);
 			for (const termId of client.terms) void this.options.engine.handle("term.close", { termId }).catch(() => undefined);
 			this.options.onIdleChange?.(this.clients.size);
@@ -357,6 +360,17 @@ export class LabServer {
 						return;
 					}
 					if (on) client.screens.add(id);
+				}
+				// Each window watches a lab's desktop at most once.
+				if (request.method === "desktop.watch") {
+					const site = String(params.site);
+					if (params.on === true) {
+						if (client.desktops.has(site)) params.on = "again";
+						else client.desktops.add(site);
+					} else if (!client.desktops.delete(site)) {
+						this.send(client, { jsonrpc: "2.0", id: request.id, result: { site, live: false } });
+						return;
+					}
 				}
 				if (request.method === "hello" && Array.isArray(params.capabilities)) {
 					client.capabilities = new Set(params.capabilities.filter((c): c is string => typeof c === "string").slice(0, 16));
@@ -427,6 +441,7 @@ export class LabServer {
 		for (const client of this.clients) {
 			if (SESSION_SCOPED.has(name) && sessionId && !client.sessions.has(sessionId)) continue;
 			if (termId && !client.terms.has(termId)) continue;
+			if (name === "desktop.band" && !client.desktops.has((params as { site: string }).site)) continue;
 			if (client.ws.readyState === WebSocket.OPEN) client.ws.send(payload);
 		}
 		if (name === "term.exit") for (const client of this.clients) client.terms.delete(termId!);

@@ -1,8 +1,9 @@
 <script lang="ts">
 	// A lab's desktop sandbox (docs/research.md): a Linux desktop the person and the agent both use. Every click, key
-	// and scroll here goes to the lab as one checked action marked as the person's, and the lab answers with a new
-	// picture; the agent's actions show here as it works. The lab audits each action, so the pane doesn't poll: it
-	// asks for a picture when it opens, just after the person acts, and on Refresh.
+	// and scroll here goes to the lab as one checked action marked as the person's. Where the lab streams the desktop,
+	// the pane shows it live (changed bands of the screen, a few times a second); otherwise it asks for a picture when
+	// it opens, just after the person acts, and on Refresh.
+	import type { DesktopBand } from "@enrichedlab/protocol";
 	import { untrack } from "svelte";
 	import { mac, placeOf } from "../../lib/places.ts";
 	import { lab } from "../../lib/store.svelte.ts";
@@ -19,13 +20,46 @@
 	const info = $derived(place.site?.desktop);
 	const frame = $derived(lab.desktops[site]);
 	const busy = $derived(Boolean(lab.desktopBusy[site]));
+	const live = $derived(Boolean(lab.desktopLive[site]?.live));
 	/** Shown for a few seconds after the agent acts, so the person knows who moved the pointer. */
 	let agentAt = $state(0);
 	let now = $state(Date.now());
 	const agentWorking = $derived(frame?.by === "agent" && now - agentAt < 4_000);
 
 	// ── The picture ──────────────────────────────────────────────────────────────────────────────────────────────
-	let image: ImageBitmap | undefined;
+	let image: ImageBitmap | OffscreenCanvas | undefined;
+	/** The live view's screen, which bands are drawn onto. */
+	let screen: OffscreenCanvas | undefined;
+	let frameAsked = 0;
+	function redraw() {
+		if (frameAsked) return;
+		frameAsked = requestAnimationFrame(() => {
+			frameAsked = 0;
+			draw();
+		});
+	}
+	function onBand(band: DesktopBand) {
+		const stream = lab.desktopLive[site];
+		const width = stream?.width || band.x + band.w;
+		const height = stream?.height || band.y + band.h;
+		if (!screen || screen.width !== width || screen.height !== height) {
+			const next = new OffscreenCanvas(width, height);
+			// Keep what was shown until bands cover the new screen.
+			if (image) next.getContext("2d")!.drawImage(image, 0, 0, width, height);
+			screen = next;
+		}
+		const bytes = Uint8Array.from(atob(band.jpeg), (c) => c.charCodeAt(0));
+		void createImageBitmap(new Blob([bytes], { type: "image/jpeg" }))
+			.then((piece) => {
+				screen?.getContext("2d")!.drawImage(piece, band.x, band.y, band.w, band.h);
+				piece.close();
+				if (image instanceof ImageBitmap) image.close();
+				image = screen;
+				drawn = true;
+				redraw();
+			})
+			.catch(() => undefined);
+	}
 	let box = { x: 0, y: 0, w: 0, h: 0 };
 	function draw() {
 		if (!canvas || !stage || !image) return;
@@ -55,8 +89,15 @@
 		const bytes = Uint8Array.from(atob(f.png), (c) => c.charCodeAt(0));
 		void createImageBitmap(new Blob([bytes], { type: "image/png" }))
 			.then((next) => {
-				image?.close();
-				image = next;
+				// While live, a full picture (from an action) is drawn onto the live screen, which bands keep current.
+				if (screen && live && next.width === screen.width && next.height === screen.height) {
+					screen.getContext("2d")!.drawImage(next, 0, 0);
+					next.close();
+					image = screen;
+				} else {
+					if (image instanceof ImageBitmap) image.close();
+					image = next;
+				}
 				drawn = true;
 				draw();
 			})
@@ -68,11 +109,13 @@
 		const observer = new ResizeObserver(() => draw());
 		if (stage) observer.observe(stage);
 		const tick = setInterval(() => (now = Date.now()), 1_000);
-		// A picture when the pane first shows; later ones come with each action.
+		// A picture when the pane first shows; later ones come live, or with each action.
 		untrack(() => (lab.desktops[site] ? draw() : void act({ action: "screenshot" })));
+		const unwatch = lab.watchDesktop(site, onBand);
 		return () => {
 			observer.disconnect();
 			clearInterval(tick);
+			unwatch();
 		};
 	});
 
@@ -86,7 +129,8 @@
 		clearTimeout(settle);
 		await act(action);
 		clearTimeout(settle);
-		settle = setTimeout(() => void act({ action: "screenshot" }), pause);
+		// A live view shows the result as it happens.
+		if (!live) settle = setTimeout(() => void act({ action: "screenshot" }), pause);
 	}
 
 	// ── The person's pointer, in the desktop's own pixels ────────────────────────────────────────────────────────
@@ -214,7 +258,7 @@
 		// A program takes a moment to open its window.
 		void lab.desktopOpen(site, next).then(() => {
 			clearTimeout(settle);
-			settle = setTimeout(() => void act({ action: "screenshot" }), 1_500);
+			if (!live) settle = setTimeout(() => void act({ action: "screenshot" }), 1_500);
 		});
 	}
 	const size = $derived(frame?.width ? `${frame.width} × ${frame.height}` : info?.width ? `${info.width} × ${info.height}` : "");
@@ -230,7 +274,7 @@
 		{:else}
 			<span class="spacer"></span>
 		{/if}
-		{#if agentWorking}<span class="who" role="status">The agent is using it</span>{:else if size}<span class="who">{size}</span>{/if}
+		{#if agentWorking}<span class="who" role="status">The agent is using it</span>{:else if size}<span class="who" title={live ? "The desktop shows live" : "The picture updates after each action"}>{live ? "Live · " : ""}{size}</span>{/if}
 		<button type="button" class="icon-btn" onclick={() => void act({ action: "screenshot" })} disabled={busy} aria-label="Refresh the picture" title="Refresh the picture">
 			<svg viewBox="0 0 16 16"><path d="M12.5 8a4.5 4.5 0 1 1-1.3-3.2M12.5 3v2.5H10" /></svg>
 		</button>

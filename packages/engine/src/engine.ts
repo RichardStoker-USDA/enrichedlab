@@ -7,6 +7,7 @@ import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import type {
+	DesktopStream,
 	Method,
 	Notification,
 	Notifications,
@@ -456,6 +457,50 @@ export class Engine {
 		});
 	}
 
+	/** Each lab desktop's live view while any window watches it: one stream from the lab, passed to those windows. */
+	private desktopStreams = new Map<string, { watchers: number; width?: number; height?: number; close?: () => void; starting?: Promise<unknown> }>();
+
+	private async desktopWatch(site: string, on: boolean): Promise<DesktopStream> {
+		const current = this.desktopStreams.get(site);
+		if (!on) {
+			if (current && --current.watchers <= 0) {
+				current.close?.();
+				this.desktopStreams.delete(site);
+			}
+			return { site, live: false };
+		}
+		if (current) {
+			current.watchers++;
+			await current.starting?.catch(() => undefined);
+			return { site, live: Boolean(current.close), width: current.width, height: current.height };
+		}
+		const api = this.sites.desktop(site);
+		if (!api?.desktopStream || !api.desktop()?.stream) return { site, live: false };
+		const stream: { watchers: number; width?: number; height?: number; close?: () => void; starting?: Promise<unknown> } = { watchers: 1 };
+		this.desktopStreams.set(site, stream);
+		stream.starting = api.desktopStream({
+			band: (b) => this.emit("desktop.band", { site, x: b.x, y: b.y, w: b.w, h: b.h, jpeg: Buffer.from(b.jpeg).toString("base64") }),
+			end: (reason) => {
+				if (this.desktopStreams.get(site) === stream) this.desktopStreams.delete(site);
+				this.emit("desktop.stream", { site, live: false, reason });
+			},
+		});
+		try {
+			const opened = (await stream.starting) as { width: number; height: number; close(): void };
+			// Every window stopped watching while it started.
+			if (stream.watchers <= 0) {
+				opened.close();
+				return { site, live: false };
+			}
+			Object.assign(stream, { width: opened.width, height: opened.height, close: opened.close });
+			this.emit("desktop.stream", { site, live: true, width: opened.width, height: opened.height });
+			return { site, live: true, width: opened.width, height: opened.height };
+		} catch {
+			if (this.desktopStreams.get(site) === stream) this.desktopStreams.delete(site);
+			return { site, live: false };
+		}
+	}
+
 	/** The session a subagent works for (itself when it isn't one), following parents to the top. */
 	private leadOf(sessionId: string): string {
 		let id = sessionId;
@@ -652,6 +697,8 @@ export class Engine {
 					}
 					return runtime.prompt(text, p.images as never);
 				}
+				case "desktop.watch":
+					return (await this.desktopWatch(need("site"), p.on === true || p.on === "again")) as never;
 				case "desktop.act":
 				case "desktop.open": {
 					const site = need("site");

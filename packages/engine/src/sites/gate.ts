@@ -28,7 +28,7 @@ import type { SiteAdapter } from "./adapter.ts";
 import { fetchRepo, sendRepo } from "./repo_handoff.ts";
 import type { SandboxApi } from "./sandbox_workspace.ts";
 import type { SiteConfig, SiteRoute } from "./sites.ts";
-import { type DesktopAction, type DesktopApi, type DesktopFrame, type DesktopResult, desktopTools, frameIn } from "./desktop.ts";
+import { type DesktopAction, type DesktopApi, type DesktopFrame, type DesktopResult, type DesktopStreamHandlers, desktopTools, frameIn } from "./desktop.ts";
 import { type CheckRow, CONTRACT, contractProblem, DESCRIPTOR_PATH, type DesktopInfo, type Endpoint, type LabAppEntry, type LabDescriptor, type LabEvent, type LabSigner, type SandboxAgents, SCHEMAS, validate } from "./contract.ts";
 
 interface GateModel {
@@ -1907,6 +1907,62 @@ export class GateSite implements SiteAdapter, SandboxApi, DesktopApi {
 		if (frame) this.onDesktopFrame?.(frame);
 		const cursor = (answer as { cursor?: unknown } | undefined)?.cursor;
 		return { frame, cursor: Array.isArray(cursor) && cursor.length === 2 ? (cursor as [number, number]) : undefined, answer };
+	}
+
+	/**
+	 * The desktop's live view (GET .../desktop/stream, subprotocol gate.desktop.v1): a hello with the screen's size,
+	 * then binary bands (x, y, w, h as big-endian u16, then a JPEG) until an end message or the socket closes. Only
+	 * watching: the person's input still goes through the checked action endpoint.
+	 */
+	async desktopStream(handlers: DesktopStreamHandlers, signal?: AbortSignal): Promise<{ width: number; height: number; close(): void }> {
+		if (!this.desktop()?.stream) throw new ToolError(`${this.title}'s desktop has no live view.`);
+		const id = await this.desktopSandbox(signal);
+		const url = `${this.route.base}/v1/containers/${encodeURIComponent(id)}/desktop/stream`;
+		await this.freshNonce();
+		const headers = await this.authHeaders("GET", url);
+		const socket = new WebSocket(url.replace(/^http/, "ws"), { headers, protocols: ["gate.desktop.v1"], ...(this.route.ca ? { tls: { ca: this.route.ca } } : {}) } as unknown as string[]);
+		socket.binaryType = "arraybuffer";
+		let ended = false;
+		const end = (reason: string) => {
+			if (ended) return;
+			ended = true;
+			handlers.end(reason);
+		};
+		return new Promise((resolve, reject) => {
+			let hello = false;
+			const timer = setTimeout(() => {
+				if (!hello) {
+					socket.close();
+					reject(new ToolError(`${this.title}'s desktop didn't start its live view.`));
+				}
+			}, 30_000);
+			signal?.addEventListener("abort", () => socket.close(), { once: true });
+			socket.onmessage = (event) => {
+				if (typeof event.data === "string") {
+					let message: { type?: string; width?: number; height?: number; reason?: string };
+					try {
+						message = JSON.parse(event.data);
+					} catch {
+						return;
+					}
+					if (message.type === "hello" && !hello) {
+						hello = true;
+						clearTimeout(timer);
+						resolve({ width: Number(message.width ?? 0), height: Number(message.height ?? 0), close: () => socket.close(1000) });
+					} else if (message.type === "end") end(String(message.reason ?? "closed"));
+					return;
+				}
+				const bytes = new Uint8Array(event.data as ArrayBuffer);
+				if (bytes.length < 9) return;
+				const head = new DataView(bytes.buffer, bytes.byteOffset, 8);
+				handlers.band({ x: head.getUint16(0), y: head.getUint16(2), w: head.getUint16(4), h: head.getUint16(6), jpeg: bytes.subarray(8) });
+			};
+			socket.onclose = (event) => {
+				clearTimeout(timer);
+				if (!hello) reject(new ToolError(`${this.title}'s desktop refused its live view (${event.code}${event.reason ? ` ${event.reason}` : ""}).`));
+				else end("closed");
+			};
+		});
 	}
 
 	/** A file from the workspace sandbox onto the desktop, through this computer; the lab scans it both ways. */

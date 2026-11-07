@@ -32,6 +32,11 @@ export interface DesktopAction {
 
 export type { DesktopFrame };
 
+export interface DesktopStreamHandlers {
+	band(band: { x: number; y: number; w: number; h: number; jpeg: Uint8Array }): void;
+	end(reason: string): void;
+}
+
 export interface DesktopResult {
 	frame?: DesktopFrame;
 	cursor?: [number, number];
@@ -44,6 +49,8 @@ export interface DesktopApi {
 	desktop(): DesktopInfo | undefined;
 	desktopAct(action: DesktopAction, by: "agent" | "person", signal?: AbortSignal): Promise<DesktopResult>;
 	desktopOpen(target: string, by: "agent" | "person", signal?: AbortSignal, app?: string): Promise<DesktopResult>;
+	/** The desktop's live view (where the lab streams it): changed bands of the screen until it ends. */
+	desktopStream?(handlers: DesktopStreamHandlers, signal?: AbortSignal): Promise<{ width: number; height: number; close(): void }>;
 	/** Copy a file from the workspace sandbox onto the desktop; absent where a lab can't. */
 	desktopCopy?(from: string, signal?: AbortSignal): Promise<{ path: string; bytes: number }>;
 }

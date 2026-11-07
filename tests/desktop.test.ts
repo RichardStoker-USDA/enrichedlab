@@ -18,11 +18,35 @@ const lab = {
 	/** Containers that ended (410 container_expired). */
 	ended: new Set<string>(),
 };
-const server = Bun.serve({
+const stream = { protocols: "", authorization: "" };
+const server = Bun.serve<{ id: string }>({
 	port: 0,
 	hostname: "127.0.0.1",
-	async fetch(request) {
+	websocket: {
+		// As Gate does: a hello with the screen's size, two bands (x, y, w, h as big-endian u16, then the JPEG), an end.
+		open(ws) {
+			ws.send(JSON.stringify({ type: "hello", width: 1280, height: 800, format: "jpeg-stripes", input: true, seq_ack: true, max_fps: 15 }));
+			for (const [x, y, w, h, body] of [[0, 0, 1280, 16, "band-a"], [64, 784, 32, 16, "band-b"]] as const) {
+				const head = Buffer.alloc(8);
+				head.writeUInt16BE(x, 0);
+				head.writeUInt16BE(y, 2);
+				head.writeUInt16BE(w, 4);
+				head.writeUInt16BE(h, 6);
+				ws.send(Buffer.concat([head, Buffer.from(body)]));
+			}
+			ws.send(JSON.stringify({ type: "end", reason: "time_limit" }));
+		},
+		message() {},
+	},
+	async fetch(request, srv) {
 		const url = new URL(request.url);
+		const live = /^\/v1\/containers\/([^/]+)\/desktop\/stream$/.exec(url.pathname);
+		if (live) {
+			stream.protocols = request.headers.get("sec-websocket-protocol") ?? "";
+			stream.authorization = request.headers.get("authorization") ?? "";
+			if (!stream.protocols.split(/,\s*/).includes("gate.desktop.v1")) return Response.json({ error: { code: "invalid_request" } }, { status: 400 });
+			return srv.upgrade(request, { data: { id: live[1]! }, headers: { "sec-websocket-protocol": "gate.desktop.v1" } }) ? undefined : new Response("", { status: 500 });
+		}
 		if (url.pathname === "/.well-known/enrichedlab-lab") {
 			return Response.json({
 				contract: "2026-11",
@@ -30,7 +54,7 @@ const server = Bun.serve({
 				title: "Field Lab",
 				endpoints: { containers: true },
 				sign_in: { kind: "oauth" },
-				sandbox_desktop: { image: "desktop", screen: { width: 1280, height: 800 }, actions: ["screenshot", "left_click", "type", "key", "scroll"], open: true },
+				sandbox_desktop: { image: "desktop", screen: { width: 1280, height: 800 }, actions: ["screenshot", "left_click", "type", "key", "scroll"], open: true, stream: true },
 			});
 		}
 		if (url.pathname === "/v1/me") return Response.json({ subject: "u_123456789", handle: "pat", memberships: [], sandboxes: { enabled: true } });
@@ -192,5 +216,27 @@ describe("reading a desktop's windows and controls", () => {
 		expect(launched.content).toBe('Launched text. Its window is 0x2200001 "Text Editor".');
 		expect(launched.images?.length).toBe(1);
 		expect(calls.map((c) => c.action)).toEqual(["state", "launch", "screenshot"]);
+	});
+});
+
+describe("a lab desktop's live view", () => {
+	test("opens with the lab's subprotocol and sign-in, reads the size, decodes each band, and reports the end", async () => {
+		const s = site();
+		await s.connect();
+		const bands: { x: number; y: number; w: number; h: number; jpeg: string }[] = [];
+		let ended = "";
+		const done = new Promise<void>((resolve) => {
+			void s
+				.desktopStream({ band: (b) => bands.push({ ...b, jpeg: Buffer.from(b.jpeg).toString() }), end: (reason) => ((ended = reason), resolve()) })
+				.then((opened) => expect([opened.width, opened.height]).toEqual([1280, 800]));
+		});
+		await done;
+		expect(stream.protocols).toBe("gate.desktop.v1");
+		expect(stream.authorization).toBe("Bearer k");
+		expect(bands).toEqual([
+			{ x: 0, y: 0, w: 1280, h: 16, jpeg: "band-a" },
+			{ x: 64, y: 784, w: 32, h: 16, jpeg: "band-b" },
+		]);
+		expect(ended).toBe("time_limit");
 	});
 });
