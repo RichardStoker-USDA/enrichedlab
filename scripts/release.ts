@@ -50,15 +50,10 @@ copyFileSync(join(root, "dist", "sbom.cdx.json"), join(release, "sbom.cdx.json")
 
 const builder = (args: string[]) => $`npx electron-builder ${args}`.cwd(desktop).env({ ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: "true" });
 
-console.log("macOS app (universal)");
-// One universal `el` in both halves of the app, so Intel and Apple silicon Macs each run their own slice.
-const fat = join(root, "dist", "stage", "el-universal");
-await $`lipo -create ${join(root, "dist", "stage", "mac-arm64", "el")} ${join(root, "dist", "stage", "mac-x64", "el")} -output ${fat}`;
-for (const arch of ["arm64", "x64"]) copyFileSync(fat, join(root, "dist", "stage", `mac-${arch}`, "el"));
-rmSync(fat);
-await builder(["--mac", "dir", "--universal", "--publish", "never"]);
-const app = join(built, "mac-universal", "EnrichedLab.app");
-await $`codesign --verify --deep --strict ${app}`;
+console.log("macOS app (native, universal)");
+// The SwiftUI window with the universal `el` inside, signed with the Developer ID (scripts/build_mac_app.ts).
+await $`bun ${join(root, "scripts", "build_mac_app.ts")} --reuse-el`.cwd(root);
+const app = join(root, "dist", "mac", "EnrichedLab.app");
 
 console.log("macOS package (installs into the home folder)");
 const stage = join(root, "dist", "pkg");
@@ -108,6 +103,7 @@ writeFileSync(
 <installer-gui-script minSpecVersion="2">
 	<title>EnrichedLab</title>
 	<options customize="never" require-scripts="false" hostArchitectures="arm64,x86_64"/>
+	<allowed-os-versions><os-version min="15.0"/></allowed-os-versions>
 	<domains enable_currentUserHome="true" enable_localSystem="false" enable_anywhere="false"/>
 	<choices-outline><line choice="default"/></choices-outline>
 	<choice id="default" title="EnrichedLab"><pkg-ref id="org.enrichedlab.app"/></choice>

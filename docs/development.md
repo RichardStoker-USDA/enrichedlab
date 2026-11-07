@@ -107,12 +107,12 @@ On a Mac with the Developer ID identities in the keychain:
 NOTARY_PROFILE=<notarytool profile> bun scripts/release.ts --publish
 ```
 
-It builds the six binaries, the universal macOS app and its home-folder package (signed and notarized), the
-per-user Windows setup, the Linux AppImages, an SBOM, and `manifest.json` signed with the release key
-(`~/.secrets/enriched/release_signing.jwk`; its public half is `config/release_key.json`). `--publish` creates the
-GitHub release that `el update` and `install.sh` read. `--security` marks a release as a security fix. The
-version is `VERSION` in `packages/engine/src/util.ts` and the `version` in each `package.json`; the release notes are
-`NEWS` beside it.
+It builds the six binaries, the native universal macOS app (`scripts/build_mac_app.ts`, macOS 15 and later) and its
+home-folder package (signed and notarized), the per-user Windows setup, the Linux AppImages, an SBOM, and
+`manifest.json` signed with the release key (`~/.secrets/enriched/release_signing.jwk`; its public half is
+`config/release_key.json`). `--publish` creates the GitHub release that `el update` and `install.sh` read. `--security`
+marks a release as a security fix. The version is `VERSION` in `packages/engine/src/util.ts` and the `version` in each
+`package.json`; the release notes are `NEWS` beside it.
 
 ### Signing for Windows
 

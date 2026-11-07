@@ -158,11 +158,11 @@ interpreters and compound lines. A site tool runs when the site marks it read-on
 commands run, since the sandbox is isolated. The person answers from whichever surface they are looking at; the
 first answer wins. `el run` refuses what would ask, unless started with `--allow`.
 
-**Windows that act.** A surface can say in `hello` what it can do for the engine. The desktop window says "browser":
+**Windows that act.** A surface can say in `hello` what it can do for the engine. The desktop windows say "browser":
 the browser tools (`browser_open`, `browser_read`, `browser_click`, `browser_type`, `browser_screenshot`) become
 `surface.call` notifications to a window showing the session, which acts on its browser pane with real input events
 and answers with `surface.reply`. The page is read as text with numbered controls
-(`apps/desktop/src/page_script.mjs`). When the agent shows something or needs the browser and no window shows the
+(`apps/desktop/src/page_script.mjs`; the macOS app carries the same script). When the agent shows something or needs the browser and no window shows the
 session, the engine sends `surface.wanted` and the terminal opens the window (`/window off` keeps a session in the
 terminal).
 

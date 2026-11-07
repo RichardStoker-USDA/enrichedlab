@@ -82,3 +82,15 @@ func copyText(_ text: String, what: String, app: AppModel) {
 func revealInFinder(_ path: String) {
 	NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
 }
+
+extension View {
+	/// Liquid Glass on macOS 26 and later; the closest material before it, so the app runs on macOS 15 too.
+	@ViewBuilder func glass(in shape: some Shape, interactive: Bool = false) -> some View {
+		if #available(macOS 26, *) {
+			glassEffect(interactive ? .regular.interactive() : .regular, in: shape)
+		} else {
+			background(.regularMaterial, in: shape)
+				.overlay(shape.stroke(.separator, lineWidth: 0.5))
+		}
+	}
+}

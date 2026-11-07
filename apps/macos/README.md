@@ -1,8 +1,8 @@
 # EnrichedLab for macOS
 
-The native window: SwiftUI on macOS 26 and later, universal (Apple silicon and Intel). It is a client of the same
-engine every EnrichedLab window uses (`docs/architecture.md`), so sessions, labs, models and tools behave the same here
-as in the terminal and on Windows.
+The native window: SwiftUI on macOS 15 and later, universal (Apple silicon and Intel), with Liquid Glass on macOS 26
+and later and the closest system material before it. It is a client of the same engine every EnrichedLab window uses
+(`docs/architecture.md`), so sessions, labs, models and tools behave the same here as in the terminal and on Windows.
 
 | Target | Owns |
 | --- | --- |

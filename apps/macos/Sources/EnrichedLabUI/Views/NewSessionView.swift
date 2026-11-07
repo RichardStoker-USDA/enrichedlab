@@ -50,7 +50,7 @@ struct NewSessionView: View {
 					}
 				}
 				.padding(14)
-				.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+				.glass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
 			}
 			.frame(maxWidth: 640)
 			.padding(.horizontal, 32)

@@ -50,7 +50,7 @@ struct TranscriptView: View {
 						.frame(width: 28, height: 28)
 				}
 				.buttonStyle(.plain)
-				.glassEffect(.regular.interactive(), in: .circle)
+				.glass(in: Circle(), interactive: true)
 				.padding(16)
 				.help("Jump to latest")
 				.transition(.opacity.combined(with: .scale(scale: 0.9)))

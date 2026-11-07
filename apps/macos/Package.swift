@@ -7,7 +7,7 @@ import PackageDescription
 let package = Package(
 	name: "EnrichedLab",
 	defaultLocalization: "en",
-	platforms: [.macOS(.v26)],
+	platforms: [.macOS(.v15)],
 	products: [
 		.executable(name: "EnrichedLab", targets: ["EnrichedLab"]),
 		.library(name: "EnrichedLabKit", targets: ["EnrichedLabKit"]),

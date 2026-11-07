@@ -193,7 +193,7 @@ struct ToastView: View {
 			}
 			.padding(.horizontal, 14)
 			.padding(.vertical, 9)
-			.glassEffect(.regular, in: .capsule)
+			.glass(in: Capsule())
 			.padding(.bottom, 120)
 			.frame(maxWidth: 560)
 			.transition(.move(edge: .bottom).combined(with: .opacity))
@@ -226,7 +226,7 @@ struct ConnectionBanner: View {
 		}
 		.padding(.horizontal, 14)
 		.padding(.vertical, 8)
-		.glassEffect(.regular, in: .capsule)
+		.glass(in: Capsule())
 		.padding(.top, 12)
 	}
 }

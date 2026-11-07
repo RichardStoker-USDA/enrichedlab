@@ -92,7 +92,7 @@ struct Composer: View {
 		.padding(.horizontal, 14)
 		.padding(.top, 12)
 		.padding(.bottom, 9)
-		.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+		.glass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
 		.overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(focused ? Theme.accent.opacity(0.45) : Color.clear, lineWidth: 1))
 		.dropDestination(for: URL.self) { urls, _ in
 			addFiles(urls)
