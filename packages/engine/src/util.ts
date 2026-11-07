@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "n
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-export const VERSION = "0.2.22";
+export const VERSION = "0.2.23";
 
 /**
  * How the harness names itself to a lab. Gate files every request under the User-Agent's first word, so the lab's
@@ -13,6 +13,7 @@ export const CLIENT_AGENT = `EnrichedLab/${VERSION} (${process.platform}; ${proc
 
 /** What changed in this version, one line each, newest first. Surfaces show the first lines when a session opens. */
 export const NEWS = [
+	"0.2.23: on macOS, EnrichedLab is now a native Mac app (macOS 15 and later) with the same sessions, labs, models and tools, and it opens room for the workbench instead of squeezing it; the window no longer slides when something inside it scrolls; agents search all their tools by what they need and come with skills for Shiny figure apps, data analysis in R or Python, Office files, PDF forms, a lab's desktop and research at a lab; a subagent's questions reach the window showing its session.",
 	"0.2.22: el lab check also checks a lab's desktop sandboxes (the picture, no shell, no address with a password) and its runs list; the lab contract adds data scopes to /v1/me.",
 	"0.2.21: the Desktop pane and the agent's desktop tools work with a lab desktop as Home Lab serves it: a fresh picture after each action, and an archived desktop is restored with its files instead of replaced.",
 	"0.2.20: a lab can offer a desktop sandbox that you and the agent both use, in a Desktop pane; a lab can grant Discovery mode, turned on by typing /discover, where the agent works on its own inside the lab without asking; each step's reasoning gets a short summary made where its model runs, with the full text a click away, and compaction stays there too; el session package writes a session as an RO-Crate to check or rerun; a lab that says it keeps data inside stays isolated.",
