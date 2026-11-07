@@ -480,6 +480,10 @@ export class Sites {
 			const adapter = factory(config, route, container, this.deviceFile(name));
 			adapter.onNotice = (text) => this.onNotice({ site: name, type: "site.notice", at: new Date().toISOString(), text });
 			adapter.onDesktopFrame = (frame) => this.onDesktopFrame?.(frame);
+			adapter.onDesktopChange = () => {
+				const state = this.states.get(name);
+				if (state) this.onChange(this.summary(state));
+			};
 			adapter.onApproved = () => void this.connect(name).catch(() => undefined);
 			try {
 				await adapter.connect();
@@ -553,8 +557,9 @@ export class Sites {
 	}
 
 	private desktopSummary(name: string): SiteSummary["desktop"] {
-		const info = this.desktop(name)?.desktop();
-		return info ? { width: info.screen?.width, height: info.screen?.height, actions: info.actions, open: info.open === true } : undefined;
+		const api = this.desktop(name);
+		const info = api?.desktop();
+		return info ? { width: info.screen?.width, height: info.screen?.height, actions: info.actions, open: info.open === true, ...(api?.desktopOutdated ? { outdated: true } : {}) } : undefined;
 	}
 
 	list(): SiteSummary[] {

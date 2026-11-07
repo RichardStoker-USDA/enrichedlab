@@ -697,6 +697,13 @@ export class Engine {
 					}
 					return runtime.prompt(text, p.images as never);
 				}
+				case "desktop.update": {
+					const site = need("site");
+					const api = this.sites.desktop(site);
+					if (!api?.desktopUpdate) throw new RpcError(-32602, `${this.sites.title(site)} can't update its desktop.`);
+					await api.desktopUpdate();
+					return { ok: true } as never;
+				}
 				case "desktop.watch":
 					return (await this.desktopWatch(need("site"), p.on === true || p.on === "again")) as never;
 				case "desktop.act":

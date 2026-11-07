@@ -51,6 +51,10 @@ export interface DesktopApi {
 	desktopOpen(target: string, by: "agent" | "person", signal?: AbortSignal, app?: string): Promise<DesktopResult>;
 	/** The desktop's live view (where the lab streams it): changed bands of the screen until it ends. */
 	desktopStream?(handlers: DesktopStreamHandlers, signal?: AbortSignal): Promise<{ width: number; height: number; close(): void }>;
+	/** Set when the lab said this desktop is older than its current image. */
+	desktopOutdated?: boolean;
+	/** Move the desktop to the lab's current image, keeping its files; absent where a lab can't. */
+	desktopUpdate?(signal?: AbortSignal): Promise<void>;
 	/** Copy a file from the workspace sandbox onto the desktop; absent where a lab can't. */
 	desktopCopy?(from: string, signal?: AbortSignal): Promise<{ path: string; bytes: number }>;
 }
@@ -146,7 +150,7 @@ export function describeState(answer: unknown): string {
 		for (const w of windows) {
 			const b = boundsOf(w.bounds);
 			const flags = [w.focused ? "focused" : "", w.minimized ? "minimized" : ""].filter(Boolean).join(", ");
-			lines.push(`- ${String(w.id ?? "?")} ${String(w.app ?? "")}${quoted(w.title)}${b ? ` at (${b.x}, ${b.y}), ${b.w} by ${b.h}` : ""}${flags ? `, ${flags}` : ""}`);
+			lines.push(`- ${String(w.id ?? "?")} ${String(w.app_id ?? w.app ?? "")}${quoted(w.title)}${b ? ` at (${b.x}, ${b.y}), ${b.w} by ${b.h}` : ""}${flags ? `, ${flags}` : ""}`);
 		}
 	}
 	const focused = root.focused as { window?: unknown; tree?: unknown; truncated?: unknown } | undefined;

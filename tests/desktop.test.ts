@@ -17,6 +17,10 @@ const lab = {
 	restored: [] as string[],
 	/** Containers that ended (410 container_expired). */
 	ended: new Set<string>(),
+	/** Desktops made from an older image build: the new actions answer 409 desktop_outdated, as Gate does. */
+	outdated: new Set<string>(),
+	/** The update steps, in order. */
+	steps: [] as string[],
 };
 const stream = { protocols: "", authorization: "" };
 const server = Bun.serve<{ id: string }>({
@@ -66,8 +70,17 @@ const server = Bun.serve<{ id: string }>({
 			lab.containers.push(made);
 			return Response.json(made, { status: 201 });
 		}
+		const step = /^\/v1\/containers\/([^/]+)\/(stop|archive)$/.exec(url.pathname);
+		if (step && request.method === "POST") {
+			lab.steps.push(step[2]!);
+			if (step[2] === "archive") lab.archived.add(step[1]!);
+			return Response.json({ id: step[1], status: step[2] === "stop" ? "stopped" : "archiving" }, { status: step[2] === "stop" ? 200 : 202 });
+		}
 		const restore = /^\/v1\/containers\/([^/]+)\/restore$/.exec(url.pathname);
 		if (restore && request.method === "POST") {
+			lab.steps.push("restore");
+			// Made again from the image's current build.
+			lab.outdated.delete(restore[1]!);
 			lab.archived.delete(restore[1]!);
 			lab.restored.push(restore[1]!);
 			return Response.json({ id: restore[1], status: "restoring" }, { status: 202 });
@@ -79,6 +92,7 @@ const server = Bun.serve<{ id: string }>({
 			if (lab.ended.has(desk[1]!)) return Response.json({ error: { code: "container_expired", message: "ended" } }, { status: 410 });
 			if (!lab.containers.some((c) => c.id === desk[1])) return Response.json({ error: { code: "container_not_found", message: "no such sandbox" } }, { status: 404 });
 			if (lab.archived.has(desk[1]!)) return Response.json({ error: { code: "sandbox_archived", message: "archived" } }, { status: 409 });
+			if (lab.outdated.has(desk[1]!)) return Response.json({ error: { code: "desktop_outdated", message: "older image" } }, { status: 409 });
 			const body = (await request.json()) as Record<string, unknown>;
 			lab.actions.push({ ...body, container: desk[1], open: Boolean(desk[2]) });
 			if (desk[2]) return Response.json({ opened: body.target });
@@ -238,5 +252,26 @@ describe("a lab desktop's live view", () => {
 			{ x: 64, y: 784, w: 32, h: 16, jpeg: "band-b" },
 		]);
 		expect(ended).toBe("time_limit");
+	});
+});
+
+describe("an outdated desktop", () => {
+	test("is marked for the windows, tells the agent what to do, and updates in place through stop, archive and restore", async () => {
+		const s = site();
+		let changes = 0;
+		s.onDesktopChange = () => changes++;
+		await s.connect();
+		await s.desktopAct({ action: "screenshot" }, "agent");
+		const id = String(lab.actions.at(-1)!.container);
+		lab.outdated.add(id);
+		await expect(s.desktopAct({ action: "left_click", coordinate: [1, 1] }, "agent")).rejects.toThrow("choose Update Desktop in its pane, which keeps its files");
+		expect(s.desktopOutdated).toBe(true);
+		expect(changes).toBe(1);
+		lab.steps = [];
+		await s.desktopUpdate();
+		expect(lab.steps).toEqual(["stop", "archive", "restore"]);
+		expect(s.desktopOutdated).toBe(false);
+		expect(changes).toBe(2);
+		await s.desktopAct({ action: "left_click", coordinate: [1, 1] }, "agent");
 	});
 });

@@ -433,6 +433,21 @@ public final class AppModel {
 		}
 	}
 
+	public private(set) var desktopUpdating: Set<String> = []
+
+	/// Move an outdated lab desktop to the lab's current one, keeping its files; then a fresh picture.
+	public func desktopUpdate(site: String) async {
+		desktopUpdating.insert(site)
+		defer { desktopUpdating.remove(site) }
+		do {
+			try await connection.updateDesktop(site: site)
+			sites = (try? await connection.sites()) ?? sites
+			await desktopAct(site: site, action: ["action": "screenshot"])
+		} catch {
+			said(error, prefix: "The desktop didn't update")
+		}
+	}
+
 	/// Watch a lab desktop live while a pane shows it (where the lab streams it).
 	public func watchDesktop(_ site: String) {
 		desktopWatchers[site, default: 0] += 1

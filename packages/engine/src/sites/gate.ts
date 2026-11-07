@@ -217,6 +217,9 @@ export class GateSite implements SiteAdapter, SandboxApi, DesktopApi {
 	private desktopStarting?: Promise<string>;
 	/** Set by Sites: a picture of the desktop after an action, for the windows that show it. */
 	onDesktopFrame?: (frame: DesktopFrame) => void;
+	/** Set by Sites: the desktop's outdated mark changed, so the lab's summary changed. */
+	onDesktopChange?: () => void;
+	desktopOutdated = false;
 
 	constructor(
 		readonly config: SiteConfig,
@@ -1904,7 +1907,11 @@ export class GateSite implements SiteAdapter, SandboxApi, DesktopApi {
 			} catch (error) {
 				const { status, code } = error as { status?: number; code?: string };
 				if (code === "desktop_outdated") {
-					throw new ToolError(`This ${this.title} desktop started before the lab updated it, so it can't list windows, launch or focus apps yet. Use screenshot and clicks, or ask the person to restart the desktop.`);
+					if (!this.desktopOutdated) {
+						this.desktopOutdated = true;
+						this.onDesktopChange?.();
+					}
+					throw new ToolError(`This ${this.title} desktop was made before the lab's current desktop, so it can't list windows, launch or focus apps. Use screenshot and clicks, or ask the person to choose Update Desktop in its pane, which keeps its files.`);
 				}
 				if (attempt < 2 && code === "sandbox_archived") {
 					this.onNotice?.(`Restoring your ${this.title} desktop from its archive. Its files come back with it.`);
@@ -1985,6 +1992,40 @@ export class GateSite implements SiteAdapter, SandboxApi, DesktopApi {
 				else end("closed");
 			};
 		});
+	}
+
+	/**
+	 * Move the desktop to the lab's current image under the same id, keeping its /sandbox files: stop it, archive it,
+	 * then restore it (Gate makes it again from the image's current build). Its open windows close.
+	 */
+	async desktopUpdate(signal?: AbortSignal): Promise<void> {
+		const id = await this.desktopSandbox(signal);
+		const at = `/v1/containers/${encodeURIComponent(id)}`;
+		const until = async (want: string) => {
+			for (const end = Date.now() + 300_000; Date.now() < end; await sleep(2_000, signal)) if ((await this.containerStatus(id, signal, true)) === want) return;
+			throw new ToolError(`Your ${this.title} desktop didn't become ${want} within 5 minutes. Try again, or ask the lab's support.`);
+		};
+		this.onNotice?.(`Updating your ${this.title} desktop. Its files come along; its open windows close.`);
+		await this.json("POST", `${at}/stop`, { json: {}, signal }).catch((error: { code?: string }) => {
+			if (error.code !== "sandbox_stopped") throw error;
+		});
+		// The lab may still be stopping it or busy with another change: try again for a minute.
+		for (let attempt = 0; ; attempt++) {
+			try {
+				await this.json("POST", `${at}/archive`, { json: {}, signal });
+				break;
+			} catch (error) {
+				const code = (error as { code?: string }).code;
+				if (attempt >= 30 || (code !== "sandbox_running" && code !== "sandbox_busy")) throw error;
+				await sleep(2_000, signal);
+			}
+		}
+		await until("archived");
+		await this.json("POST", `${at}/restore`, { json: {}, signal });
+		await until("running");
+		this.desktopOutdated = false;
+		this.onDesktopChange?.();
+		this.onNotice?.(`Your ${this.title} desktop is up to date.`);
 	}
 
 	/** A file from the workspace sandbox onto the desktop, through this computer; the lab scans it both ways. */

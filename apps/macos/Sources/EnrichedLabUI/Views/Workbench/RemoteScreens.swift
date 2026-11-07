@@ -319,6 +319,18 @@ struct DesktopPane: View {
 				if app.desktopBusy.contains(site) { ProgressView().progressViewStyle(.linear).controlSize(.mini).tint(Theme.accent) }
 			}
 			Divider()
+			if app.sites.first(where: { $0.name == site })?.desktop?.outdated == true {
+				HStack(spacing: 12) {
+					Text("This desktop is older than \(app.place(of: site).title)'s current one, so the agent can't read its windows. Updating keeps its files and closes its windows.")
+						.font(.callout).foregroundStyle(.secondary)
+					Spacer(minLength: 8)
+					Button(app.desktopUpdating.contains(site) ? "Updating…" : "Update Desktop") { Task { await app.desktopUpdate(site: site) } }
+						.disabled(app.desktopUpdating.contains(site))
+				}
+				.padding(.horizontal, 12)
+				.padding(.vertical, 8)
+				Divider()
+			}
 			if let image = app.desktopImages[site]?.image, let size = screenSize(frame) {
 				CanvasHost(image: image, size: size, raw: false) { input in act(input) }
 			} else {

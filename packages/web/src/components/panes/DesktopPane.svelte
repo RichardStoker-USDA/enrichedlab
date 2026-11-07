@@ -279,6 +279,12 @@
 			<svg viewBox="0 0 16 16"><path d="M12.5 8a4.5 4.5 0 1 1-1.3-3.2M12.5 3v2.5H10" /></svg>
 		</button>
 	</div>
+	{#if info?.outdated}
+		<div class="update" role="status">
+			<span>This desktop is older than {place.title}'s current one, so the agent can't read its windows. Updating keeps its files and closes its windows.</span>
+			<button type="button" class="btn" onclick={() => void lab.desktopUpdate(site)} disabled={lab.desktopUpdating[site]}>{lab.desktopUpdating[site] ? "Updating…" : "Update Desktop"}</button>
+		</div>
+	{/if}
 	<div class="stage" bind:this={stage} class:busy>
 		<canvas
 			bind:this={canvas}
@@ -319,6 +325,18 @@
 		flex-direction: column;
 		min-width: 0;
 		min-height: 0;
+	}
+	.update {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 8px 12px;
+		border-bottom: 1px solid var(--rule);
+		font-size: 13px;
+		color: var(--text-muted);
+	}
+	.update span {
+		flex: 1;
 	}
 	.bar {
 		display: flex;

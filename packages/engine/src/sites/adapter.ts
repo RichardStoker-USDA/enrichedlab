@@ -36,6 +36,8 @@ export interface SiteAdapter {
 	onNotice?: (text: string) => void;
 	/** Set by Sites: a picture of the lab's desktop sandbox after an action. */
 	onDesktopFrame?: (frame: DesktopFrame) => void;
+	/** The desktop's outdated mark changed: the lab's summary changed with it. */
+	onDesktopChange?: () => void;
 	/** The lab's desktop sandbox, where it offers one (sites/desktop.ts). */
 	desktop?(): DesktopInfo | undefined;
 	desktopAct?: DesktopApi["desktopAct"];

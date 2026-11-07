@@ -270,10 +270,9 @@ export interface SiteSummary {
 	/** Sandbox sizes the lab offers. */
 	profiles?: { name: string; cpu: number; memory: string; gpu?: string }[];
 	/** A desktop sandbox the person and the agent work in, through the lab's checked actions. */
-	desktop?: { width?: number; height?: number; actions: string[]; open: boolean };
+	desktop?: { width?: number; height?: number; actions: string[]; open: boolean; /** Made before the lab's current desktop image: desktop.update moves it over, keeping its files. */ outdated?: boolean };
 }
 
-/** A picture of a lab's desktop sandbox after an action (PNG), for the windows that show it. */
 /** A part of a desktop's screen from its live view: a JPEG (base64) to draw at x, y, w by h desktop pixels. */
 export interface DesktopBand {
 	site: string;
@@ -294,6 +293,7 @@ export interface DesktopStream {
 	reason?: string;
 }
 
+/** A picture of a lab's desktop sandbox after an action (PNG), for the windows that show it. */
 export interface DesktopFrame {
 	site: string;
 	png: string;
@@ -565,6 +565,8 @@ export interface Requests {
 	"desktop.act": { params: { site: string; action: Record<string, unknown> }; result: { frame?: DesktopFrame; cursor?: [number, number] } };
 	/** Open an https address or a /sandbox file on a lab's desktop. */
 	"desktop.open": { params: { site: string; target: string }; result: { frame?: DesktopFrame } };
+	/** Move an outdated desktop to the lab's current image, keeping its files (its open windows close). */
+	"desktop.update": { params: { site: string }; result: { ok: true } };
 	/** Watch a lab desktop live where the lab streams it: desktop.band notifications follow while on. */
 	"desktop.watch": { params: { site: string; on: boolean }; result: DesktopStream };
 	/** Turn Discovery mode on or off; on only in a session at a lab that grants the person `discovery`. */

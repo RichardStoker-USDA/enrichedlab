@@ -145,6 +145,8 @@ public struct SiteDesktop: Codable, Sendable, Hashable {
 	public var height: Int?
 	public var actions: [String]
 	public var open: Bool
+	/// Made before the lab's current desktop image: desktop.update moves it over, keeping its files.
+	public var outdated: Bool?
 }
 
 public struct SiteSummary: Codable, Sendable, Hashable, Identifiable {

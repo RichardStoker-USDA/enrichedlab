@@ -486,6 +486,21 @@ class Lab {
 		}
 	}
 
+	desktopUpdating = $state<Record<string, boolean>>({});
+
+	/** Move an outdated lab desktop to the lab's current one, keeping its files; then a fresh picture. */
+	async desktopUpdate(site: string): Promise<void> {
+		this.desktopUpdating = { ...this.desktopUpdating, [site]: true };
+		try {
+			await rpc.call("desktop.update", { site });
+			void this.desktopAct(site, { action: "screenshot" });
+		} catch (error) {
+			this.say((error as Error).message);
+		} finally {
+			this.desktopUpdating = { ...this.desktopUpdating, [site]: false };
+		}
+	}
+
 	/** Watch a lab desktop live while `draw` is subscribed; the returned function stops. */
 	watchDesktop(site: string, draw: (band: DesktopBand) => void): () => void {
 		let listeners = this.desktopBands.get(site);
