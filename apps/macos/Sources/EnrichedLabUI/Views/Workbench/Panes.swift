@@ -235,10 +235,10 @@ func pngFromPDF(_ data: Data, scale: CGFloat) throws -> Data {
 	return png
 }
 
-/// A web view made once per pane.
+/// A web view made once per pane, when it first shows (SwiftUI may make this holder more than once).
 @MainActor
 final class WebHolder {
-	let view: WKWebView = {
+	lazy var view: WKWebView = {
 		let configuration = WKWebViewConfiguration()
 		configuration.websiteDataStore = .default()
 		let view = WKWebView(frame: .zero, configuration: configuration)
