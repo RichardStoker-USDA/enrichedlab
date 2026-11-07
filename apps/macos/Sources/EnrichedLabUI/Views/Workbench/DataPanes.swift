@@ -84,11 +84,13 @@ struct TablePane: View {
 	@State private var filter = ""
 	@State private var order: [ColumnOrder] = []
 	@State private var selection = Set<Int>()
+	@State private var shown: [DataTable.Row] = []
+
+	private struct Shape: Equatable { var filter: String; var order: [ColumnOrder]; var rows: Int }
 
 	var body: some View {
 		VStack(spacing: 0) {
 			if let table {
-				let shown = visible(table)
 				Table(shown, selection: $selection, sortOrder: $order) {
 					TableColumnForEach(Array(table.columns.enumerated()), id: \.offset) { i, name in
 						TableColumn(name, sortUsing: ColumnOrder(column: i)) { row in
@@ -114,14 +116,20 @@ struct TablePane: View {
 			}
 		}
 		.task(id: "\(view.id):\(view.version)") { await load() }
-	}
-
-	private func visible(_ table: DataTable) -> [DataTable.Row] {
-		var rows = table.rows
-		let words = filter.trimmingCharacters(in: .whitespaces).lowercased()
-		if !words.isEmpty { rows = rows.filter { $0.values.contains { $0.lowercased().contains(words) } } }
-		if !order.isEmpty { rows.sort(using: order) }
-		return rows
+		// Filtering and sorting run off the main thread, only when the filter, the order or the data change.
+		.task(id: Shape(filter: filter, order: order, rows: table?.rows.count ?? -1)) {
+			guard let table else { return }
+			if !filter.isEmpty { try? await Task.sleep(for: .milliseconds(150)) }
+			guard !Task.isCancelled else { return }
+			let words = filter.trimmingCharacters(in: .whitespaces).lowercased()
+			let order = order
+			shown = await Task.detached(priority: .userInitiated) {
+				var rows = table.rows
+				if !words.isEmpty { rows = rows.filter { $0.values.contains { $0.lowercased().contains(words) } } }
+				if !order.isEmpty { rows.sort(using: order) }
+				return rows
+			}.value
+		}
 	}
 
 	private func load() async {
@@ -131,7 +139,9 @@ struct TablePane: View {
 				error = "Parquet tables open in a terminal for now: ask the agent to save it as CSV, or to summarize it."
 				return
 			}
-			guard let parsed = DataTable.parse(name: data.name, text: data.text ?? "") else { error = "The data didn't read as a table."; return }
+			let name = data.name, text = data.text ?? ""
+			// Large files parse off the main thread.
+			guard let parsed = await Task.detached(priority: .userInitiated, operation: { DataTable.parse(name: name, text: text) }).value else { error = "The data didn't read as a table."; return }
 			table = parsed
 		} catch let failure {
 			error = (failure as? LocalizedError)?.errorDescription ?? failure.localizedDescription
