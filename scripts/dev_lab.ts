@@ -313,7 +313,7 @@ function electron(extra: Record<string, string>, argv: string[]): ReturnType<typ
 	const proc = Bun.spawn([bin, ".", `--user-data-dir=${join(work, "electron")}`, "--use-mock-keychain", ...argv], { cwd: join(root, "apps/desktop"), env: { ...env, ...extra }, stdout: "pipe", stderr: "ignore" });
 	// What a scene measured (shot: perf ...) goes to this script's output.
 	void (async () => {
-		for await (const line of proc.stdout.pipeThrough(new TextDecoderStream())) for (const l of line.split("\n")) if (l.startsWith("shot: perf")) console.log(`  ${l.slice(6)}`);
+		for await (const line of proc.stdout.pipeThrough(new TextDecoderStream())) for (const l of line.split("\n")) if (l.startsWith("shot: perf") || l.startsWith("shot: check")) console.log(`  ${l.slice(6)}`);
 	})().catch(() => undefined);
 	return proc;
 }
@@ -366,6 +366,18 @@ const SCENES: Scene[] = [
 	{ name: "compact_workbench", session: "local", size: "1100x800", after: 2000, js: `button("Workbench")?.click(); later(700, () => button("Files")?.click());` },
 	// The lab's desktop sandbox in a pane: the first picture, then a click the person makes (the marker moves there).
 	{ name: "desktop", session: "lab", after: 4500, js: `button("Workbench")?.click(); later(700, () => button("Desktop")?.click()); later(2500, () => { const c = q(".desktop-pane canvas"); if (!c) return; const r = c.getBoundingClientRect(); const at = { clientX: r.left + r.width * 0.42, clientY: r.top + r.height * 0.5, bubbles: true, button: 0 }; c.dispatchEvent(new PointerEvent("pointerdown", at)); c.dispatchEvent(new PointerEvent("pointerup", at)); c.dispatchEvent(new MouseEvent("click", { ...at, detail: 1 })); });` },
+	// The window never scrolls as a whole: focus and scrollIntoView inside the panes leave every frame where it is.
+	{
+		name: "window_stays_put",
+		session: "lab",
+		after: 6000,
+		js: `button("Workbench")?.click(); later(700, () => button("Desktop")?.click());
+later(3000, () => { const tall = document.createElement("div"); tall.style.cssText = "position:absolute;top:0;width:10px;height:4000px"; q(".rail")?.append(tall); tall.scrollIntoView(); const c = q(".desktop-pane canvas"); c?.focus(); c?.scrollIntoView(); q("textarea")?.scrollIntoView({ block: "end" }); [...document.querySelectorAll("*")].at(-1)?.scrollIntoView(); document.documentElement.scrollTop = 400; });
+later(4200, () => { const tall = [...document.querySelectorAll("*")].map((e) => [e, e.getBoundingClientRect()]).filter(([, r]) => r.bottom > innerHeight + 4 && r.height > 0).filter(([e]) => getComputedStyle(e).position === "absolute" || getComputedStyle(e).position === "fixed").sort((a, b) => b[1].bottom - a[1].bottom).slice(0, 6).map(([e, r]) => (e.id || String(e.className).split(" ").slice(0, 2).join(".") || e.tagName) + "@" + Math.round(r.top) + "-" + Math.round(r.bottom));
+console.log("shot: check page " + document.documentElement.scrollHeight + " tall in a " + innerHeight + " window; below the window " + JSON.stringify(tall)); });
+later(4500, () => { const moved = [document.documentElement, document.body, ...document.querySelectorAll("*")].filter((e) => (e.scrollTop || e.scrollLeft) && !["auto", "scroll"].includes(getComputedStyle(e).overflowY)).map((e) => (e.id || String(e.className).split(" ")[0] || e.tagName) + ":" + e.scrollTop);
+console.log("shot: check shell top " + q(".shell")?.getBoundingClientRect().top + "; frames moved " + JSON.stringify(moved)); });`,
+	},
 	// Discovery mode, typed in a lab session: the title bar says so and the transcript marks where it started.
 	{ name: "discovery", session: "lab", after: 2500, type: "/discover", js: `q("textarea")?.focus();` },
 	// A long tool call streams for about 20 seconds: the page has to keep drawing frames (a window resized meanwhile

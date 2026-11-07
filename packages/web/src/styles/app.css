@@ -101,10 +101,14 @@
 	box-sizing: border-box;
 }
 
+/* The window never scrolls as a whole: only the panes inside it do. overflow: clip (unlike hidden) can't be scrolled
+   by focus() or scrollIntoView() either. */
 html,
 body {
 	margin: 0;
 	height: 100%;
+	overflow: clip;
+	overscroll-behavior: none;
 	background: var(--canvas);
 	color: var(--text);
 	font: 14.5px/1.5 var(--font-ui);
@@ -113,8 +117,9 @@ body {
 }
 
 #app {
-	height: 100%;
-	overflow: hidden;
+	position: fixed;
+	inset: 0;
+	overflow: clip;
 }
 
 button,

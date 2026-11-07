@@ -102,7 +102,7 @@
 	function press(e: PointerEvent) {
 		const at = point(e);
 		if (!at) return;
-		canvas?.focus();
+		canvas?.focus({ preventScroll: true });
 		down = { at, button: e.button };
 	}
 	function release(e: PointerEvent) {
@@ -170,7 +170,7 @@
 	let address: HTMLInputElement | undefined = $state();
 	function leave() {
 		flushTyping();
-		(address ?? canvas)?.focus();
+		(address ?? canvas)?.focus({ preventScroll: true });
 	}
 	function key(e: KeyboardEvent) {
 		if (e.key === "F6" || ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "l")) {

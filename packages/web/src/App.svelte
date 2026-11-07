@@ -163,7 +163,7 @@
 		grid-template-columns: var(--rail-width) minmax(0, 1fr);
 		grid-template-rows: 100%;
 		height: 100%;
-		overflow: hidden;
+		overflow: clip;
 		background: var(--canvas);
 	}
 	.shell.bench {

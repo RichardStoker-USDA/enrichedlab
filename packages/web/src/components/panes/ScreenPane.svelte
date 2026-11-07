@@ -110,7 +110,7 @@
 		const at = point(e);
 		if (!at) return;
 		if (type === "mousePressed") {
-			canvas?.focus();
+			canvas?.focus({ preventScroll: true });
 			pressed = true;
 		}
 		if (type === "mouseReleased") pressed = false;
@@ -132,7 +132,7 @@
 	let addressField: HTMLInputElement | undefined = $state();
 	/** Hand the keyboard back to the window: to the address bar, as F6 and Cmd/Ctrl+L do in a browser. */
 	function release() {
-		addressField?.focus();
+		addressField?.focus({ preventScroll: true });
 		addressField?.select();
 	}
 	function key(e: KeyboardEvent, type: "keyDown" | "keyUp") {
