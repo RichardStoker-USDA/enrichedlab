@@ -144,6 +144,11 @@ more than 40 tools offers the model its core tools (reading, editing, the shell,
 rebuilt from the log when a session resumes. Search is lexical (BM25), so it works offline and needs no model; a
 ranking by meaning can join it through the same search.
 
+**Built-in skills.** EnrichedLab carries skills for the work scientists bring most (`packages/engine/skills`): Shiny
+figure apps with export, reproducible data analysis in R or Python, Office files, PDF forms, a lab's desktop, and
+research at a lab. They're embedded in `el`, written to `<home>/skills/builtin-<version>/` on first use, and listed
+like any skill; a personal or project skill with the same name replaces one.
+
 **Permissions.** Reads inside the project run. Writes, edits and shell commands ask. A shell command runs without
 asking only when a quote-aware check finds every part read-only (no variables, substitutions, subshells, background
 jobs, writing redirections or environment prefixes; no command that runs another program) and every path argument
