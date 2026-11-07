@@ -9,11 +9,12 @@ struct EnrichedLabApp: App {
 
 	var body: some Scene {
 		Window("EnrichedLab", id: "main") {
+			// RootView sets the smallest size: wider while the workbench shows.
 			RootView()
 				.environment(model)
-				.frame(minWidth: 720, minHeight: 480)
 		}
 		.defaultSize(width: 1320, height: 860)
+		.windowResizability(.contentMinSize)
 		.windowToolbarStyle(.unified)
 		.commands { EnrichedLabCommands(app: model) }
 

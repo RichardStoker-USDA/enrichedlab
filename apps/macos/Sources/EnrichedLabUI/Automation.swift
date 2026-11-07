@@ -10,6 +10,7 @@ import SwiftUI
 /// EL_SCENE_PANE     files, terminal, browser, desktop, or first (the newest view)
 /// EL_SCENE_SETTINGS general, models, labs or updates: open Settings on that tab
 /// EL_SCENE_SIZE     the window's content size, such as 1360x880
+/// EL_SCENE_RESIZE   a content size applied after the pane opens (narrowing a window with the workbench open)
 /// EL_SCENE_ADVANCED 1 to show advanced controls
 /// EL_SCENE_AFTER    milliseconds to wait before saying the scene is ready
 @MainActor
@@ -21,6 +22,8 @@ enum Automation {
 		guard env["EL_SCENE"] != nil else { return }
 		UserDefaults.standard.set(env["EL_SCENE_ADVANCED"] == "1", forKey: "advanced")
 		for _ in 0 ..< 100 where !app.connected { try? await Task.sleep(for: .milliseconds(100)) }
+
+		// The size comes first: opening the workbench in a narrow window then widens it, as macOS does.
 		if let size = env["EL_SCENE_SIZE"]?.split(separator: "x").compactMap({ Double($0) }), size.count == 2, let window = mainWindow {
 			window.setContentSize(NSSize(width: size[0], height: size[1]))
 			window.center()
@@ -38,6 +41,13 @@ enum Automation {
 			case "first": if let view = session.canvases.first { session.showView(view.id) }
 			default: break
 			}
+		}
+		if let size = env["EL_SCENE_RESIZE"]?.split(separator: "x").compactMap({ Double($0) }), size.count == 2, let window = mainWindow {
+			try? await Task.sleep(for: .milliseconds(800))
+			// As far as a person dragging the window's edge could take it.
+			let smallest = window.contentMinSize
+			window.setContentSize(NSSize(width: max(size[0], smallest.width), height: max(size[1], smallest.height)))
+			print("scene: narrowed to \(Int(window.contentLayoutRect.width)) (smallest \(Int(smallest.width)))")
 		}
 		if let tab = env["EL_SCENE_SETTINGS"].flatMap(SettingsTab.init(rawValue:)) {
 			app.showSettingsTab = tab

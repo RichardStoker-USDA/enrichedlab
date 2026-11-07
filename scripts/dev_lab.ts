@@ -324,6 +324,8 @@ interface MacScene {
 	pane?: "files" | "terminal" | "browser" | "desktop" | "first";
 	settings?: "general" | "models" | "labs" | "updates";
 	size?: string;
+	/** A size applied after the pane opens: narrowing a window with the workbench open. */
+	resize?: string;
 	advanced?: boolean;
 	after?: number;
 }
@@ -336,7 +338,8 @@ const MAC_SCENES: MacScene[] = [
 	{ name: "mac_files", session: "local", pane: "files", after: 2500 },
 	{ name: "mac_terminal", session: "local", pane: "terminal", after: 3000 },
 	{ name: "mac_desktop", session: "lab", pane: "desktop", after: 4000 },
-	{ name: "mac_narrow", session: "lab", size: "900x700" },
+	{ name: "mac_narrow", session: "lab", pane: "desktop", size: "900x700", after: 3000 },
+	{ name: "mac_narrowed", session: "lab", pane: "desktop", resize: "900x700", after: 3000 },
 	{ name: "mac_settings_general", settings: "general" },
 	{ name: "mac_settings_models", settings: "models", after: 2500 },
 	{ name: "mac_settings_labs", settings: "labs" },
@@ -362,6 +365,7 @@ async function macScenes(client: EngineClient, engineVersion: string, sessions: 
 					EL_SCENE_AFTER: String(scene.after ?? 1800),
 					...(sessionId ? { EL_SCENE_SESSION: sessionId } : {}),
 					...(scene.pane ? { EL_SCENE_PANE: scene.pane } : {}),
+					...(scene.resize ? { EL_SCENE_RESIZE: scene.resize } : {}),
 					...(scene.settings ? { EL_SCENE_SETTINGS: scene.settings } : {}),
 					...(scene.advanced ? { EL_SCENE_ADVANCED: "1" } : {}),
 				},
@@ -376,6 +380,7 @@ async function macScenes(client: EngineClient, engineVersion: string, sessions: 
 						const w = /^scene: window (\d+) (.*)$/.exec(line);
 						if (w) windows.push({ id: w[1]!, name: w[2]! });
 						if (line === "scene: ready") ready = true;
+						else if (line.startsWith("scene: ") && !w) console.log(`  ${scene.name}: ${line.slice(7)}`);
 					}
 					if (ready) break;
 				}

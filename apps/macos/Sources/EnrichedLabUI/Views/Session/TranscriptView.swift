@@ -113,9 +113,10 @@ struct BlockView: View {
 				.textSelection(.enabled)
 		case let .rule(_, text):
 			HStack(spacing: 10) {
-				Rectangle().fill(.separator).frame(height: 1)
-				Text(text).font(.caption).foregroundStyle(.secondary).fixedSize()
-				Rectangle().fill(.separator).frame(height: 1)
+				// The text shortens in the middle in a narrow window rather than setting the run sheet's width.
+				Rectangle().fill(.separator).frame(minWidth: 12, maxHeight: 1)
+				Text(text).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).layoutPriority(1).help(text)
+				Rectangle().fill(.separator).frame(minWidth: 12, maxHeight: 1)
 			}
 			.padding(.vertical, 4)
 		}

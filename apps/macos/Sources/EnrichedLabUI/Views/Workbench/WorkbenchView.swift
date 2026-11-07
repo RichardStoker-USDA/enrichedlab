@@ -10,6 +10,7 @@ struct WorkbenchView: View {
 	var body: some View {
 		VStack(spacing: 0) {
 			TabStrip(session: session)
+				.onGeometryChange(for: CGFloat.self) { $0.size.width } action: { if $0 > 0 { app.workbenchWidth = $0 } }
 			Divider()
 			ZStack {
 				if let tab = session.workbench.front {

@@ -22,7 +22,9 @@ struct SessionView: View {
 			.navigationTitle(session.summary.title.isEmpty ? "New session" : session.summary.title)
 			.navigationSubtitle(subtitle)
 			.toolbar { toolbar }
-			.inspector(isPresented: $workbench.isOpen) {
+			// Opening it in a narrow window widens the window when the screen has room (the macOS behavior).
+			// Shown once the window has made room for it (wider, or the sidebar aside), never squeezed in.
+			.inspector(isPresented: Binding(get: { workbench.isOpen && app.workbenchRoom }, set: { workbench.isOpen = $0 })) {
 				WorkbenchView(session: session)
 					.inspectorColumnWidth(min: 380, ideal: 560, max: 1400)
 			}

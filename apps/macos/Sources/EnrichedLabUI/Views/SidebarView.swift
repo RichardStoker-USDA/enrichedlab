@@ -42,6 +42,7 @@ struct SidebarView: View {
 			}
 		}
 		.listStyle(.sidebar)
+		.onGeometryChange(for: CGFloat.self) { $0.size.width } action: { if $0 > 0 { app.sidebarWidth = $0 } }
 		.searchable(text: $query, placement: .sidebar, prompt: "Search sessions")
 		.task(id: query) { await search() }
 		.toolbar {

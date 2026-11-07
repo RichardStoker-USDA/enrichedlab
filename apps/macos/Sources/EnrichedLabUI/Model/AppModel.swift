@@ -86,6 +86,16 @@ public final class AppModel {
 
 	public var terminalHub: TerminalHub { terminals }
 
+	/// Set by the main window: whether the workbench has room beside the run sheet right now.
+	public var workbenchRoom = true
+
+	/// The sidebar's and the workbench's widths as last drawn: the window needs room for both beside the run sheet.
+	public var sidebarWidth: CGFloat = 260
+	public var workbenchWidth: CGFloat = 560
+
+	/// The run sheet's narrowest: the composer's place and model menus and buttons in one row.
+	public static let runSheetWidth: CGFloat = 470
+
 	/// The person's appearance for every window, AppKit views (terminals, web views) and Settings included.
 	private func applyAppearance() {
 		NSApp?.appearance = ui.theme == "light" ? NSAppearance(named: .aqua) : ui.theme == "dark" ? NSAppearance(named: .darkAqua) : nil

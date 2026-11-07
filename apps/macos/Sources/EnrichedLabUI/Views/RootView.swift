@@ -6,8 +6,67 @@ public struct RootView: View {
 	@Environment(AppModel.self) private var app
 	@Environment(\.openSettings) private var openSettings
 	@State private var columns = NavigationSplitViewVisibility.all
+	@State private var window: NSWindow?
+	@State private var width: CGFloat = 0
+	/// The sidebar stepped aside for the workbench, so it comes back when the workbench closes.
+	@State private var sidebarAsideForWorkbench = false
+	/// The window is widening to make room: its in-between widths don't move the sidebar.
+	@State private var widening = false
 
 	public init() {}
+
+	private var workbenchOpen: Bool { app.session?.workbench.isOpen == true }
+
+	/// The width the sidebar (when shown), the run sheet and the workbench need side by side. The sidebar and the
+	/// workbench keep their widths as the window narrows, as in Xcode, so the window's smallest size follows them.
+	private var roomy: CGFloat {
+		(columns == .detailOnly ? 0 : app.sidebarWidth) + AppModel.runSheetWidth + app.workbenchWidth
+	}
+
+	private func measure(_ window: NSWindow) {
+		let now = window.contentLayoutRect.width
+		width = now
+		if widening, now >= roomy - 1 { widening = false }
+		updateRoom()
+	}
+
+	private func updateRoom() {
+		let room = !widening && (width == 0 || width >= roomy - 1 || columns == .detailOnly)
+		if app.workbenchRoom != room { app.workbenchRoom = room }
+	}
+
+	/// With the workbench showing, the window can't be narrowed past what its columns need.
+	private var smallestWidth: CGFloat {
+		guard workbenchOpen, app.workbenchRoom else { return 720 }
+		return max(720, min(roomy, width > 0 ? width : roomy))
+	}
+
+	private func asideSidebar() {
+		columns = .detailOnly
+		sidebarAsideForWorkbench = true
+	}
+
+	/// Room for the workbench when it opens: a wider window when the screen allows (as macOS does), else the
+	/// sidebar steps aside.
+	private func makeRoom() {
+		guard width > 0, width < roomy - 1, columns != .detailOnly else { return }
+		if let window, let screen = window.screen, !window.styleMask.contains(.fullScreen) {
+			let visible = screen.visibleFrame
+			var frame = window.frame
+			// The frame is a little wider than the content (the window's edges).
+			let wanted = roomy + (frame.width - width)
+			let grow = min(wanted, visible.width) - frame.width
+			if frame.width + grow >= wanted - 1 {
+				frame.size.width += grow
+				// Grow to the right, moved left only as far as the screen's edge requires.
+				if frame.maxX > visible.maxX { frame.origin.x = max(visible.minX, visible.maxX - frame.width) }
+				widening = true
+				window.setFrame(frame, display: true, animate: !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+				return
+			}
+		}
+		asideSidebar()
+	}
 
 	public var body: some View {
 		@Bindable var app = app
@@ -25,6 +84,29 @@ public struct RootView: View {
 			}
 			.overlay(alignment: .bottom) { ToastView() }
 			.overlay(alignment: .top) { ConnectionBanner() }
+		}
+		.frame(minWidth: smallestWidth, minHeight: 480)
+		.background(WindowReader(window: $window))
+		// The window's own width: the split view can't report a width below its columns' minimums.
+		.onReceive(NotificationCenter.default.publisher(for: NSWindow.didResizeNotification)) { note in
+			if let resized = note.object as? NSWindow, resized === window { measure(resized) }
+		}
+		.onChange(of: window) { _, now in if let now { measure(now) } }
+		.onChange(of: workbenchOpen) { _, open in
+			if open { makeRoom() }
+			else if sidebarAsideForWorkbench {
+				sidebarAsideForWorkbench = false
+				columns = .all
+			}
+			updateRoom()
+		}
+		.onChange(of: columns) { _, now in
+			// The person brought the sidebar back in a window too narrow for all three: the workbench closes.
+			if now != .detailOnly {
+				sidebarAsideForWorkbench = false
+				if workbenchOpen, width > 0, width < roomy - 1 { app.session?.workbench.isOpen = false }
+			}
+			updateRoom()
 		}
 		.tint(Theme.accent)
 		.preferredColorScheme(app.ui.theme == "light" ? .light : app.ui.theme == "dark" ? .dark : nil)
@@ -146,5 +228,20 @@ struct ConnectionBanner: View {
 		.padding(.vertical, 8)
 		.glassEffect(.regular, in: .capsule)
 		.padding(.top, 12)
+	}
+}
+
+/// The NSWindow a view is in.
+struct WindowReader: NSViewRepresentable {
+	@Binding var window: NSWindow?
+
+	func makeNSView(context: Context) -> NSView {
+		let view = NSView()
+		DispatchQueue.main.async { window = view.window }
+		return view
+	}
+
+	func updateNSView(_ nsView: NSView, context: Context) {
+		if window !== nsView.window { DispatchQueue.main.async { window = nsView.window } }
 	}
 }

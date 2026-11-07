@@ -259,34 +259,55 @@ struct DesktopPane: View {
 	@State private var target = ""
 	@State private var settle: Task<Void, Never>?
 
+	private var canOpen: Bool { app.sites.first(where: { $0.name == site })?.desktop?.open == true }
+
+	@ViewBuilder private func title(_ frame: DesktopFrame?) -> some View {
+		PlaceDot(place: app.place(of: site))
+		Text("\(app.place(of: site).title) desktop").font(.callout).lineLimit(1).fixedSize()
+		if let frame, frame.by == "agent" {
+			Text("The agent is using it").font(.caption).foregroundStyle(Theme.accent).lineLimit(1).fixedSize()
+		}
+		Spacer(minLength: 8)
+	}
+
+	@ViewBuilder private func tools(_ frame: DesktopFrame?) -> some View {
+		if let frame { Text("\(frame.width) × \(frame.height)").font(.caption).foregroundStyle(.secondary).monospacedDigit().fixedSize() }
+		Button { Task { await app.desktopAct(site: site, action: ["action": "screenshot"]) } } label: { Image(systemName: "arrow.clockwise") }
+			.buttonStyle(.borderless)
+			.help("Refresh the picture")
+	}
+
+	private var addressField: some View {
+		TextField("Open an address or a /sandbox file", text: $target)
+			.textFieldStyle(.roundedBorder)
+			.onSubmit {
+				let value = target.trimmingCharacters(in: .whitespaces)
+				guard !value.isEmpty else { return }
+				target = ""
+				Task {
+					await app.desktopOpen(site: site, target: value)
+					settleShot(after: 1.5)
+				}
+			}
+	}
+
 	var body: some View {
 		let frame = app.desktops[site]
 		VStack(spacing: 0) {
-			HStack(spacing: 8) {
-				PlaceDot(place: app.place(of: site))
-				Text("\(app.place(of: site).title) desktop").font(.callout).lineLimit(1)
-				if let frame, frame.by == "agent" {
-					Text("The agent is using it").font(.caption).foregroundStyle(Theme.accent)
+			// One row when the pane is wide enough; the address field takes its own row when it isn't.
+			ViewThatFits(in: .horizontal) {
+				HStack(spacing: 8) {
+					title(frame)
+					if canOpen { addressField.frame(minWidth: 200, idealWidth: 260, maxWidth: 280) }
+					tools(frame)
 				}
-				Spacer()
-				if app.sites.first(where: { $0.name == site })?.desktop?.open == true {
-					TextField("Open an address or a /sandbox file", text: $target)
-						.textFieldStyle(.roundedBorder)
-						.frame(maxWidth: 280)
-						.onSubmit {
-							let value = target.trimmingCharacters(in: .whitespaces)
-							guard !value.isEmpty else { return }
-							target = ""
-							Task {
-								await app.desktopOpen(site: site, target: value)
-								settleShot(after: 1.5)
-							}
-						}
+				VStack(spacing: 6) {
+					HStack(spacing: 8) {
+						title(frame)
+						tools(frame)
+					}
+					if canOpen { addressField }
 				}
-				if let frame { Text("\(frame.width) × \(frame.height)").font(.caption).foregroundStyle(.secondary).monospacedDigit() }
-				Button { Task { await app.desktopAct(site: site, action: ["action": "screenshot"]) } } label: { Image(systemName: "arrow.clockwise") }
-					.buttonStyle(.borderless)
-					.help("Refresh the picture")
 			}
 			.padding(.horizontal, 12)
 			.padding(.vertical, 6)
